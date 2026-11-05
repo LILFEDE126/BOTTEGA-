@@ -1,6 +1,16 @@
 # Bottega Leonardesca & THE Engine
 
+[![Pure Unit Tests](https://img.shields.io/badge/tests-26%20passed%20(0.8s)-brightgreen?style=flat-square&logo=pytest)](tests/test_bottega.py)
+[![Architecture](https://img.shields.io/badge/THE%20Hierarchy-5%20Acyclic%20Rings%20(EWD196)-blue?style=flat-square)](config.py)
+[![Zero Frameworks](https://img.shields.io/badge/Dependencies-Zero%20LangChain%20%2F%20LlamaIndex-orange?style=flat-square)](requirements.txt)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](LICENSE)
+
 **Deterministic Hybrid RAG (HNSW + Full-Text RRF), Static AST Inspection & Closed-Loop Multilingual Diagnostic Solver for Local LLMs and Free Cloud APIs — Zero Frameworks.**
+
+<p align="center">
+  <img src="assets/bottega_preview.svg" alt="Bottega Leonardesca & THE Engine — Closed-Loop Zero-Clutter Diagnostic Dashboard" width="100%"/>
+</p>
 
 Large Language Models fail in production for two structural reasons:
 1. **Hallucination on empty memory:** when the context lacks the required datum, a standard LLM guesses by statistical plausibility instead of stopping to request or fetch the missing fact.

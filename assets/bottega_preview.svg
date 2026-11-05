@@ -1,0 +1,169 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 560" width="100%" height="100%">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#1e293b"/>
+    </linearGradient>
+    <linearGradient id="cardGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="100%" stop-color="#0f172a"/>
+    </linearGradient>
+    <filter id="shadow" x="-5%" y="-5%" width="110%" height="110%">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.45"/>
+    </filter>
+  </defs>
+
+  <!-- Main Window Background -->
+  <rect width="1100" height="560" rx="14" fill="url(#bgGrad)" stroke="#334155" stroke-width="2"/>
+
+  <!-- Browser / Dashboard Top Bar -->
+  <rect x="2" y="2" width="1096" height="44" rx="12" fill="#090d16"/>
+  <circle cx="26" cy="24" r="6" fill="#ef4444"/>
+  <circle cx="46" cy="24" r="6" fill="#f59e0b"/>
+  <circle cx="66" cy="24" r="6" fill="#10b981"/>
+  <text x="550" y="29" fill="#94a3b8" font-family="Segoe UI, Inter, sans-serif" font-size="13" font-weight="600" text-anchor="middle">
+    Bottega Leonardesca &amp; THE Engine — Closed-Loop Diagnostic Dashboard (Streamlit :8501)
+  </text>
+
+  <!-- Left Sidebar (Config & THE Hierarchy) -->
+  <rect x="18" y="60" width="250" height="482" rx="10" fill="#111827" stroke="#334155" stroke-width="1"/>
+  <text x="34" y="88" fill="#f8fafc" font-family="Segoe UI, Inter, sans-serif" font-size="14" font-weight="700">
+    ⚙️ Motore &amp; Presidio THE
+  </text>
+  <text x="34" y="114" fill="#94a3b8" font-family="Segoe UI, Inter, sans-serif" font-size="11">
+    Provider LLM (Locale / Cloud Free)
+  </text>
+  <rect x="34" y="122" width="218" height="30" rx="6" fill="#1e293b" stroke="#475569"/>
+  <text x="46" y="141" fill="#38bdf8" font-family="Consolas, monospace" font-size="12" font-weight="600">
+    Ollama / Gemini / Groq Free
+  </text>
+
+  <text x="34" y="176" fill="#94a3b8" font-family="Segoe UI, Inter, sans-serif" font-size="11">
+    5 Anelli Aciclici (EWD196 / AST Verified)
+  </text>
+  <g font-family="Consolas, monospace" font-size="11">
+    <rect x="34" y="186" width="218" height="24" rx="4" fill="#1e293b"/>
+    <text x="44" y="202" fill="#a78bfa">L4: app.py (UI Streamlit)</text>
+    <rect x="34" y="216" width="218" height="24" rx="4" fill="#1e293b"/>
+    <text x="44" y="232" fill="#34d399">L3: risolutore_artigiano.py</text>
+    <rect x="34" y="246" width="218" height="24" rx="4" fill="#1e293b"/>
+    <text x="44" y="262" fill="#38bdf8">L2: store_pgvector / ollama</text>
+    <rect x="34" y="276" width="218" height="24" rx="4" fill="#1e293b"/>
+    <text x="44" y="292" fill="#fbbf24">L1: geometria / grounding</text>
+    <rect x="34" y="306" width="218" height="24" rx="4" fill="#1e293b"/>
+    <text x="44" y="322" fill="#f87171">L0: config / anatomia_ast</text>
+  </g>
+
+  <rect x="34" y="348" width="218" height="82" rx="6" fill="#064e3b" stroke="#059669"/>
+  <text x="46" y="370" fill="#6ee7b7" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700">
+    ✓ Invarianti Attivi
+  </text>
+  <text x="46" y="390" fill="#d1fae5" font-family="Consolas, monospace" font-size="11">
+    • RRF K=60 (1.0 / 1.0 / 1.3)
+  </text>
+  <text x="46" y="407" fill="#d1fae5" font-family="Consolas, monospace" font-size="11">
+    • Variante stretta t &gt; 0
+  </text>
+  <text x="46" y="424" fill="#d1fae5" font-family="Consolas, monospace" font-size="11">
+    • Zero commenti # (AST=OK)
+  </text>
+
+  <rect x="34" y="446" width="218" height="80" rx="6" fill="#1e293b" stroke="#334155"/>
+  <text x="46" y="468" fill="#cbd5e1" font-family="Segoe UI, Inter, sans-serif" font-size="11" font-weight="700">
+    Banchiere EWD116 &amp; Segretario
+  </text>
+  <text x="46" y="488" fill="#38bdf8" font-family="Consolas, monospace" font-size="11">
+    Slot liberi: 8 / 8 (Stato Sicuro)
+  </text>
+  <text x="46" y="506" fill="#94a3b8" font-family="Consolas, monospace" font-size="11">
+    Holyness Counter: 0
+  </text>
+
+  <!-- Main Workspace Area -->
+  <!-- Step 1: Problem & Excluded Hypotheses -->
+  <rect x="284" y="60" width="798" height="112" rx="10" fill="url(#cardGrad)" stroke="#334155" filter="url(#shadow)"/>
+  <text x="304" y="86" fill="#f8fafc" font-family="Segoe UI, Inter, sans-serif" font-size="14" font-weight="700">
+    1. Problema Imprevisto &amp; Falsificazione sul Campo (EN / ES / IT)
+  </text>
+  <rect x="304" y="96" width="510" height="62" rx="6" fill="#090d16" stroke="#334155"/>
+  <text x="316" y="118" fill="#e2e8f0" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    "La caldaia perde 1,5 bar a freddo ma non ci sono perdite visibili sui radiatori.
+  </text>
+  <text x="316" y="138" fill="#94a3b8" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    Qual è l'unica causa radice e quale verifica eseguo prima di smontare?"
+  </text>
+
+  <rect x="826" y="96" width="236" height="62" rx="6" fill="#3f1d2e" stroke="#be123c"/>
+  <text x="838" y="116" fill="#fda4af" font-family="Segoe UI, Inter, sans-serif" font-size="11" font-weight="700">
+    ✗ Ipotesi già escluse sul campo:
+  </text>
+  <text x="838" y="136" fill="#fecdd3" font-family="Consolas, monospace" font-size="11">
+    - Valvola sicurezza 3 bar asciutta
+  </text>
+  <text x="838" y="151" fill="#fecdd3" font-family="Consolas, monospace" font-size="11">
+    - Rubinetto di carico chiuso
+  </text>
+
+  <!-- Step 2: Semaphore & Closed-Loop Search Banner -->
+  <rect x="284" y="186" width="798" height="68" rx="10" fill="#111827" stroke="#3b82f6" stroke-width="1.5"/>
+  <rect x="300" y="201" width="150" height="38" rx="6" fill="#065f46"/>
+  <text x="375" y="225" fill="#6ee7b7" font-family="Consolas, monospace" font-size="13" font-weight="700" text-anchor="middle">
+    SEMAFORO: VERDE
+  </text>
+  <text x="468" y="214" fill="#f8fafc" font-family="Segoe UI, Inter, sans-serif" font-size="12" font-weight="700">
+    Guardia EWD472 Superata (s_max = 0.7842)  |  Se ROJO → Stop Onesto &amp; Ricerca Chirurgica Esterna
+  </text>
+  <text x="468" y="236" fill="#94a3b8" font-family="Consolas, monospace" font-size="11">
+    Grounding EWD496A: NODO NERO (0 cifre allucinate)  •  Conservazione Decimal EL X8: 100% OK
+  </text>
+
+  <!-- Step 3: Zero-Clutter Split View (Selected Principle vs Discarded Clutter) -->
+  <rect x="284" y="268" width="390" height="135" rx="10" fill="#0f172a" stroke="#10b981" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="302" y="294" fill="#34d399" font-family="Segoe UI, Inter, sans-serif" font-size="13" font-weight="700">
+    ✓ Principio Guida Unico (Zero Mucchio)
+  </text>
+  <text x="302" y="318" fill="#e2e8f0" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    [LEONARDO] Impianti Termici &gt; Vaso di espansione:
+  </text>
+  <text x="302" y="338" fill="#cbd5e1" font-family="Segoe UI, Inter, sans-serif" font-size="11">
+    "Precarica azoto richiesta pari a 1,0 bar - 1,5 bar.
+  </text>
+  <text x="302" y="356" fill="#cbd5e1" font-family="Segoe UI, Inter, sans-serif" font-size="11">
+    Se la membrana cede, la pressione crolla a freddo."
+  </text>
+  <text x="302" y="384" fill="#6ee7b7" font-family="Consolas, monospace" font-size="11" font-weight="600">
+    wp(S, R): Circuito isolato e manometro tarato
+  </text>
+
+  <rect x="692" y="268" width="390" height="135" rx="10" fill="#0f172a" stroke="#f59e0b" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="710" y="294" fill="#fbbf24" font-family="Segoe UI, Inter, sans-serif" font-size="13" font-weight="700">
+    🗑️ Elementi Scartati (Anti-Clutter Filter)
+  </text>
+  <text x="710" y="318" fill="#cbd5e1" font-family="Consolas, monospace" font-size="11">
+    1. [Scartato] Frammento #2 (Colpo d'ariete 14,4 bar)
+  </text>
+  <text x="710" y="338" fill="#cbd5e1" font-family="Consolas, monospace" font-size="11">
+    2. [Scartato] Frammento #3 (Dazio doganale TARIC)
+  </text>
+  <text x="710" y="358" fill="#fda4af" font-family="Consolas, monospace" font-size="11">
+    3. [Falsificata sul campo] Valvola sicurezza 3 bar
+  </text>
+  <text x="710" y="378" fill="#fda4af" font-family="Consolas, monospace" font-size="11">
+    4. [Falsificata sul campo] Rubinetto di carico
+  </text>
+
+  <!-- Step 4: Single Action & Practical Verification Experiment -->
+  <rect x="284" y="418" width="798" height="124" rx="10" fill="url(#cardGrad)" stroke="#38bdf8" stroke-width="1.5" filter="url(#shadow)"/>
+  <text x="304" y="444" fill="#38bdf8" font-family="Segoe UI, Inter, sans-serif" font-size="13" font-weight="700">
+    🔧 Unica Ipotesi Causale, Azione Chirurgica &amp; Esperimento di Verifica Pratica
+  </text>
+  <text x="304" y="468" fill="#f8fafc" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    • <tspan font-weight="700" fill="#93c5fd">Ipotesi Causale Unica:</tspan> Scarica del cuscino d'azoto o perforazione membrana nel vaso di espansione.
+  </text>
+  <text x="304" y="492" fill="#f8fafc" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    • <tspan font-weight="700" fill="#93c5fd">Azione Singola:</tspan> Scaricare la pressione lato acqua a 0 bar e ripristinare la precarica a 1,5 bar.
+  </text>
+  <text x="304" y="516" fill="#6ee7b7" font-family="Segoe UI, Inter, sans-serif" font-size="12">
+    • <tspan font-weight="700">Esperimento di Verifica:</tspan> Premere la valvola Schrader: se esce acqua anziché gas, sostituire il vaso.
+  </text>
+</svg>
