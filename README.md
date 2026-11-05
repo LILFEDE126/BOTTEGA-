@@ -9,7 +9,7 @@
 **Deterministic Hybrid RAG (HNSW + Full-Text RRF), Static AST Inspection & Closed-Loop Multilingual Diagnostic Solver for Local LLMs and Free Cloud APIs — Zero Frameworks.**
 
 <p align="center">
-  <img src="assets/bottega_preview.svg" alt="Bottega Leonardesca & THE Engine — Closed-Loop Zero-Clutter Diagnostic Dashboard" width="100%"/>
+  <img src="assets/bottega_architecture_en.svg" alt="Bottega Leonardesca & THE Engine — Deterministic Hybrid RAG & Closed-Loop Diagnostic Architecture" width="100%"/>
 </p>
 
 Large Language Models fail in production for two structural reasons:
