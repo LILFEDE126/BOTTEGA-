@@ -272,7 +272,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         "post",
         lambda url, json, timeout: _FakeResp(risposte.pop(0)),
     )
-    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
+    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
     assert ris.esito == "riparato"
     assert ris.valore == 42
 
@@ -282,7 +282,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         lambda url, json, timeout: _FakeResp('{"json_rotto": '),
     )
     with pytest.raises(RuntimeError, match="variante t=0"):
-        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
+        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
 
 
 def test_client_cloud_free_gemini_groq_openrouter_compatibilita(monkeypatch):
