@@ -23,7 +23,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.06.v3"
+_VERSIONE_MODULI_THE = "2026.11.06.v4"
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -152,37 +152,107 @@ with st.sidebar:
         DOMINI_DISPONIBILI,
         key="dom_upload",
     )
-    file_caricato = st.file_uploader(
-        "Upload a document (.pdf, .txt, .md, .csv, .py) into the Archive:",
-        type=["pdf", "txt", "md", "csv", "py"],
-    )
-    if file_caricato is not None:
-        raw_bytes = file_caricato.getvalue()
-        chiave_doc = f"{dominio_doc}:{file_caricato.name}:{len(raw_bytes)}"
-        clic_salva = st.button("Save to Archive")
-        in_ram = _conta_frammenti_ram_sicuro(file_caricato.name)
-        if clic_salva or st.session_state.get("ultimo_doc_indicizzato") != chiave_doc or in_ram == 0:
-            try:
-                blocchi_doc = store_pgvector.estrai_blocchi_documento(file_caricato.name, raw_bytes)
-                if not blocchi_doc:
-                    st.warning("No readable text found in the uploaded file.")
-                else:
-                    try:
-                        store_pgvector.inizializza_schema()
-                    except psycopg2.Error:
-                        pass
-                    n_ins = store_pgvector.incasella_e_salva(dominio_doc, file_caricato.name, blocchi_doc)
-                    st.session_state["ultimo_doc_indicizzato"] = chiave_doc
-                    st.session_state["ultimo_doc_msg"] = (
-                        f"Indexed {len(blocchi_doc)} fragments ({n_ins} new) from "
-                        f"'{file_caricato.name}' in domain '{dominio_doc}'."
-                    )
-            except Exception as err:
-                logging_bottega.log_exception("Errore indicizzazione documento caricato", "APP_DOC_001", err)
-                st.error(f"Could not read document '{file_caricato.name}': {err}")
+    max_docs = getattr(config, "MAX_DOCUMENTI_PER_RICHIESTA", 30)
+    max_mb = getattr(config, "MAX_MB_PER_RICHIESTA", 200)
+    max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * 1024 * 1024)
 
-        if st.session_state.get("ultimo_doc_msg"):
-            st.success(st.session_state["ultimo_doc_msg"])
+    if "documenti_archivio_sessione" not in st.session_state:
+        st.session_state["documenti_archivio_sessione"] = {}
+
+    files_caricati = st.file_uploader(
+        f"Upload up to {max_docs} documents (.pdf, .txt, .md, .csv, .py — max {max_mb} MB total):",
+        type=["pdf", "txt", "md", "csv", "py"],
+        accept_multiple_files=True,
+    )
+    clic_salva = st.button("Save to Archive")
+
+    if files_caricati:
+        archivio_sess = st.session_state["documenti_archivio_sessione"]
+        files_da_elaborare = list(files_caricati)
+        if len(files_da_elaborare) > max_docs:
+            st.warning(
+                f"Maximum limit of {max_docs} documents per request reached: "
+                f"indexing the first {max_docs} files."
+            )
+            files_da_elaborare = files_da_elaborare[:max_docs]
+
+        bytes_totali_correnti = sum(
+            info["size_bytes"]
+            for nome_f, info in archivio_sess.items()
+            if nome_f not in {f.name for f in files_da_elaborare}
+        )
+
+        for singolo_file in files_da_elaborare:
+            raw_bytes = singolo_file.getvalue()
+            dim_file = len(raw_bytes)
+            if singolo_file.name not in archivio_sess and len(archivio_sess) >= max_docs:
+                st.warning(
+                    f"Archive already holds {max_docs}/{max_docs} documents. "
+                    f"Skipped '{singolo_file.name}'."
+                )
+                continue
+            if bytes_totali_correnti + dim_file > max_bytes:
+                st.warning(
+                    f"Total size limit of {max_mb} MB per request exceeded: "
+                    f"skipped '{singolo_file.name}'."
+                )
+                continue
+
+            bytes_totali_correnti += dim_file
+            chiave_doc = f"{dominio_doc}:{singolo_file.name}:{dim_file}"
+            info_esistente = archivio_sess.get(singolo_file.name)
+            in_ram = _conta_frammenti_ram_sicuro(singolo_file.name)
+
+            if (
+                clic_salva
+                or info_esistente is None
+                or info_esistente.get("chiave") != chiave_doc
+                or in_ram == 0
+            ):
+                try:
+                    blocchi_doc = store_pgvector.estrai_blocchi_documento(singolo_file.name, raw_bytes)
+                    if not blocchi_doc:
+                        st.warning(f"No readable text found in '{singolo_file.name}'.")
+                    else:
+                        try:
+                            store_pgvector.inizializza_schema()
+                        except psycopg2.Error:
+                            pass
+                        n_ins = store_pgvector.incasella_e_salva(dominio_doc, singolo_file.name, blocchi_doc)
+                        archivio_sess[singolo_file.name] = {
+                            "chiave": chiave_doc,
+                            "dominio": dominio_doc,
+                            "raw_bytes": raw_bytes,
+                            "size_bytes": dim_file,
+                            "n_frammenti": len(blocchi_doc),
+                            "n_nuovi": n_ins,
+                        }
+                except Exception as err:
+                    logging_bottega.log_exception(
+                        "Errore indicizzazione documento caricato", "APP_DOC_001", err
+                    )
+                    st.error(f"Could not read document '{singolo_file.name}': {err}")
+
+    archivio_attivo = st.session_state.get("documenti_archivio_sessione", {})
+    if archivio_attivo:
+        tot_docs = len(archivio_attivo)
+        tot_frammenti = sum(v["n_frammenti"] for v in archivio_attivo.values())
+        tot_mb = sum(v["size_bytes"] for v in archivio_attivo.values()) / (1024 * 1024)
+        st.success(
+            f"Active Archive: {tot_docs}/{max_docs} documents indexed "
+            f"({tot_frammenti} total fragments, {tot_mb:.2f} MB / {max_mb} MB)."
+        )
+        with st.expander(f"Loaded Documents ({tot_docs}/{max_docs})"):
+            for idx_d, (nome_d, meta_d) in enumerate(archivio_attivo.items(), start=1):
+                st.caption(
+                    f"{idx_d}. {nome_d} — {meta_d['n_frammenti']} fragments "
+                    f"({meta_d['dominio']}, {meta_d['size_bytes'] / (1024 * 1024):.2f} MB)"
+                )
+            if st.button("Clear All Uploaded Documents"):
+                st.session_state["documenti_archivio_sessione"] = {}
+                if hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
+                    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+                st.rerun()
 
 chiave_effettiva_ui = api_key_ui.strip() if api_key_ui.strip() else (chiave_auto if provider_ui != "ollama" else None)
 
@@ -295,13 +365,18 @@ with tab_artigiano:
             cercatore_fn = _cercatore_cascata_ui if attiva_ricerca else None
             try:
                 with st.status("Streaming diagnostic analysis (PDF Archive, RAG Semaphore & Write Barrier)...", expanded=True) as stato_diag:
-                    if file_caricato is not None and _conta_frammenti_ram_sicuro(file_caricato.name) == 0:
-                        blocchi_sync = store_pgvector.estrai_blocchi_documento(file_caricato.name, file_caricato.getvalue())
-                        if blocchi_sync:
-                            store_pgvector.incasella_e_salva(dominio_doc, file_caricato.name, blocchi_sync)
+                    for nome_sync, meta_sync in st.session_state.get("documenti_archivio_sessione", {}).items():
+                        if _conta_frammenti_ram_sicuro(nome_sync) == 0:
+                            blocchi_sync = store_pgvector.estrai_blocchi_documento(
+                                nome_sync, meta_sync["raw_bytes"]
+                            )
+                            if blocchi_sync:
+                                store_pgvector.incasella_e_salva(
+                                    meta_sync["dominio"], nome_sync, blocchi_sync
+                                )
                     tot_ram = _conta_frammenti_ram_sicuro()
-                    st.write(f"1. Archivio attivo in memoria: **{tot_ram} frammenti** pronti per la verifica.")
-                    st.write("2. Ricerca ibrida RRF (EWD472), calcolo precondizione wp(S, R) e filtro Zero Mucchio...")
+                    st.write(f"1. Active Archive in memory: **{tot_ram} fragments** ready for verification.")
+                    st.write("2. Hybrid RRF Search (EWD472), wp(S, R) precondition & Zero-Clutter filter...")
                     esito = risolutore_artigiano.risolvi_da_artigiano(
                         problema_utente,
                         dominio=dominio_scelto,
@@ -309,29 +384,49 @@ with tab_artigiano:
                         ipotesi_gia_escluse=lista_escluse,
                         llm_fn=llm_selezionato_fn,
                     )
+                    lingua_risp = esito.get("lingua", "it")
                     st.write(
-                        f"3. Semaforo: **{esito['semaforo']}** (s_max={esito['s_max']}) | "
-                        f"Nodo Tri-Colore (EWD496A): **{esito['colore_nodo_ewd496a']}** "
-                        f"(Percentuali conservate: {esito['percentuali_conservate']})"
+                        f"3. Semaphore: **{esito['semaforo']}** (s_max={esito['s_max']}) | "
+                        f"Tri-Color Node (EWD496A): **{esito['colore_nodo_ewd496a']}** "
+                        f"(Percentages preserved: {esito['percentuali_conservate']})"
                     )
-                    stato_diag.update(
-                        label=(
+                    if lingua_risp == "en":
+                        etichetta_stato = (
+                            f"Analysis complete — Semaphore: {esito['semaforo']} (s_max={esito['s_max']}) | "
+                            f"Numeric Barrier (EWD496A): Node {esito['colore_nodo_ewd496a']}"
+                        )
+                        titolo_risp = "Final Answer (Craftsman Method — Zero Clutter)"
+                        titolo_expander = "Technical Details: Extracted PDF Fragments & JSON Schema (THE / EWD401 / EWD496A)"
+                    elif lingua_risp == "es":
+                        etichetta_stato = (
+                            f"Análisis completado — Semáforo: {esito['semaforo']} (s_max={esito['s_max']}) | "
+                            f"Barrera Numérica (EWD496A): Nodo {esito['colore_nodo_ewd496a']}"
+                        )
+                        titolo_risp = "Respuesta Final (Método Artesano — Cero Montón)"
+                        titolo_expander = "Detalles Técnicos: Fragmentos PDF Extraídos y Esquema JSON (THE / EWD401 / EWD496A)"
+                    else:
+                        etichetta_stato = (
                             f"Analisi completata — Semaforo: {esito['semaforo']} (s_max={esito['s_max']}) | "
                             f"Barriera Numerica (EWD496A): Nodo {esito['colore_nodo_ewd496a']}"
-                        ),
+                        )
+                        titolo_risp = "Risposta Finale (Metodo Artigiano — Zero Mucchio)"
+                        titolo_expander = "Dettagli Tecnici: Frammenti PDF Estratti & Schema JSON (THE / EWD401 / EWD496A)"
+
+                    stato_diag.update(
+                        label=etichetta_stato,
                         state="complete",
                         expanded=False,
                     )
 
-                st.subheader("Risposta Finale (Metodo Artigiano — Zero Mucchio)")
+                st.subheader(titolo_risp)
                 testo_discorsivo = esito.get("risposta_discorsiva", "")
                 if not testo_discorsivo and hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile"):
                     testo_discorsivo = risolutore_artigiano.formatta_risposta_artigiano_leggibile(
-                        esito["risultato"], esito["modalita"]
+                        esito["risultato"], esito["modalita"], lingua=lingua_risp
                     )
                 st.write_stream(_stream_testo_parole(testo_discorsivo))
 
-                with st.expander("Dettagli Tecnici: Frammenti PDF Estratti & Schema JSON (THE / EWD401 / EWD496A)"):
+                with st.expander(titolo_expander):
                     frammenti_letti = esito.get("frammenti_usati", [])
                     if frammenti_letti:
                         st.markdown("**Frammenti certificati estratti dal PDF / Archivio:**")

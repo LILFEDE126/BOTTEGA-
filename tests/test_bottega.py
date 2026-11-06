@@ -762,3 +762,98 @@ def test_logging_bottega_queue_handler_sette_chiavi_json_e_assenza_log_file():
     if listener is not None:
         listener.stop()
 
+
+def test_nodo_nero_ewd496a_con_frammenti_scartati_risposta_monolingua_en_es_e_30_documenti(monkeypatch):
+    assert config.MAX_DOCUMENTI_PER_RICHIESTA == 30
+    assert config.MAX_MB_PER_RICHIESTA == 200
+    assert config.MAX_BYTES_PER_RICHIESTA == 200 * 1024 * 1024
+
+    q_en = (
+        "According to the business project, what is the retail price of the shirt and shorts kit "
+        "(maglia e pantaloncino), what is the unit margin in euros, and what is the maximum delivery lead time in months?"
+    )
+    q_es = (
+        "¿Cuál es el presupuesto estimado en euros para el desarrollo del sitio web (sito web) "
+        "y para los folletos (brochure) en el plan de inversiones de Too Fast?"
+    )
+    assert client_ollama.rileva_lingua_testo(q_en) == "en"
+    assert client_ollama.rileva_lingua_testo(q_es) == "es"
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="generale", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.95,
+            "frammenti": [
+                {
+                    "id": 1,
+                    "testo": "1.9a Modello di Business: prezzo imposto 40 euro, margine tra 15 e 20 euro, consegna 3 mesi.",
+                },
+                {
+                    "id": 2,
+                    "testo": "Bando Voucher digitali I4.0: contributo 50% fino a 10.000,00 euro, consulenza 10%.",
+                },
+            ],
+        },
+    )
+
+    def finto_llm_en(sys_p, usr_p, schema):
+        assert "100% ENGLISH ONLY" in sys_p
+        return risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "The retail price for the shirt and shorts kit is 40 euro, with a unit margin between 15 and 20 euro "
+                "and a maximum delivery lead time of 3 months."
+            ),
+            principio_guida_unico="Business Model section 1.9a: retail price 40 euro, margin 15 to 20 euro, lead time 3 months.",
+            elementi_scartati_per_non_fare_mucchio=["Digital Voucher Grant I4.0: 50% up to 10.000,00 euro"],
+            precondizione_wp_richiesta="wp(S, R) requires extracting 40 euro, 15-20 euro, and 3 months from section 1.9a.",
+            invariante_violato="Alignment between retail price and unit contribution margin.",
+            ipotesi_causale_unica="The unit margin of 15 to 20 euro is calculated on the 40 euro retail price.",
+            azione_correttiva_singola="Extract the verified values 40 euro, 15 to 20 euro, and 3 months.",
+            esperimento_di_verifica_pratica="Verify that 40 euro, 15-20 euro, and 3 months match section 1.9a.",
+        )
+
+    esito_en = risolutore_artigiano.risolvi_da_artigiano(
+        q_en,
+        dominio="generale",
+        ipotesi_gia_escluse=["Foreign supplier delay"],
+        llm_fn=finto_llm_en,
+    )
+    assert esito_en["lingua"] == "en"
+    assert esito_en["colore_nodo_ewd496a"] == "NERO"
+    assert esito_en["percentuali_conservate"] is True
+    assert "**1. Main Answer & Root Diagnosis:**" in esito_en["risposta_discorsiva"]
+    assert "**6. Excluded Items or Hypotheses (Anti-Clutter Filter):**" in esito_en["risposta_discorsiva"]
+    assert "[Falsified in the field] Foreign supplier delay" in esito_en["risposta_discorsiva"]
+    assert "Risposta e Diagnosi Principale" not in esito_en["risposta_discorsiva"]
+
+    def finto_llm_es(sys_p, usr_p, schema):
+        assert "100% ESPAÑOL ÚNICAMENTE" in sys_p
+        return risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "El Bando Voucher digitali I4.0 cubre el 50% hasta 10.000,00 euro, mientras que el precio es 40 euro."
+            ),
+            principio_guida_unico="Bando Voucher digitali I4.0 (Reggio Emilia)",
+            elementi_scartati_per_non_fare_mucchio=["Modelo de negocio 1.9a: 40 euro"],
+            precondizione_wp_richiesta="wp(S, R) exige separar costos digitales (50%) de folletos impresos.",
+            invariante_violato="Elegibilidad de gastos digitales frente a tipografía.",
+            ipotesi_causale_unica="El subsidio del 50% aplica únicamente a la plataforma web hasta 10.000,00 euro.",
+            azione_correttiva_singola="Aplicar el 50% hasta 10.000,00 euro.",
+            esperimento_di_verifica_pratica="Comprobar el límite de 10.000,00 euro y el 50%.",
+        )
+
+    esito_es = risolutore_artigiano.risolvi_da_artigiano(
+        q_es,
+        dominio="generale",
+        ipotesi_gia_escluse=["Bando Invitalia descartado"],
+        llm_fn=finto_llm_es,
+    )
+    assert esito_es["lingua"] == "es"
+    assert esito_es["colore_nodo_ewd496a"] == "NERO"
+    assert "**1. Respuesta y Diagnóstico Principal:**" in esito_es["risposta_discorsiva"]
+    assert "**6. Elementos o Hipótesis Excluidas (para no mezclar soluciones):**" in esito_es["risposta_discorsiva"]
+    assert "[Falsificada en el campo] Bando Invitalia descartado" in esito_es["risposta_discorsiva"]
+    assert "Risposta e Diagnosi Principale" not in esito_es["risposta_discorsiva"]
+
+

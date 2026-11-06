@@ -57,22 +57,76 @@ GLOSSARIO_MULTILINGUA_IT = {
     "sobrepresion": "sovrappressione",
     "pipes": "tubazioni",
     "tuberias": "tubazioni",
+    "price": "prezzo",
+    "precio": "prezzo",
+    "retail": "mercato",
+    "shirt": "maglia",
+    "shorts": "pantaloncino",
+    "margin": "margine",
+    "margen": "margine",
+    "months": "mesi",
+    "meses": "mesi",
+    "website": "sito",
+    "sitio": "sito",
+    "brochures": "brochure",
+    "folletos": "brochure",
+    "budget": "budget",
+    "presupuesto": "budget",
+    "percentage": "percentuale",
+    "porcentaje": "percentuale",
+    "requirements": "requisiti",
+    "requisitos": "requisiti",
 }
 
 PAROLE_SPIA_LINGUA = {
-    "en": {"the", "how", "what", "why", "when", "where", "is", "are", "with", "from", "boiler", "duty", "pressure", "loss"},
-    "es": {"que", "qué", "como", "cómo", "cuando", "cuándo", "donde", "para", "con", "del", "las", "los", "caldera", "arancel", "presion", "presión"},
-    "it": {"che", "come", "quando", "dove", "della", "nella", "delle", "degli", "caldaia", "pressione", "dazio", "impianto", "perdita"},
+    "en": {
+        "the", "how", "what", "why", "when", "where", "which", "is", "are", "with",
+        "from", "according", "retail", "price", "margin", "months", "delivery", "lead",
+        "boiler", "duty", "pressure", "loss", "please", "respond", "reply", "english",
+        "for", "and", "in", "of", "to",
+    },
+    "es": {
+        "que", "qué", "como", "cómo", "cuando", "cuándo", "donde", "dónde", "cual",
+        "cuál", "cuales", "cuáles", "cuanto", "cuánto", "para", "con", "del", "las",
+        "los", "por", "según", "segun", "sitio", "folletos", "presupuesto", "porcentaje",
+        "cubre", "inversiones", "caldera", "arancel", "presion", "presión", "español",
+        "espagnol", "hablame", "háblame", "favor", "responde",
+    },
+    "it": {
+        "che", "come", "quando", "dove", "quale", "quali", "quanto", "della", "nella",
+        "delle", "degli", "dallo", "sulla", "sono", "calcola", "dichiarato", "documento",
+        "maglia", "pantaloncino", "caldaia", "pressione", "dazio", "impianto", "perdita",
+        "italiano", "rispondi",
+    },
 }
 
 
 def rileva_lingua_testo(testo: str) -> str:
     """Detects whether the input text is primarily English ('en'), Spanish ('es'), or Italian ('it')."""
-    tokens = set(re.findall(r"\w+", testo.lower()))
+    basso = testo.lower()
+    if any(k in basso for k in ("in english", "respond all in english", "reply in english")):
+        return "en"
+    if any(k in basso for k in ("en español", "en espagnol", "hablame todo en", "háblame todo en")):
+        return "es"
+    if any(k in basso for k in ("in italiano", "rispondi in italiano")):
+        return "it"
+
+    senza_parentesi = re.sub(r"\([^)]*\)", " ", basso)
+    tokens = set(re.findall(r"\w+", senza_parentesi))
+    if not tokens:
+        tokens = set(re.findall(r"\w+", basso))
+
     punteggi = {
         lingua: len(tokens & parole)
         for lingua, parole in PAROLE_SPIA_LINGUA.items()
     }
+    if "¿" in testo or "¡" in testo or any(w in tokens for w in ("cuál", "qué", "cómo", "cuánto")):
+        punteggi["es"] += 3
+    if any(w in tokens for w in ("what", "which", "according", "how", "where", "why")):
+        punteggi["en"] += 2
+    if any(w in tokens for w in ("qual", "quale", "quali", "quanto", "della", "nella")):
+        punteggi["it"] += 2
+
     migliore = max(punteggi, key=punteggi.get)
     if punteggi[migliore] == 0:
         return "it"
