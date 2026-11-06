@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Layer 4 (THE): Multilingual Streamlit Dashboard (EN / ES / IT) with Free Cloud APIs,
-automatic API key detection, live word-by-word answer streaming, PDF archive and Free Web Bridge."""
+automatic submodule hot-reload, automatic API key detection, live streaming and PDF archive."""
 
+import importlib
 import re
 import tempfile
 import time
@@ -9,27 +10,59 @@ from pathlib import Path
 import psycopg2
 import streamlit as st
 
-from config import LLM_PROVIDER, risolvi_chiave_api
-from logging_bottega import log_exception
-from anatomia_ast import analizza_codice_ast
-from grounding_numerico import (
-    classifica_nodo_tricolore,
-    verifica_conservazione_percentuali_decimal,
-)
-from store_pgvector import (
-    conta_frammenti_archivio_ram,
-    estrai_blocchi_documento,
-    incasella_e_salva,
-    inizializza_schema,
-    recupera_con_semaforo,
-)
-from client_ollama import costruisci_llm_fn, traduci_query_per_ricerca
-from cascata_strutturata import esegui_cascata
-from risolutore_artigiano import (
-    genera_prompt_ponte_web_gratuito,
-    risolvi_da_artigiano,
-)
-from seed_bottega import cerca_nel_prontuario_esterno
+import config
+import logging_bottega
+import anatomia_ast
+import geometria_semaforo
+import grounding_numerico
+import ispezione_moduli
+import presidio_concorrenza
+import store_pgvector
+import client_ollama
+import seed_bottega
+import cascata_strutturata
+import risolutore_artigiano
+
+_VERSIONE_MODULI_THE = "2026.11.06.v3"
+
+
+def _allinea_moduli_in_memoria() -> None:
+    """Forces Python on Streamlit Cloud to reload Layers 0..3 from disk when a new git commit is deployed,
+    preventing stale sys.modules cache and ImportError while preserving the in-memory PDF archive."""
+    necessita_reload = (
+        st.session_state.get("_versione_moduli_the") != _VERSIONE_MODULI_THE
+        or not hasattr(store_pgvector, "conta_frammenti_archivio_ram")
+        or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
+        or not hasattr(config, "risolvi_chiave_api")
+    )
+    if not necessita_reload:
+        return
+
+    archivio_precedente = list(getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", []))
+    moduli_ordinati = (
+        config,
+        logging_bottega,
+        anatomia_ast,
+        geometria_semaforo,
+        grounding_numerico,
+        ispezione_moduli,
+        presidio_concorrenza,
+        store_pgvector,
+        client_ollama,
+        seed_bottega,
+        cascata_strutturata,
+        risolutore_artigiano,
+    )
+    for modulo in moduli_ordinati:
+        importlib.reload(modulo)
+
+    if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
+        store_pgvector._ARCHIVIO_MEMORIA_RAM.extend(archivio_precedente)
+
+    st.session_state["_versione_moduli_the"] = _VERSIONE_MODULI_THE
+
+
+_allinea_moduli_in_memoria()
 
 PROMPT_TASCHINO_UNIVERSALE = (
     'Always act with the "Craftsman Method (Leonardo + Dijkstra EWD401)":\n'
@@ -53,15 +86,27 @@ def _stream_testo_parole(testo: str):
         time.sleep(0.01)
 
 
+def _conta_frammenti_ram_sicuro(titolo=None) -> int:
+    """Safely counts fragments in the RAM archive even if an older module instance is present."""
+    fn_conta = getattr(store_pgvector, "conta_frammenti_archivio_ram", None)
+    if callable(fn_conta):
+        return fn_conta(titolo)
+    archivio = getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", [])
+    if titolo is None:
+        return len(archivio)
+    return sum(1 for item in archivio if item.get("titolo") == titolo)
+
+
 st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
 st.title("Bottega — Engine & Diagnostic Solver")
 st.caption("Multilingual Input Enabled: Write in English, Español, Italiano or any language — search is automatically translated.")
 
 with st.sidebar:
     st.header("1. AI Engine (Local or Free Cloud)")
+    provider_cfg = getattr(config, "LLM_PROVIDER", "gemini")
     idx_provider_default = (
-        PROVIDERS_DISPONIBILI.index(LLM_PROVIDER)
-        if LLM_PROVIDER in PROVIDERS_DISPONIBILI
+        PROVIDERS_DISPONIBILI.index(provider_cfg)
+        if provider_cfg in PROVIDERS_DISPONIBILI
         else 0
     )
     provider_ui = st.selectbox(
@@ -70,7 +115,8 @@ with st.sidebar:
         index=idx_provider_default,
         help="Gemini (Google AI Studio), Groq and OpenRouter offer a Free Tier without credit card.",
     )
-    chiave_auto = risolvi_chiave_api()
+    fn_risolvi_chiave = getattr(config, "risolvi_chiave_api", None)
+    chiave_auto = fn_risolvi_chiave() if callable(fn_risolvi_chiave) else getattr(config, "LLM_API_KEY", "")
     api_key_ui = ""
     model_ui = ""
     if provider_ui != "ollama":
@@ -114,25 +160,25 @@ with st.sidebar:
         raw_bytes = file_caricato.getvalue()
         chiave_doc = f"{dominio_doc}:{file_caricato.name}:{len(raw_bytes)}"
         clic_salva = st.button("Save to Archive")
-        in_ram = conta_frammenti_archivio_ram(file_caricato.name)
+        in_ram = _conta_frammenti_ram_sicuro(file_caricato.name)
         if clic_salva or st.session_state.get("ultimo_doc_indicizzato") != chiave_doc or in_ram == 0:
             try:
-                blocchi_doc = estrai_blocchi_documento(file_caricato.name, raw_bytes)
+                blocchi_doc = store_pgvector.estrai_blocchi_documento(file_caricato.name, raw_bytes)
                 if not blocchi_doc:
                     st.warning("No readable text found in the uploaded file.")
                 else:
                     try:
-                        inizializza_schema()
+                        store_pgvector.inizializza_schema()
                     except psycopg2.Error:
                         pass
-                    n_ins = incasella_e_salva(dominio_doc, file_caricato.name, blocchi_doc)
+                    n_ins = store_pgvector.incasella_e_salva(dominio_doc, file_caricato.name, blocchi_doc)
                     st.session_state["ultimo_doc_indicizzato"] = chiave_doc
                     st.session_state["ultimo_doc_msg"] = (
                         f"Indexed {len(blocchi_doc)} fragments ({n_ins} new) from "
                         f"'{file_caricato.name}' in domain '{dominio_doc}'."
                     )
             except Exception as err:
-                log_exception("Errore indicizzazione documento caricato", "APP_DOC_001", err)
+                logging_bottega.log_exception("Errore indicizzazione documento caricato", "APP_DOC_001", err)
                 st.error(f"Could not read document '{file_caricato.name}': {err}")
 
         if st.session_state.get("ultimo_doc_msg"):
@@ -140,7 +186,7 @@ with st.sidebar:
 
 chiave_effettiva_ui = api_key_ui.strip() if api_key_ui.strip() else (chiave_auto if provider_ui != "ollama" else None)
 
-llm_selezionato_fn = costruisci_llm_fn(
+llm_selezionato_fn = client_ollama.costruisci_llm_fn(
     provider=provider_ui,
     api_key=chiave_effettiva_ui,
     model=model_ui.strip() if model_ui.strip() else None,
@@ -148,7 +194,7 @@ llm_selezionato_fn = costruisci_llm_fn(
 
 
 def _cercatore_cascata_ui(query_ricerca: str):
-    return cerca_nel_prontuario_esterno(
+    return seed_bottega.cerca_nel_prontuario_esterno(
         query_ricerca,
         provider=provider_ui,
         api_key=chiave_effettiva_ui,
@@ -175,7 +221,7 @@ with tab_codice:
                 st.warning("Please enter Python code first.")
             else:
                 try:
-                    dati_ast = analizza_codice_ast(codice_incollato)
+                    dati_ast = anatomia_ast.analizza_codice_ast(codice_incollato)
                     st.success(
                         f"Functions/Methods: {dati_ast['numero_funzioni']} | "
                         f"Bare excepts: {dati_ast['totale_except_nudi']} | "
@@ -193,7 +239,7 @@ with tab_codice:
                 st.warning("Please enter Python code first.")
             else:
                 try:
-                    analizza_codice_ast(codice_incollato)
+                    anatomia_ast.analizza_codice_ast(codice_incollato)
                 except SyntaxError as err:
                     st.error(f"Syntax error at line {err.lineno}: {err.msg}")
                     st.stop()
@@ -203,7 +249,7 @@ with tab_codice:
                     tmp_path.write_text(codice_incollato, encoding="utf-8")
                     try:
                         with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade..."):
-                            referto = esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
+                            referto = cascata_strutturata.esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
                         st.write_stream(_stream_testo_parole(referto))
                         st.download_button(
                             "Download Markdown Report",
@@ -212,7 +258,7 @@ with tab_codice:
                             mime="text/markdown",
                         )
                     except Exception:
-                        log_exception("Errore esecuzione cascata Streamlit", "APP_CASCATA_001")
+                        logging_bottega.log_exception("Errore esecuzione cascata Streamlit", "APP_CASCATA_001")
                         st.error(
                             "Inference service or API key unavailable. "
                             "Check the sidebar or use Tab 3 (Free Web Bridge)."
@@ -249,14 +295,14 @@ with tab_artigiano:
             cercatore_fn = _cercatore_cascata_ui if attiva_ricerca else None
             try:
                 with st.status("Streaming diagnostic analysis (PDF Archive, RAG Semaphore & Write Barrier)...", expanded=True) as stato_diag:
-                    if file_caricato is not None and conta_frammenti_archivio_ram(file_caricato.name) == 0:
-                        blocchi_sync = estrai_blocchi_documento(file_caricato.name, file_caricato.getvalue())
+                    if file_caricato is not None and _conta_frammenti_ram_sicuro(file_caricato.name) == 0:
+                        blocchi_sync = store_pgvector.estrai_blocchi_documento(file_caricato.name, file_caricato.getvalue())
                         if blocchi_sync:
-                            incasella_e_salva(dominio_doc, file_caricato.name, blocchi_sync)
-                    tot_ram = conta_frammenti_archivio_ram()
+                            store_pgvector.incasella_e_salva(dominio_doc, file_caricato.name, blocchi_sync)
+                    tot_ram = _conta_frammenti_ram_sicuro()
                     st.write(f"1. Archivio attivo in memoria: **{tot_ram} frammenti** pronti per la verifica.")
                     st.write("2. Ricerca ibrida RRF (EWD472), calcolo precondizione wp(S, R) e filtro Zero Mucchio...")
-                    esito = risolvi_da_artigiano(
+                    esito = risolutore_artigiano.risolvi_da_artigiano(
                         problema_utente,
                         dominio=dominio_scelto,
                         cercatore_esterno_fn=cercatore_fn,
@@ -279,6 +325,10 @@ with tab_artigiano:
 
                 st.subheader("Risposta Finale (Metodo Artigiano — Zero Mucchio)")
                 testo_discorsivo = esito.get("risposta_discorsiva", "")
+                if not testo_discorsivo and hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile"):
+                    testo_discorsivo = risolutore_artigiano.formatta_risposta_artigiano_leggibile(
+                        esito["risultato"], esito["modalita"]
+                    )
                 st.write_stream(_stream_testo_parole(testo_discorsivo))
 
                 with st.expander("Dettagli Tecnici: Frammenti PDF Estratti & Schema JSON (THE / EWD401 / EWD496A)"):
@@ -290,7 +340,7 @@ with tab_artigiano:
                     st.markdown("**Oggetto Strutturato JSON (Pydantic Validated):**")
                     st.json(esito["risultato"])
             except Exception as err:
-                log_exception("Errore risolutore artigiano Streamlit", "APP_ARTIGIANO_001", err)
+                logging_bottega.log_exception("Errore risolutore artigiano Streamlit", "APP_ARTIGIANO_001", err)
                 st.error(
                     f"Unable to reach the selected AI provider ({err}). "
                     "Check the sidebar or use Tab 3 (Free Web Bridge)."
@@ -312,9 +362,9 @@ with tab_ponte_web:
     )
 
     frammenti_contesto_web = []
-    query_web_tradotta = traduci_query_per_ricerca(problema_web)
+    query_web_tradotta = client_ollama.traduci_query_per_ricerca(problema_web)
     try:
-        rag_web = recupera_con_semaforo(query_web_tradotta, dominio=dominio_doc, top_k=3)
+        rag_web = store_pgvector.recupera_con_semaforo(query_web_tradotta, dominio=dominio_doc, top_k=3)
         if rag_web.get("frammenti"):
             frammenti_contesto_web = [
                 (f.get("sezione", "Archive"), f.get("testo", ""))
@@ -326,7 +376,7 @@ with tab_ponte_web:
         frammenti_contesto_web = _cercatore_cascata_ui(problema_web)
 
     lista_escluse_web = [x.strip() for x in escluse_web.split(",") if x.strip()]
-    prompt_pronto = genera_prompt_ponte_web_gratuito(
+    prompt_pronto = risolutore_artigiano.genera_prompt_ponte_web_gratuito(
         problema_web,
         frammenti_contesto_web,
         ipotesi_gia_escluse=lista_escluse_web,
@@ -349,8 +399,8 @@ with tab_ponte_web:
             contesto_verifica = f"{problema_web}\n" + "\n".join(
                 f"{sez}: {txt}" for sez, txt in frammenti_contesto_web
             )
-            colore, orfane = classifica_nodo_tricolore(risposta_incollata, contesto_verifica)
-            pct_ok = verifica_conservazione_percentuali_decimal(risposta_incollata, contesto_verifica)
+            colore, orfane = grounding_numerico.classifica_nodo_tricolore(risposta_incollata, contesto_verifica)
+            pct_ok = grounding_numerico.verifica_conservazione_percentuali_decimal(risposta_incollata, contesto_verifica)
             if colore == "NERO" and pct_ok:
                 st.success(
                     "Certified BLACK Node (EWD496A): all numbers, amounts, and percentages "
