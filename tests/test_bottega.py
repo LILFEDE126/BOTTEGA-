@@ -922,4 +922,49 @@ def test_normalizzazione_spazi_pdf_incollati_e_barriera_numerica_su_contesto_rea
     assert esito_im["cifre_non_ancorate"] == []
 
 
+def test_deduplicazione_file_duplicati_ragioneria_multilingua_e_cascata_rojo_verde(monkeypatch):
+    monkeypatch.setattr(store_pgvector, "_OLLAMA_EMBED_OFFLINE", True)
+    monkeypatch.setattr(store_pgvector, "_POSTGRES_OFFLINE", True)
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+    blocchi_paniere = [
+        ("Page 1", "Lezione 041: credito 10.000 euro cliente Rossi scadenza 90 giorni anticipo 90% oneri 35 euro interesse 6% costo 168,15 euro."),
+        ("Page 2", "Lezione 048: Gamma Spa conferimento 35.000 euro, ATTIVITA 60000+20000=80000 - PASSIVITA 50000 = 30000, AVVIAMENTO = 5000."),
+    ]
+    n_primo = store_pgvector.incasella_e_salva(
+        "generale", "eaa78fa0-cc37-4a38-a8a9-cad55f19aa4c.pdf", blocchi_paniere
+    )
+    n_secondo_duplicato = store_pgvector.incasella_e_salva(
+        "generale", "f6d6dbaa-b02d-4116-b558-cb49fc505d13.pdf", blocchi_paniere
+    )
+    assert n_primo == 2
+    assert n_secondo_duplicato == 0
+
+    ctx_ragioneria = (
+        "ATTIVITA 60000+20000=80000 - PASSIVITA 50000 = 30000 AVVIAMENTO = 5000. "
+        "Spese legali 4.160, IVA 915,20, Ritenuta 800, FIFO 47.650,00."
+    )
+    assert verifica_grounding_numerico(
+        "Attivita' 80.000 euro, capitale netto 30.000 euro, avviamento 5.000 euro, "
+        "spese 4.160,00 euro, ritenuta 800,00 euro e in inglese 47,650.00 euro.",
+        ctx_ragioneria,
+    ) == []
+
+    q_oic34 = (
+        "Cosa prevede il nuovo principio contabile OIC 34 sui ricavi entrato in vigore per i bilanci dal 2024 "
+        "in merito all'identificazione delle unita' elementari di contabilizzazione?"
+    )
+    assert client_ollama.rileva_lingua_testo(q_oic34) == "it"
+    rag_rojo = store_pgvector.recupera_con_semaforo(
+        client_ollama.traduci_query_per_ricerca(q_oic34), dominio="generale", top_k=5
+    )
+    assert rag_rojo["semaforo"] == "ROJO"
+
+    trovati_oic34 = seed_bottega.cerca_nel_prontuario_locale(q_oic34)
+    assert len(trovati_oic34) == 1
+    assert "OIC 34" in trovati_oic34[0][0]
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+
+
 

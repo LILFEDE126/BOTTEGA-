@@ -7,3 +7,5 @@ radon>=6.0.1
 pytest>=8.3.4
 streamlit>=1.41.1
 pypdf>=5.0.0
+pypdfium2>=4.30.0
+fonttools>=4.55.0

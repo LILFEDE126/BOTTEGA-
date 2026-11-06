@@ -9,17 +9,63 @@ from typing import List, Set, Tuple
 PATRON_NUM = re.compile(
     r"\d+(?:[.,]\d+)?\s*%"
     r"|(?<!\d)\d{1,3}(?:\.\d{3})+(?:,\d+)?(?!\d)"
+    r"|(?<!\d)\d{1,3}(?:,\d{3})+\.\d+(?!\d)"
     r"|(?<!\d)\d{8,10}(?!\d)"
     r"|(?<!\d)(?:19|20)\d{2}(?!\d)"
     r"|(?<!\d)\d+[.,]\d+(?!\d)"
 )
 PATRON_PERCENTUALE = re.compile(r"\d+(?:[.,]\d+)?\s*%")
 PATRON_MIGLIAIA = re.compile(r"^\d{1,3}(?:\.\d{3})+(?:,\d+)?$")
+PATRON_MIGLIAIA_EN_DEC = re.compile(r"^\d{1,3}(?:,\d{3})+\.\d+$")
+PATRON_MIGLIAIA_EN_INT = re.compile(r"^\d{1,3}(?:,\d{3})+$")
+PATRON_INTERI_PURI = re.compile(r"(?<![\d.,])\d+(?![\d%]|[.,]\d)")
 
 
 def _normalizza_separatore_decimale(cifra: str) -> str:
     """Strips whitespace (including U+00A0) and normalizes decimal commas into dots."""
     return re.sub(r"[\s\xa0]", "", cifra).replace(",", ".")
+
+
+def _converti_in_decimal_esatti(token_pulito: str) -> Set[Decimal]:
+    """Converts a numeric token (EU thousands, EN thousands, or standard decimal) to exact Decimal values."""
+    valori: Set[Decimal] = set()
+    if not token_pulito or token_pulito.endswith("%"):
+        return valori
+
+    if PATRON_MIGLIAIA.match(token_pulito):
+        senza_punti = token_pulito.replace(".", "").replace(",", ".")
+        try:
+            valori.add(Decimal(senza_punti))
+        except InvalidOperation:
+            pass
+        return valori
+
+    if PATRON_MIGLIAIA_EN_DEC.match(token_pulito):
+        senza_virgole = token_pulito.replace(",", "")
+        try:
+            valori.add(Decimal(senza_virgole))
+        except InvalidOperation:
+            pass
+        return valori
+
+    if PATRON_MIGLIAIA_EN_INT.match(token_pulito):
+        try:
+            valori.add(Decimal(token_pulito.replace(",", "")))
+        except InvalidOperation:
+            pass
+        try:
+            valori.add(Decimal(token_pulito.replace(",", ".")))
+        except InvalidOperation:
+            pass
+        return valori
+
+    norm = token_pulito.replace(",", ".")
+    if norm.count(".") <= 1:
+        try:
+            valori.add(Decimal(norm))
+        except InvalidOperation:
+            pass
+    return valori
 
 
 def arrotonda_esatto_el_x8(valore: float | str | Decimal, decimali: int = 2) -> Decimal:
@@ -50,7 +96,7 @@ def verifica_conservazione_percentuali_decimal(prosa_narrata: str, fonte_ufficia
 
 def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
     """Returns the sorted list of figures cited in the response but absent from the context,
-    comparing Decimal values for percentages and technical decimals without confusing thousands."""
+    comparing Decimal values for percentages, thousands, and technical decimals without confusing thousands."""
     raw_risp = PATRON_NUM.findall(risposta)
     raw_ctx = PATRON_NUM.findall(contesto)
 
@@ -59,18 +105,20 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
     dec_ctx: Set[Decimal] = set()
     pct_ctx = estrai_percentuali_decimal(contesto)
 
+    for m_int in PATRON_INTERI_PURI.findall(contesto):
+        try:
+            dec_ctx.add(Decimal(m_int))
+        except InvalidOperation:
+            pass
+
     for m in raw_ctx:
         pulito = re.sub(r"[\s\xa0]", "", m)
         norm = _normalizza_separatore_decimale(m)
+        dec_ctx.update(_converti_in_decimal_esatti(pulito))
         if PATRON_MIGLIAIA.match(pulito):
             migliaia_ctx.add(norm)
         else:
             altri_ctx.add(norm)
-            if not pulito.endswith("%") and norm.count(".") == 1:
-                try:
-                    dec_ctx.add(Decimal(norm))
-                except InvalidOperation:
-                    pass
 
     orfane: List[str] = []
     for m in raw_risp:
@@ -78,24 +126,20 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
         c = _normalizza_separatore_decimale(m)
         e_migliaia = bool(PATRON_MIGLIAIA.match(pulito))
 
-        if e_migliaia:
-            if c in migliaia_ctx:
-                continue
+        if e_migliaia and c in migliaia_ctx:
+            continue
+        if not e_migliaia and c in altri_ctx:
+            continue
+        if c.endswith("%"):
+            try:
+                if Decimal(c[:-1]) in pct_ctx:
+                    continue
+            except InvalidOperation:
+                pass
         else:
-            if c in altri_ctx:
+            candidati_dec = _converti_in_decimal_esatti(pulito)
+            if candidati_dec and (candidati_dec & dec_ctx):
                 continue
-            if c.endswith("%"):
-                try:
-                    if Decimal(c[:-1]) in pct_ctx:
-                        continue
-                except InvalidOperation:
-                    pass
-            elif c.count(".") == 1:
-                try:
-                    if Decimal(c) in dec_ctx:
-                        continue
-                except InvalidOperation:
-                    pass
         orfane.append(c)
     return sorted(set(orfane))
 

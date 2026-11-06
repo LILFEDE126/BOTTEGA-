@@ -2,6 +2,7 @@
 """Layer 4 (THE): Multilingual Streamlit Dashboard (EN / ES / IT) with Free Cloud APIs,
 automatic submodule hot-reload, automatic API key detection, live streaming and PDF archive."""
 
+import hashlib
 import importlib
 import re
 import tempfile
@@ -23,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.06.v5"
+_VERSIONE_MODULI_THE = "2026.11.06.v6"
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -186,6 +187,9 @@ with st.sidebar:
             if nome_f not in {f.name for f in files_da_elaborare}
         )
 
+        ram_globale = _conta_frammenti_ram_sicuro()
+        nuovi_elaborati_ora = 0
+
         for singolo_file in files_da_elaborare:
             raw_bytes = singolo_file.getvalue()
             dim_file = len(raw_bytes)
@@ -203,18 +207,18 @@ with st.sidebar:
                 continue
 
             bytes_totali_correnti += dim_file
-            chiave_doc = f"{dominio_doc}:{singolo_file.name}:{dim_file}"
+            sha_file = hashlib.sha256(raw_bytes).hexdigest()
+            chiave_doc = f"{dominio_doc}:{sha_file}"
             info_esistente = archivio_sess.get(singolo_file.name)
-            in_ram = _conta_frammenti_ram_sicuro(singolo_file.name)
 
             if (
-                clic_salva
-                or info_esistente is None
+                info_esistente is None
                 or info_esistente.get("chiave") != chiave_doc
-                or in_ram == 0
+                or ram_globale == 0
             ):
                 try:
                     blocchi_doc = store_pgvector.estrai_blocchi_documento(singolo_file.name, raw_bytes)
+                    n_ins = 0
                     if not blocchi_doc:
                         st.warning(f"No readable text found in '{singolo_file.name}'.")
                     else:
@@ -223,33 +227,43 @@ with st.sidebar:
                         except psycopg2.Error:
                             pass
                         n_ins = store_pgvector.incasella_e_salva(dominio_doc, singolo_file.name, blocchi_doc)
-                        archivio_sess[singolo_file.name] = {
-                            "chiave": chiave_doc,
-                            "dominio": dominio_doc,
-                            "raw_bytes": raw_bytes,
-                            "size_bytes": dim_file,
-                            "n_frammenti": len(blocchi_doc),
-                            "n_nuovi": n_ins,
-                        }
+                        ram_globale = _conta_frammenti_ram_sicuro()
+                    archivio_sess[singolo_file.name] = {
+                        "chiave": chiave_doc,
+                        "dominio": dominio_doc,
+                        "blocchi": blocchi_doc,
+                        "size_bytes": dim_file,
+                        "n_frammenti": len(blocchi_doc),
+                        "n_nuovi": n_ins,
+                    }
+                    nuovi_elaborati_ora += 1
                 except Exception as err:
                     logging_bottega.log_exception(
                         "Errore indicizzazione documento caricato", "APP_DOC_001", err
                     )
                     st.error(f"Could not read document '{singolo_file.name}': {err}")
 
+        if clic_salva and nuovi_elaborati_ora == 0 and archivio_sess:
+            st.toast("All uploaded documents are already indexed and active in the Archive!")
+
     archivio_attivo = st.session_state.get("documenti_archivio_sessione", {})
     if archivio_attivo:
         tot_docs = len(archivio_attivo)
-        tot_frammenti = sum(v["n_frammenti"] for v in archivio_attivo.values())
+        tot_frammenti_ram = _conta_frammenti_ram_sicuro()
+        tot_frammenti = tot_frammenti_ram if tot_frammenti_ram > 0 else sum(
+            v["n_frammenti"] for v in archivio_attivo.values()
+        )
         tot_mb = sum(v["size_bytes"] for v in archivio_attivo.values()) / (1024 * 1024)
         st.success(
             f"Active Archive: {tot_docs}/{max_docs} documents indexed "
-            f"({tot_frammenti} total fragments, {tot_mb:.2f} MB / {max_mb} MB)."
+            f"({tot_frammenti} unique fragments in memory, {tot_mb:.2f} MB / {max_mb} MB)."
         )
         with st.expander(f"Loaded Documents ({tot_docs}/{max_docs})"):
             for idx_d, (nome_d, meta_d) in enumerate(archivio_attivo.items(), start=1):
+                n_new = meta_d.get("n_nuovi", meta_d["n_frammenti"])
+                nota_dup = " [duplicate deduplicated]" if (n_new == 0 and meta_d["n_frammenti"] > 0) else ""
                 st.caption(
-                    f"{idx_d}. {nome_d} — {meta_d['n_frammenti']} fragments "
+                    f"{idx_d}. {nome_d} — {n_new} new / {meta_d['n_frammenti']} fragments{nota_dup} "
                     f"({meta_d['dominio']}, {meta_d['size_bytes'] / (1024 * 1024):.2f} MB)"
                 )
             if st.button("Clear All Uploaded Documents"):
@@ -366,14 +380,25 @@ with tab_artigiano:
             lista_escluse = [
                 riga.strip() for riga in ipotesi_escluse_input.splitlines() if riga.strip()
             ]
-            cercatore_fn = _cercatore_cascata_ui if attiva_ricerca else None
+            cercatore_fn = (
+                (lambda q: _cercatore_cascata_ui(f"{problema_utente} {q}"))
+                if attiva_ricerca
+                else None
+            )
             try:
                 with st.status("Streaming diagnostic analysis (PDF Archive, RAG Semaphore & Write Barrier)...", expanded=True) as stato_diag:
-                    for nome_sync, meta_sync in st.session_state.get("documenti_archivio_sessione", {}).items():
-                        if _conta_frammenti_ram_sicuro(nome_sync) == 0:
-                            blocchi_sync = store_pgvector.estrai_blocchi_documento(
-                                nome_sync, meta_sync["raw_bytes"]
-                            )
+                    if not attiva_ricerca and hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
+                        store_pgvector._ARCHIVIO_MEMORIA_RAM[:] = [
+                            x for x in store_pgvector._ARCHIVIO_MEMORIA_RAM
+                            if not str(x.get("titolo", "")).startswith("Ricerca:")
+                        ]
+                    if _conta_frammenti_ram_sicuro() == 0:
+                        for nome_sync, meta_sync in st.session_state.get("documenti_archivio_sessione", {}).items():
+                            blocchi_sync = meta_sync.get("blocchi")
+                            if blocchi_sync is None and "raw_bytes" in meta_sync:
+                                blocchi_sync = store_pgvector.estrai_blocchi_documento(
+                                    nome_sync, meta_sync["raw_bytes"]
+                                )
                             if blocchi_sync:
                                 store_pgvector.incasella_e_salva(
                                     meta_sync["dominio"], nome_sync, blocchi_sync

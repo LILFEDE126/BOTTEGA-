@@ -76,6 +76,49 @@ GLOSSARIO_MULTILINGUA_IT = {
     "porcentaje": "percentuale",
     "requirements": "requisiti",
     "requisitos": "requisiti",
+    "rent": "fitto fitti",
+    "prepaid": "risconto attivo",
+    "august": "agosto",
+    "december": "dicembre",
+    "legal": "legali",
+    "fee": "parcella spese",
+    "withholding": "ritenuta",
+    "supplier": "fornitori",
+    "inventory": "rimanenze magazzino",
+    "march": "marzo",
+    "weighted": "ponderato",
+    "average": "medio",
+    "purchase": "acquisto",
+    "issue": "scarico",
+    "units": "unita",
+    "maquinaria": "macchinario",
+    "machinery": "macchinario",
+    "amortizada": "ammortizzato",
+    "plusvalía": "plusvalenza",
+    "plusvalia": "plusvalenza",
+    "minusvalía": "minusvalenza",
+    "minusvalia": "minusvalenza",
+    "histórico": "storico",
+    "historico": "storico",
+    "contable": "contabile",
+    "deudas": "debiti",
+    "plazo": "scadenza",
+    "tasa": "tasso",
+    "interés": "interesse",
+    "interes": "interesse",
+    "intereses": "interessi",
+    "amortizado": "ammortizzato",
+    "actualizarse": "attualizzazione",
+    "crédito": "credito",
+    "vencimiento": "scadenza",
+    "días": "giorni",
+    "dias": "giorni",
+    "banco": "banca",
+    "gastos": "oneri",
+    "comisiones": "commissioni",
+    "anticipo": "anticipo",
+    "facturas": "fatture",
+    "arrendamiento": "leasing",
 }
 
 PAROLE_SPIA_LINGUA = {
@@ -93,10 +136,11 @@ PAROLE_SPIA_LINGUA = {
         "espagnol", "hablame", "háblame", "favor", "responde",
     },
     "it": {
-        "che", "come", "quando", "dove", "quale", "quali", "quanto", "della", "nella",
-        "delle", "degli", "dallo", "sulla", "sono", "calcola", "dichiarato", "documento",
+        "che", "come", "quando", "dove", "quale", "quali", "quanto", "cosa", "della", "nella",
+        "delle", "degli", "dallo", "sulla", "alla", "nelle", "negli", "sui", "nei", "dal",
+        "sono", "calcola", "dichiarato", "documento", "prevede", "nuovo", "nuovi", "entrato",
         "maglia", "pantaloncino", "caldaia", "pressione", "dazio", "impianto", "perdita",
-        "italiano", "rispondi",
+        "italiano", "rispondi", "per", "il", "gli", "un", "una",
     },
 }
 
@@ -124,7 +168,7 @@ def rileva_lingua_testo(testo: str) -> str:
         punteggi["es"] += 3
     if any(w in tokens for w in ("what", "which", "according", "how", "where", "why")):
         punteggi["en"] += 2
-    if any(w in tokens for w in ("qual", "quale", "quali", "quanto", "della", "nella")):
+    if any(w in tokens for w in ("qual", "quale", "quali", "quanto", "cosa", "della", "nella", "delle", "alla")):
         punteggi["it"] += 2
 
     migliore = max(punteggi, key=punteggi.get)

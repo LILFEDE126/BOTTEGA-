@@ -129,20 +129,124 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "10.000-15.000 euro, coperto al 50% entro il tetto di 10.000,00 euro). Sono invece escluse le spese di "
         "pubblicita' tradizionale, materiale cartaceo e tipografia (come le brochure stimate 1.500 euro).",
     ),
+    (
+        "Nuovo Principio Contabile OIC 34 sui Ricavi (2024) e Unita' Elementari di Contabilizzazione",
+        "Il nuovo principio contabile nazionale OIC 34 (Ricavi), entrato in vigore per i bilanci degli esercizi "
+        "aventi inizio dal 1 gennaio 2024, introduce un modello organico per la rilevazione e valorizzazione dei "
+        "ricavi da vendita di beni e prestazione di servizi. Per i contratti complessi (a prestazioni multiple), "
+        "l'OIC 34 impone di scomporre (segmentare) il contratto identificando le singole 'unita' elementari di "
+        "contabilizzazione' (ciascun bene, servizio o diritto distinto promesso al cliente) e di allocare il prezzo "
+        "complessivo del contratto a ciascuna unita' elementare in proporzione ai rispettivi prezzi di vendita "
+        "autonomi (stand-alone). Il ricavo per la vendita di beni viene rilevato al trasferimento sostanziale dei "
+        "rischi e dei benefici (oltre al trasferimento del titolo), mentre il ricavo per i servizi viene rilevato "
+        "in base allo stato di avanzamento se il diritto al corrispettivo matura progressivamente. Le societa' che "
+        "redigono il bilancio in forma abbreviata (art. 2435-bis c.c.) e le micro-imprese (art. 2435-ter c.c.) "
+        "possono non separare le unita' elementari se i rischi e benefici sono trasferiti contestualmente.",
+    ),
+    (
+        "Nuovi Limiti Bilancio Abbreviato (art. 2435-bis c.c.) e Micro-imprese (art. 2435-ter c.c.) D.Lgs. 125/2024",
+        "Il D.Lgs. 6 settembre 2024, n. 125 (D.Lgs. 125/2024), recependo la Direttiva Delegata UE 2023/2775, "
+        "ha aumentato del 25% i limiti dimensionali di stato patrimoniale e ricavi per i bilanci semplificati in Italia: "
+        "1) Bilancio in forma abbreviata (art. 2435-bis c.c.): totale dell'attivo dello stato patrimoniale innalzato "
+        "da 4.400.000 euro a 5.500.000 euro; ricavi delle vendite e delle prestazioni innalzati da 8.800.000 euro a "
+        "11.000.000 euro; dipendenti occupati in media durante l'esercizio invariati a 50 unita' (richiesto il non "
+        "superamento di almeno 2 dei 3 limiti nel primo esercizio o per 2 esercizi consecutivi). "
+        "2) Bilancio delle micro-imprese (art. 2435-ter c.c.): totale dell'attivo dello stato patrimoniale innalzato "
+        "da 175.000 euro a 220.000 euro; ricavi delle vendite e delle prestazioni innalzati da 350.000 euro a "
+        "440.000 euro; dipendenti occupati in media durante l'esercizio invariati a 5 unita'.",
+    ),
+    (
+        "Norma Internacional NIIF 16 (IFRS 16) Right-of-Use vs Metodo Patrimoniale Leasing Codice Civile Italiano",
+        "Nella contabilizzazione del leasing (arrendamiento financiero) per il locatario/utilizzatore (arrendatario), "
+        "la differenza fondamentale tra il principio internazionale NIIF 16 (IFRS 16) e il metodo patrimoniale del "
+        "codice civile italiano (OIC 12 / art. 2427 n. 22 c.c.) risiede nella prevalenza della sostanza sulla forma: "
+        "1) NIIF 16 / IFRS 16 (metodo finanziario unico / Right-of-Use model): elimina per il locatario la distinzione "
+        "tra leasing operativo e finanziario e impone di iscrivere nello Stato Patrimoniale (Balance) l'attivo per "
+        "diritto d'uso (Right-of-Use asset / activo por derecho de uso) nell'attivo e la corrispondente passivita' "
+        "finanziaria per leasing (lease liability / pasivo por arrendamiento) al valore attuale dei canoni futuri "
+        "nel passivo, rilevando a Conto Economico l'ammortamento del diritto d'uso e gli interessi passivi finanziari "
+        "(con esenzione facoltativa per contratti di durata fino a 12 mesi o beni di modico valore fino a 5.000 USD). "
+        "2) Metodo patrimoniale (codice civile italiano): il bene resta iscritto nell'attivo del bilancio della "
+        "societa' di leasing concedente (locatore) che lo ammortizza, mentre l'impresa utilizzatrice (locatario) "
+        "non iscrive il bene ne' il debito nello Stato Patrimoniale, ma rileva unicamente i canoni periodici di "
+        "leasing a Conto Economico (voce B8 per godimento di beni di terzi, con risconto attivo per l'eventuale "
+        "maxicanone iniziale) e fornisce nella Nota Integrativa (art. 2427 n. 22 c.c.) il prospetto degli effetti "
+        "del metodo finanziario.",
+    ),
+    (
+        "Impuesto sobre Sociedades en Espana 2026 (25%) y Reglamento Tecnico Verifactu Agencia Tributaria",
+        "En Espana (Ley 27/2014 del Impuesto sobre Sociedades y reformas de la Ley 7/2024), el tipo de gravamen "
+        "general vigente del Impuesto sobre Sociedades en 2026 es del 25% sobre la base imponible (con un tipo "
+        "reducido del 15% para entidades de nueva creacion en el primer periodo impositivo con base positiva y en "
+        "el siguiente, y tipos reducidos progresivos entre el 20% y el 24% para microempresas con cifra de negocios "
+        "inferior a 1.000.000 euros y entidades de reducida dimension). "
+        "El reglamento tecnico Verifactu (Real Decreto 1007/2023 y Orden HAC/1177/2024 de la Agencia Tributaria - AEAT, "
+        "en desarrollo de la Ley Antifraude 11/2021) exige que los sistemas informaticos de facturacion (SIF) "
+        "garanticen la integridad, conservacion, accesibilidad, legibilidad, trazabilidad e inalterabilidad de los "
+        "registros de facturacion mediante: 1) generacion automatica de un registro de facturacion de alta o de "
+        "anulacion con huella digital criptografica encadenada (hash SHA-256 vinculado al registro anterior) y "
+        "firma electronica; 2) inclusion obligatoria de un codigo QR tributario verificable en cada factura; "
+        "3) capacidad de remision electronica inmediata y continuada de los registros a la Agencia Tributaria "
+        "(modalidad VERI*FACTU).",
+    ),
+    (
+        "IFRS 18 Presentation and Disclosure in Financial Statements (Replacing IAS 1) Three Mandatory Categories",
+        "Issued by the IASB in April 2024 (effective from 1 January 2027, replacing IAS 1), the new accounting "
+        "standard IFRS 18 (Presentation and Disclosure in Financial Statements) introduces 3 (three) new mandatory "
+        "categories for classifying income and expenses in the statement of profit or loss (income statement): "
+        "1) Operating category: the default category capturing all income and expenses from the entity's main "
+        "business activities that are not classified in the investing or financing categories; "
+        "2) Investing category: income and expenses from investments in associates, joint ventures and unconsolidated "
+        "subsidiaries, cash and cash equivalents, and other assets that generate a return individually and largely "
+        "independently of the entity's other resources; "
+        "3) Financing category: income and expenses from liabilities arising from transactions that involve only "
+        "the raising of finance (such as bank loans and bonds) as well as interest expense and effects of changes "
+        "in interest rates on other liabilities (such as lease liabilities and pension obligations). "
+        "IFRS 18 also requires two new mandatory subtotals in the statement of profit or loss ('Operating profit "
+        "or loss' and 'Profit or loss before financing and income taxes') and strict disclosures for "
+        "Management-defined Performance Measures (MPMs).",
+    ),
+    (
+        "EU Corporate Sustainability Reporting Directive (CSRD 2022/2464) & ESRS Double Materiality Principle",
+        "Under the EU Corporate Sustainability Reporting Directive (CSRD, Directive EU 2022/2464) and the European "
+        "Sustainability Reporting Standards (ESRS 1), companies must apply the principle of 'double materiality' "
+        "(doppia materialita'), which requires assessing sustainability matters across 2 (two) dimensions: "
+        "1) Impact materiality (inside-out perspective): a sustainability matter is material from an impact "
+        "perspective if it pertains to the undertaking's actual or potential, positive or negative significant "
+        "impacts on people or the environment over the short-, medium-, or long-term (including across its "
+        "upstream and downstream value chain); "
+        "2) Financial materiality (outside-in perspective): a sustainability matter is material from a financial "
+        "perspective if it triggers or could reasonably be expected to trigger significant financial effects on "
+        "the undertaking (risks and opportunities affecting cash flows, development, performance, position, cost "
+        "of capital, or access to finance over the short-, medium-, or long-term). "
+        "An undertaking must report on a sustainability topic if it is material from either the impact perspective, "
+        "the financial perspective, or both.",
+    ),
 ]
+
+STOPWORDS_PRONTUARIO = {
+    "normativa", "principio", "contabile", "contabili", "sistema", "sistemi",
+    "azienda", "aziende", "impresa", "imprese", "secondo", "qual", "quale",
+    "quali", "cosa", "come", "what", "which", "under", "cual", "como",
+}
 
 
 def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
     """Checks the internal certified regulatory/technical handbook for exact keyword matches."""
     query_tradotta = traduci_query_per_ricerca(query)
-    parole = {p.lower() for p in query_tradotta.split() if len(p) >= 4}
-    trovati: List[Tuple[str, str]] = []
+    token_grezzi = re.findall(r"\d+(?:[.,/-]\d+)+|\w+", query_tradotta.lower())
+    parole = {
+        p for p in token_grezzi
+        if (len(p) >= 4 or (len(p) >= 2 and p[0].isdigit())) and p not in STOPWORDS_PRONTUARIO
+    }
+    valutati: List[Tuple[int, str, str]] = []
     for sezione, testo in PRONTUARIO_ESTERNO_SOCCORSO:
         blocco_lower = f"{sezione} {testo}".lower()
-        match_n = sum(1 for p in parole if p in blocco_lower)
+        match_n = sum(2 if any(c.isdigit() for c in p) else 1 for p in parole if p in blocco_lower)
         if match_n >= 2 or (match_n == 1 and len(parole) <= 3):
-            trovati.append((sezione, testo))
-    return trovati
+            valutati.append((match_n, sezione, testo))
+    valutati.sort(key=lambda item: item[0], reverse=True)
+    return [(sez, txt) for _, sez, txt in valutati[:1]]
 
 
 def cerca_nel_prontuario_esterno(

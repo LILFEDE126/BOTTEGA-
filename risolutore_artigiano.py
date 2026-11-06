@@ -384,7 +384,8 @@ def risolvi_da_artigiano(
             piano = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
 
         if cercatore_esterno_fn is not None:
-            nuovi_blocchi = cercatore_esterno_fn(piano.query_chirurgica_esterna)
+            query_ricerca_est = f"{problema} {piano.query_chirurgica_esterna}".strip()
+            nuovi_blocchi = cercatore_esterno_fn(query_ricerca_est)
             if nuovi_blocchi:
                 ricerca_esterna_eseguita = True
                 try:
