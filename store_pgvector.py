@@ -68,8 +68,25 @@ def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
     return sum(1 for item in _ARCHIVIO_MEMORIA_RAM if item.get("titolo") == titolo)
 
 
+def normalizza_spazi_testo_pdf(testo: str) -> str:
+    """Repairs missing spaces between glued words, numbers, currencies, and punctuation in justified PDFs."""
+    if not testo:
+        return ""
+    t = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo)
+    t = re.sub(r"([a-zA-Zàèéìòùáéíóúñ]{2,})(\d)", r"\1 \2", t)
+    t = re.sub(r"(\d)(€)", r"\1 \2", t)
+    t = re.sub(r"(€)(\d)", r"\1 \2", t)
+    t = re.sub(r"(\d|%|€)([a-zA-Zàèéìòùáéíóúñ]{2,})", r"\1 \2", t)
+    t = re.sub(r"\b(euro)([a-zA-Zàèéìòùáéíóúñ]+)", r"\1 \2", t, flags=re.IGNORECASE)
+    t = re.sub(r"([,:;])([a-zA-Zàèéìòùáéíóúñ€])", r"\1 \2", t)
+    t = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", t)
+    t = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", t)
+    return t
+
+
 def _suddividi_testo_in_blocchi(testo: str, prefisso: str, max_caratteri: int = 2000) -> List[Tuple[str, str]]:
     """Splits a page or document text into clean semantic paragraphs bounded by max_caratteri."""
+    testo = normalizza_spazi_testo_pdf(testo)
     paragrafi_grezzi = [p.strip() for p in re.split(r"\n\s*\n", testo) if p.strip()]
     if not paragrafi_grezzi and testo.strip():
         paragrafi_grezzi = [testo.strip()]

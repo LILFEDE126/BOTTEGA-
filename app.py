@@ -23,7 +23,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.06.v4"
+_VERSIONE_MODULI_THE = "2026.11.06.v5"
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -32,6 +32,7 @@ def _allinea_moduli_in_memoria() -> None:
     necessita_reload = (
         st.session_state.get("_versione_moduli_the") != _VERSIONE_MODULI_THE
         or not hasattr(store_pgvector, "conta_frammenti_archivio_ram")
+        or not hasattr(store_pgvector, "normalizza_spazi_testo_pdf")
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
         or not hasattr(config, "risolvi_chiave_api")
     )
@@ -57,6 +58,9 @@ def _allinea_moduli_in_memoria() -> None:
         importlib.reload(modulo)
 
     if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
+        for voce in archivio_precedente:
+            if "testo" in voce:
+                voce["testo"] = store_pgvector.normalizza_spazi_testo_pdf(voce["testo"])
         store_pgvector._ARCHIVIO_MEMORIA_RAM.extend(archivio_precedente)
 
     st.session_state["_versione_moduli_the"] = _VERSIONE_MODULI_THE

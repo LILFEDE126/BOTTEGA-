@@ -8,10 +8,10 @@ from typing import List, Set, Tuple
 
 PATRON_NUM = re.compile(
     r"\d+(?:[.,]\d+)?\s*%"
-    r"|\b\d{1,3}(?:\.\d{3})+(?:,\d+)?\b"
-    r"|\b\d{8,10}\b"
-    r"|\b(?:19|20)\d{2}\b"
-    r"|\b\d+[.,]\d+\b"
+    r"|(?<!\d)\d{1,3}(?:\.\d{3})+(?:,\d+)?(?!\d)"
+    r"|(?<!\d)\d{8,10}(?!\d)"
+    r"|(?<!\d)(?:19|20)\d{2}(?!\d)"
+    r"|(?<!\d)\d+[.,]\d+(?!\d)"
 )
 PATRON_PERCENTUALE = re.compile(r"\d+(?:[.,]\d+)?\s*%")
 PATRON_MIGLIAIA = re.compile(r"^\d{1,3}(?:\.\d{3})+(?:,\d+)?$")

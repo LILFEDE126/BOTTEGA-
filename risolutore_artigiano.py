@@ -12,6 +12,7 @@ from logging_bottega import log
 from grounding_numerico import (
     arrotonda_esatto_el_x8,
     classifica_nodo_tricolore,
+    estrai_percentuali_decimal,
     verifica_conservazione_percentuali_decimal,
 )
 from store_pgvector import incasella_e_salva, recupera_con_semaforo
@@ -501,12 +502,12 @@ def risolvi_da_artigiano(
     contesto_totale = f"{problema}\n{contesto_rag}"
     colore_nodo, cifre_errate = classifica_nodo_tricolore(testo_uscita, contesto_totale)
 
-    fonte_pct_riferimento = (
-        contesto_totale
-        if len(rag.get("frammenti", [])) <= 1
-        else f"{problema}\n{soluzione.principio_guida_unico}"
-    )
-    pct_ok = verifica_conservazione_percentuali_decimal(testo_uscita, fonte_pct_riferimento)
+    pct_uscita = estrai_percentuali_decimal(testo_uscita)
+    pct_contesto = estrai_percentuali_decimal(contesto_totale)
+    if len(rag.get("frammenti", [])) <= 1:
+        pct_ok = verifica_conservazione_percentuali_decimal(testo_uscita, contesto_totale) and pct_uscita.issubset(pct_contesto)
+    else:
+        pct_ok = pct_uscita.issubset(pct_contesto)
 
     if not pct_ok and colore_nodo == "NERO":
         colore_nodo = "GRIGIO"

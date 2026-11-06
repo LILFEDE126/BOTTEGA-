@@ -857,3 +857,69 @@ def test_nodo_nero_ewd496a_con_frammenti_scartati_risposta_monolingua_en_es_e_30
     assert "Risposta e Diagnosi Principale" not in esito_es["risposta_discorsiva"]
 
 
+def test_normalizzazione_spazi_pdf_incollati_e_barriera_numerica_su_contesto_reale(monkeypatch):
+    testo_incollato = (
+        "Siimmaginaunbudgetstimatotrai10-15.000euro(preventivodarealizzare) "
+        "Adoggi,ilprezzoimpostoalmercatosumagliapiùpantaloncinoèdi40euro,conun "
+        "marginecheoscillatrai15ei20euroapezzo. 1.9a ModellodiBusiness "
+        "50%deicostisostenutiedentroillimitemassimodi40.000€perlemicroepiccoleimprese "
+        "BandoVoucherdigitaliI4.0eErroreE04"
+    )
+    normalizzato = store_pgvector.normalizza_spazi_testo_pdf(testo_incollato)
+    assert "trai 10-15.000 euro (preventivodarealizzare)" in normalizzato
+    assert "di 40 euro, conun" in normalizzato
+    assert "trai 15 ei 20 euro apezzo" in normalizzato
+    assert "50% deicostisostenutiedentroillimitemassimodi 40.000 € perlemicroepiccoleimprese" in normalizzato
+    assert "1.9a Modellodi Business" in normalizzato
+    assert "I4.0" in normalizzato
+    assert "E04" in normalizzato
+
+    assert verifica_grounding_numerico(
+        "Il budget e' 15.000 euro, il contributo 50% fino a 40.000 euro al punto 1.9.",
+        testo_incollato,
+    ) == []
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="tecnico", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.95,
+            "frammenti": [
+                {
+                    "id": 2,
+                    "testo": "4. Bando Nazionale Innovation Manager 2023 contratti non inferiore a nove mesi.",
+                },
+                {
+                    "id": 5,
+                    "testo": "50%deicostisostenutiedentroillimitemassimodi40.000€perlemicroepiccoleimprese.",
+                },
+            ],
+        },
+    )
+
+    def finto_llm_innovation_manager(sys_p, usr_p, schema):
+        return risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "Il contributo copre il 50% dei costi sostenuti fino a un massimo di 40.000 euro per le micro e piccole imprese."
+            ),
+            principio_guida_unico="Bando Nazionale Innovation Manager 2023 (Frammento 2 e 5)",
+            elementi_scartati_per_non_fare_mucchio=["Bando Voucher digitali I4.0 - Reggio Emilia"],
+            precondizione_wp_richiesta="Contratto di consulenza non inferiore a nove mesi",
+            invariante_violato="Equilibrio tra qualificazione del consulente e ammissibilita' spesa",
+            ipotesi_causale_unica="Necessita' di iscrizione nell'elenco ministeriale",
+            azione_correttiva_singola="Verificare iscrizione del consulente nell'elenco del Ministero",
+            esperimento_di_verifica_pratica="Controllare presenza nominativo nell'elenco pubblico",
+        )
+
+    esito_im = risolutore_artigiano.risolvi_da_artigiano(
+        "Quali sono i requisiti aggiornati del Ministero delle Imprese per i voucher di consulenza in innovazione?",
+        dominio="tecnico",
+        llm_fn=finto_llm_innovation_manager,
+    )
+    assert esito_im["colore_nodo_ewd496a"] == "NERO"
+    assert esito_im["percentuali_conservate"] is True
+    assert esito_im["cifre_non_ancorate"] == []
+
+
+
