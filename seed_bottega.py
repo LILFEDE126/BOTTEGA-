@@ -14,7 +14,7 @@ from client_ollama import rileva_lingua_testo, traduci_query_per_ricerca
 
 CORPUS_INGEGNERIA = [
     (
-        "leonardo",
+        "generale",
         "Metodo Empirico, Principio di Necessita' e Diagnostica Idraulica",
         [
             (
@@ -47,7 +47,7 @@ CORPUS_INGEGNERIA = [
         ],
     ),
     (
-        "antirez",
+        "tecnico",
         "Guardrail, Concorrenza e Diagnostica di Produzione",
         [
             (
@@ -72,7 +72,7 @@ CORPUS_INGEGNERIA = [
         ],
     ),
     (
-        "dijkstra",
+        "normativo",
         "Correttezza Costruttiva a Priori, Gerarchia THE e Quadratura Contabile/Doganale",
         [
             (
@@ -127,10 +127,6 @@ def cerca_nel_prontuario_esterno(
     provider: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
-    """Cascata di ricerca a 3 livelli (Opzione B + Opzione A in fallback automatico) con URL puri:
-    0. Prontuario Tecnico locale certificato;
-    1. Opzione B (Web Search AI Grounding via Gemini o OpenRouter :online) se c'e' chiave API;
-    2. Opzione A (Ricerca Web Diretta Zero-Key: DuckDuckGo JSON API + Wikipedia IT API JSON)."""
     query_tradotta = traduci_query_per_ricerca(query)
     parole = {p.lower() for p in query_tradotta.split() if len(p) >= 4}
     trovati: List[Tuple[str, str]] = []
@@ -157,7 +153,7 @@ def cerca_nel_prontuario_esterno(
                         {
                             "parts": [
                                 {
-                                    "text": f"Cerca sul web dati tecnici ufficiali e numeri esatti per: {query}"
+                                    "text": f"Search the web for official technical facts and exact numbers for: {query}"
                                 }
                             ]
                         }
@@ -180,7 +176,7 @@ def cerca_nel_prontuario_esterno(
                         "messages": [
                             {
                                 "role": "user",
-                                "content": f"Riporta solo dati tecnici e numeri verificati dal web per: {query}",
+                                "content": f"Report only verified technical facts and exact numbers from the web for: {query}",
                             }
                         ],
                     },
@@ -198,7 +194,7 @@ def cerca_nel_prontuario_esterno(
         r_ddg = requests.get(
             url_ddg,
             params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
-            headers={"User-Agent": "BottegaLeonardesca/1.0"},
+            headers={"User-Agent": "Bottega/1.0"},
             timeout=10,
         )
         r_ddg.raise_for_status()
@@ -228,7 +224,7 @@ def cerca_nel_prontuario_esterno(
                 "format": "json",
                 "srlimit": 2,
             },
-            headers={"User-Agent": "BottegaLeonardesca/1.0"},
+            headers={"User-Agent": "Bottega/1.0"},
             timeout=10,
         )
         res.raise_for_status()
@@ -245,11 +241,10 @@ def cerca_nel_prontuario_esterno(
 
 
 def esegui_seed() -> None:
-    """Crea le tabelle su PostgreSQL e indicizza il corpus completo dei tre maestri."""
     log.info("1/2 Inizializzazione schema PostgreSQL + pgvector...", extra={"code": "SEED_START_001"})
     inizializza_schema()
 
-    log.info("2/2 Indicizzazione Corpus Ingegneristico (Leonardo, antirez, Dijkstra EWD)...", extra={"code": "SEED_ING_001"})
+    log.info("2/2 Indicizzazione Corpus...", extra={"code": "SEED_ING_001"})
     totale_nuovi = 0
     for dominio, titolo, blocchi in CORPUS_INGEGNERIA:
         inseriti = incasella_e_salva(dominio, titolo, blocchi)

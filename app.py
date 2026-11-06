@@ -36,8 +36,8 @@ PROMPT_TASCHINO_UNIVERSALE = (
     "4. LANGUAGE: Always reply in the exact same language used by the user (EN, ES, IT, etc.)."
 )
 
-st.set_page_config(page_title="Bottega Leonardesca & THE Engine", layout="wide")
-st.title("Bottega Leonardesca — THE Architecture (EWD196), Hybrid RRF RAG & Diagnostic Solver")
+st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
+st.title("Bottega — Engine & Diagnostic Solver")
 st.caption("Multilingual Input Enabled: Write in English, Español, Italiano or any language — search is automatically translated.")
 
 with st.sidebar:
@@ -66,7 +66,7 @@ with st.sidebar:
     st.header("2. Local PostgreSQL Archive")
     dominio_doc = st.selectbox(
         "Target Domain:",
-        ["leonardo", "dijkstra", "antirez"],
+        ["generale", "tecnico", "normativo"],
         key="dom_upload",
     )
     file_caricato = st.file_uploader(
@@ -179,7 +179,7 @@ with tab_artigiano:
     )
     col_a, col_b = st.columns(2)
     with col_a:
-        dominio_scelto = st.selectbox("Guiding Domain:", ["leonardo", "dijkstra", "antirez"])
+        dominio_scelto = st.selectbox("Guiding Domain:", ["generale", "tecnico", "normativo"])
         attiva_ricerca = st.checkbox(
             "Enable cascading external search (Handbook -> AI Web Search -> DuckDuckGo/Wikipedia) on ROJO",
             value=True,

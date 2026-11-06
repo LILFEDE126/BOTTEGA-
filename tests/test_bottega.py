@@ -41,7 +41,6 @@ class _SchemaTest(BaseModel):
 
 
 def _trova_radice_progetto() -> Path:
-    """Finds the directory containing config.py whether run from tests/ or project root."""
     corrente = Path(__file__).resolve().parent
     if (corrente / "config.py").is_file():
         return corrente
@@ -88,8 +87,6 @@ def test_gerarchia_aciclica_the_ewd196_sui_file_reali():
 
 
 def test_zero_commenti_cancelletto_nei_moduli_sorgente():
-    """JISO TARIC discipline: verifies that none of the 13 application modules contain inline '#'
-    comments (except the '#!/usr/bin/env python3' shebang on line 1)."""
     radice = _trova_radice_progetto()
     for nome_modulo in GERARCHIA_LIVELLI_THE:
         percorso = radice / f"{nome_modulo}.py"
@@ -106,7 +103,6 @@ def test_zero_commenti_cancelletto_nei_moduli_sorgente():
 
 
 def test_traduzione_query_multilingua_en_es_it():
-    """Verifies that queries written in English or Spanish are translated to match the Italian handbook."""
     assert client_ollama.rileva_lingua_testo("How to fix boiler pressure drop when cold?") == "en"
     assert client_ollama.rileva_lingua_testo("¿Qué arancel aplica a la caldera con pérdida de presión?") == "es"
     assert client_ollama.rileva_lingua_testo("Perdita di pressione della caldaia a freddo") == "it"
@@ -130,20 +126,20 @@ def test_algoritmo_del_banchiere_ewd116_stato_sicuro_e_insicuro():
 
 def test_segretario_the_holyness_counter_ewd113_e_banchiere():
     segretario = PresidioConcorrenzaTHE(capitale_slot=2)
-    assert segretario.holyness_di("dijkstra") == 0
-    assert segretario.puo_essere_vittima("dijkstra") is True
+    assert segretario.holyness_di("generale") == 0
+    assert segretario.puo_essere_vittima("generale") is True
 
-    with segretario.sezione_sacra("dijkstra", fabbisogno_massimo=2):
-        assert segretario.holyness_di("dijkstra") == 1
-        assert segretario.puo_essere_vittima("dijkstra") is False
+    with segretario.sezione_sacra("generale", fabbisogno_massimo=2):
+        assert segretario.holyness_di("generale") == 1
+        assert segretario.puo_essere_vittima("generale") is False
 
-    assert segretario.holyness_di("dijkstra") == 0
-    assert segretario.puo_essere_vittima("dijkstra") is True
+    assert segretario.holyness_di("generale") == 0
+    assert segretario.puo_essere_vittima("generale") is True
 
     with pytest.raises(RuntimeError, match="Violazione EWD116"):
-        with segretario.sezione_sacra("dijkstra", fabbisogno_massimo=5):
+        with segretario.sezione_sacra("generale", fabbisogno_massimo=5):
             pass
-    assert segretario.holyness_di("dijkstra") == 0
+    assert segretario.holyness_di("generale") == 0
 
 
 def test_arrotondamento_esatto_el_x8_ewd145_e_conservazione_percentuali():
@@ -214,9 +210,9 @@ def test_normalizzazione_l2_e_controllo_dimensioni_coseno():
 
 def test_costruisci_testo_ancorato():
     testo = costruisci_testo_ancorato(
-        "leonardo", "Metodo Empirico", "Osservazione", "Misurare l'AST prima di giudicare."
+        "generale", "Metodo Empirico", "Osservazione", "Misurare l'AST prima di giudicare."
     )
-    assert testo.startswith("[LEONARDO] Metodo Empirico > Osservazione\n\n")
+    assert testo.startswith("[GENERALE] Metodo Empirico > Osservazione\n\n")
     assert testo.endswith("Misurare l'AST prima di giudicare.")
 
 
@@ -272,7 +268,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         "post",
         lambda url, json, timeout: _FakeResp(risposte.pop(0)),
     )
-    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
+    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
     assert ris.esito == "riparato"
     assert ris.valore == 42
 
@@ -282,7 +278,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         lambda url, json, timeout: _FakeResp('{"json_rotto": '),
     )
     with pytest.raises(RuntimeError, match="variante t=0"):
-        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
+        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
 
 
 def test_client_cloud_free_gemini_groq_openrouter_compatibilita(monkeypatch):
@@ -476,7 +472,7 @@ def test_risolutore_artigiano_stop_onesto_su_semaforo_rojo(monkeypatch):
     monkeypatch.setattr(
         risolutore_artigiano,
         "recupera_con_semaforo",
-        lambda q, dominio="leonardo", top_k=3: {"semaforo": "ROJO", "s_max": 0.12, "frammenti": []},
+        lambda q, dominio="generale", top_k=3: {"semaforo": "ROJO", "s_max": 0.12, "frammenti": []},
     )
     esito = risolutore_artigiano.risolvi_da_artigiano(
         "La caldaia segna E04 e pressione 0.3 bar",
@@ -496,7 +492,7 @@ def test_risolutore_artigiano_stop_onesto_su_semaforo_rojo(monkeypatch):
 def test_risolutore_artigiano_ciclo_chiuso_cerca_fuori_e_risolve_senza_mucchio(monkeypatch):
     stato_chiamate = {"n": 0}
 
-    def finto_recupera(q, dominio="leonardo", top_k=3):
+    def finto_recupera(q, dominio="generale", top_k=3):
         stato_chiamate["n"] += 1
         if stato_chiamate["n"] == 1:
             return {"semaforo": "ROJO", "s_max": 0.10, "frammenti": []}
@@ -546,7 +542,7 @@ def test_risolutore_artigiano_falsificazione_sul_campo_e_prompt_ponte_web(monkey
     monkeypatch.setattr(
         risolutore_artigiano,
         "recupera_con_semaforo",
-        lambda q, dominio="leonardo", top_k=3: {
+        lambda q, dominio="generale", top_k=3: {
             "semaforo": "VERDE",
             "s_max": 0.82,
             "frammenti": [
