@@ -146,7 +146,7 @@ def cerca_nel_prontuario_esterno(
             if provider_attivo == "gemini":
                 url_gemini = (
                     "https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"gemini-2.5-flash:generateContent?key={chiave_attiva}"
+                    f"gemini-3.5-flash-lite:generateContent?key={chiave_attiva}"
                 )
                 payload_g = {
                     "contents": [

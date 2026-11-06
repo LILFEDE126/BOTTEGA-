@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Layer 4 (THE): Multilingual Streamlit Dashboard (EN / ES / IT) with Free Cloud APIs,
-PDF & document archive uploader (PostgreSQL + Cloud RAM fallback) and Free Web Bridge."""
+automatic API key detection, PDF & document archive uploader and Free Web Bridge."""
 
 import tempfile
 from pathlib import Path
 import psycopg2
 import streamlit as st
 
+from config import LLM_PROVIDER, risolvi_chiave_api
 from logging_bottega import log_exception
 from anatomia_ast import analizza_codice_ast
 from grounding_numerico import (
@@ -39,6 +40,7 @@ PROMPT_TASCHINO_UNIVERSALE = (
 )
 
 DOMINI_DISPONIBILI = ["generale", "tecnico", "normativo"]
+PROVIDERS_DISPONIBILI = ["gemini", "groq", "openrouter", "ollama", "deepseek", "openai"]
 
 st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
 st.title("Bottega — Engine & Diagnostic Solver")
@@ -46,23 +48,43 @@ st.caption("Multilingual Input Enabled: Write in English, Español, Italiano or 
 
 with st.sidebar:
     st.header("1. AI Engine (Local or Free Cloud)")
+    idx_provider_default = (
+        PROVIDERS_DISPONIBILI.index(LLM_PROVIDER)
+        if LLM_PROVIDER in PROVIDERS_DISPONIBILI
+        else 0
+    )
     provider_ui = st.selectbox(
         "Select AI Provider:",
-        ["ollama", "gemini", "groq", "openrouter", "deepseek", "openai"],
+        PROVIDERS_DISPONIBILI,
+        index=idx_provider_default,
         help="Gemini (Google AI Studio), Groq and OpenRouter offer a Free Tier without credit card.",
     )
+    chiave_auto = risolvi_chiave_api()
     api_key_ui = ""
     model_ui = ""
     if provider_ui != "ollama":
-        api_key_ui = st.text_input(
-            f"API Key ({provider_ui.upper()}):",
-            type="password",
-            help="Leave blank if LLM_API_KEY is already set in .env or Streamlit Secrets.",
-        )
-        model_ui = st.text_input(
-            "Model (optional, press Enter for free default):",
-            placeholder="e.g. gemini-2.5-flash or openrouter/free",
-        )
+        if chiave_auto:
+            st.success(f"Automatic {provider_ui.upper()} API Key active (Ready to use).")
+            with st.expander("Optional: Override API Key or Model"):
+                api_key_ui = st.text_input(
+                    f"Custom API Key ({provider_ui.upper()}):",
+                    type="password",
+                    help="Leave blank to use the built-in automatic key.",
+                )
+                model_ui = st.text_input(
+                    "Model (optional, press Enter for default):",
+                    placeholder="e.g. gemini-3.5-flash-lite or openrouter/free",
+                )
+        else:
+            api_key_ui = st.text_input(
+                f"API Key ({provider_ui.upper()}):",
+                type="password",
+                help="Enter your API key or set LLM_API_KEY in .env / Streamlit Secrets.",
+            )
+            model_ui = st.text_input(
+                "Model (optional, press Enter for free default):",
+                placeholder="e.g. gemini-3.5-flash-lite or openrouter/free",
+            )
     else:
         st.caption("Local mode active on 127.0.0.1:11434 (Ollama).")
 
@@ -104,10 +126,12 @@ with st.sidebar:
         if st.session_state.get("ultimo_doc_msg"):
             st.success(st.session_state["ultimo_doc_msg"])
 
+chiave_effettiva_ui = api_key_ui.strip() if api_key_ui.strip() else (chiave_auto if provider_ui != "ollama" else None)
+
 llm_selezionato_fn = costruisci_llm_fn(
     provider=provider_ui,
-    api_key=api_key_ui if api_key_ui else None,
-    model=model_ui if model_ui else None,
+    api_key=chiave_effettiva_ui,
+    model=model_ui.strip() if model_ui.strip() else None,
 )
 
 
@@ -115,7 +139,7 @@ def _cercatore_cascata_ui(query_ricerca: str):
     return cerca_nel_prontuario_esterno(
         query_ricerca,
         provider=provider_ui,
-        api_key=api_key_ui if api_key_ui else None,
+        api_key=chiave_effettiva_ui,
     )
 
 
@@ -227,10 +251,10 @@ with tab_artigiano:
                     f"Tri-Color Node (EWD496A): {esito['colore_nodo_ewd496a']}"
                 )
                 st.json(esito["risultato"])
-            except Exception:
-                log_exception("Errore risolutore artigiano Streamlit", "APP_ARTIGIANO_001")
+            except Exception as err:
+                log_exception("Errore risolutore artigiano Streamlit", "APP_ARTIGIANO_001", err)
                 st.error(
-                    "Unable to reach the selected AI provider. "
+                    f"Unable to reach the selected AI provider ({err}). "
                     "Check the API key in the sidebar or use Tab 3 (Free Web Bridge)."
                 )
 

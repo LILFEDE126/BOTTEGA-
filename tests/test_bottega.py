@@ -635,3 +635,71 @@ def test_estrazione_pdf_e_archivio_ram_senza_postgres(monkeypatch):
     assert len(rag_res["frammenti"]) == 1
     assert "10.000,00" in rag_res["frammenti"][0]["testo"]
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+
+
+def test_rotazione_modelli_gemini_su_404_503_e_fallback_deterministico_artigiano(monkeypatch):
+    monkeypatch.setattr(client_ollama.time, "sleep", lambda s: None)
+    modelli_tentati = []
+
+    class _Resp404:
+        status_code = 404
+
+        def raise_for_status(self):
+            err = requests.exceptions.HTTPError("404 Model Not Available")
+            err.response = self
+            raise err
+
+    class _Resp200:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"choices": [{"message": {"content": '{"esito": "rotazione_ok", "valore": 1}'}}]}
+
+    def finto_post_rotazione(url, headers=None, json=None, timeout=120):
+        modelli_tentati.append(json["model"])
+        if len(modelli_tentati) == 1:
+            return _Resp404()
+        return _Resp200()
+
+    monkeypatch.setattr(client_ollama.requests, "post", finto_post_rotazione)
+    ris = client_ollama.chiama_ollama_json(
+        "sys",
+        "usr",
+        _SchemaTest,
+        max_passi_variante=3,
+        provider="gemini",
+        api_key="AQ.test",
+        model="gemini-2.5-flash",
+    )
+    assert ris.esito == "rotazione_ok"
+    assert modelli_tentati[0] == "gemini-2.5-flash"
+    assert modelli_tentati[1] == "gemini-3.5-flash-lite"
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="tecnico", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.85,
+            "frammenti": [
+                {
+                    "id": 1,
+                    "testo": "Il sito web da 10.000-15.000 euro rientra nel Bando Voucher I4.0 al 50%, escluse brochure da 1.500 euro.",
+                }
+            ],
+        },
+    )
+
+    def llm_spento(sys_p, usr_p, schema):
+        raise RuntimeError("API momentaneamente irraggiungibile")
+
+    esito_fb = risolutore_artigiano.risolvi_da_artigiano(
+        "I costi per il sito web (10.000-15.000 euro) e brochure (1.500 euro) sono coperti?",
+        dominio="tecnico",
+        llm_fn=llm_spento,
+    )
+    assert esito_fb["semaforo"] == "VERDE"
+    assert esito_fb["colore_nodo_ewd496a"] == "NERO"
+    assert "50%" in esito_fb["risultato"]["principio_guida_unico"]

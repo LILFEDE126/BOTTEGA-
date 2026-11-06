@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Layer 2 (THE): Multi-provider LLM client (Ollama + Gemini/Groq/OpenRouter Free API),
-deterministic query translation, EWD426 self-stabilization, HTTP 429 retry and EWD316 variant t."""
+deterministic query translation, EWD426 self-stabilization, HTTP 429/404/503 model fallback and EWD316 variant t."""
 
 import json
 import re
@@ -11,6 +11,7 @@ from pydantic import BaseModel, ValidationError
 
 from config import (
     MAX_PASSI_VARIANTE_T,
+    MODELLI_FALLBACK_GEMINI,
     get_llm_endpoint_config,
     opzioni_ollama_deterministiche,
 )
@@ -112,6 +113,13 @@ def chiama_ollama_json(
         raise ValueError("La funzione variante t deve partire da un intero strettamente positivo (t > 0).")
 
     cfg = get_llm_endpoint_config(provider=provider, api_key=api_key, model=model)
+    modelli_candidati = [cfg["model"]]
+    if cfg["provider"] == "gemini":
+        for m_fb in MODELLI_FALLBACK_GEMINI:
+            if m_fb not in modelli_candidati:
+                modelli_candidati.append(m_fb)
+    idx_modello = 0
+
     t_variante = max_passi_variante
     ultimo_errore: Exception | None = None
     prompt_corrente = user_prompt
@@ -123,10 +131,12 @@ def chiama_ollama_json(
         if t_variante >= t_precedente:
             raise RuntimeError("Violazione EWD316: mancato decremento stretto della variante t.")
 
+        modello_corrente = modelli_candidati[min(idx_modello, len(modelli_candidati) - 1)]
+
         try:
             if cfg["provider"] == "ollama":
                 payload = {
-                    "model": cfg["model"],
+                    "model": modello_corrente,
                     "messages": [
                         {"role": "system", "content": system_prompt},
                         {"role": "user", "content": prompt_corrente},
@@ -149,7 +159,7 @@ def chiama_ollama_json(
                     "Content-Type": "application/json",
                 }
                 payload_cloud = {
-                    "model": cfg["model"],
+                    "model": modello_corrente,
                     "messages": [
                         {"role": "system", "content": istruzione_schema},
                         {"role": "user", "content": prompt_corrente},
@@ -189,12 +199,19 @@ def chiama_ollama_json(
                 time.sleep(2 ** (max_passi_variante - t_variante))
         except requests.exceptions.HTTPError as err:
             status_code = err.response.status_code if err.response is not None else 0
-            if status_code in (429, 502, 503, 504) and t_variante > 0:
+            codici_recuperabili = (
+                (400, 404, 429, 500, 502, 503, 504)
+                if cfg["provider"] == "gemini"
+                else (429, 502, 503, 504)
+            )
+            if status_code in codici_recuperabili and t_variante > 0:
                 ultimo_errore = err
+                idx_modello += 1
                 log.warning(
-                    "Rate limit / Errore transitorio HTTP %d su provider='%s' (t_residuo=%d)",
+                    "Rate limit / Rotazione modello su HTTP %d provider='%s' modello='%s' (t_residuo=%d)",
                     status_code,
                     cfg["provider"],
+                    modello_corrente,
                     t_variante,
                     extra={"code": "LLM_RATE_001"},
                 )

@@ -312,11 +312,16 @@ def _recupera_da_archivio_ram(
     top_k: int = 3,
 ) -> Dict[str, Any]:
     """Executes 3-way RRF + Guarded Semaphore (EWD472) over the in-memory session archive."""
-    candidati = [x for x in _ARCHIVIO_MEMORIA_RAM if x["dominio"] == dominio]
-    if not candidati:
-        candidati = list(_ARCHIVIO_MEMORIA_RAM)
-    if not candidati:
+    if not _ARCHIVIO_MEMORIA_RAM:
         return {"semaforo": "ROJO", "s_max": 0.0, "s_dominio": 0.0, "frammenti": []}
+
+    parole_q = list(dict.fromkeys(p for p in re.findall(r"\w+|\d+[.,]\d+", query.lower()) if len(p) >= 3))
+    candidati_dom = [x for x in _ARCHIVIO_MEMORIA_RAM if x["dominio"] == dominio]
+    ha_match_in_dominio = any(
+        any(p in x["testo"].lower() for p in parole_q)
+        for x in candidati_dom
+    )
+    candidati = candidati_dom if (candidati_dom and (ha_match_in_dominio or not parole_q)) else list(_ARCHIVIO_MEMORIA_RAM)
 
     somma_vec = [0.0] * EMBED_DIM
     for item in candidati:
@@ -326,7 +331,6 @@ def _recupera_da_archivio_ram(
     s_dom = max(0.0, similitudine_coseno(q_vec, centroide))
 
     valutati: List[Dict[str, Any]] = []
-    parole_q = list(dict.fromkeys(p for p in re.findall(r"\w+|\d+[.,]\d+", query.lower()) if len(p) >= 3))
     cerca_costi = bool(set(parole_q) & TERMINI_ECONOMICI_AFFINI)
 
     for item in candidati:

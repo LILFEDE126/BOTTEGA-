@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Layer 3 (THE): Closed-loop diagnostic solver (Zero Clutter / Zero Mucchio).
-Supports any input language (EN, ES, IT, etc.) with automatic search translation and response matching."""
+Supports any input language (EN, ES, IT, etc.) with automatic search translation and deterministic RAG fallback."""
 
 from typing import Callable, List, Literal, Optional, Tuple
 import psycopg2
@@ -58,6 +58,53 @@ class SoluzioneArtigiano(BaseModel):
     )
 
 
+def _costruisci_piano_deterministico(problema: str) -> PianoRicercaArtigiano:
+    """Builds a deterministic research plan when the external LLM is unreachable on ROJO semaphore."""
+    testo_pulito = problema.strip()
+    return PianoRicercaArtigiano(
+        fatti_accertati_nel_problema=[testo_pulito],
+        dato_esatto_mancante=f"Fonte documentale ufficiale per: {testo_pulito}",
+        query_chirurgica_esterna=traduci_query_per_ricerca(testo_pulito),
+        ispezione_preliminare_sul_campo=(
+            "Verificare il documento originale nell'archivio o acquisire la specifica tecnica ufficiale prima di agire."
+        ),
+    )
+
+
+def _costruisci_soluzione_deterministica(
+    problema: str,
+    frammenti: List[dict],
+    escluse_pulite: List[str],
+) -> SoluzioneArtigiano:
+    """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
+    when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
+    principale = frammenti[0]["testo"] if frammenti else problema.strip()
+    scartati = [
+        f"[Scartato per Zero Mucchio] {f['testo']}"
+        for f in frammenti[1:]
+    ]
+    for ip_escl in escluse_pulite:
+        scartati.append(f"[Falsificata sul campo] {ip_escl}")
+
+    return SoluzioneArtigiano(
+        principio_guida_unico=principale,
+        elementi_scartati_per_non_fare_mucchio=scartati,
+        precondizione_wp_richiesta=(
+            "Verifica diretta di conformita' sui frammenti estratti dall'archivio ufficiale."
+        ),
+        invariante_violato=(
+            "Allineamento tra i requisiti del problema e i parametri certificati nella fonte documentale."
+        ),
+        ipotesi_causale_unica=f"Riscontro documentale diretto dalla fonte prioritaria: {principale}",
+        azione_correttiva_singola=(
+            f"Applicare esclusivamente i parametri e i vincoli della fonte selezionata al caso: {problema.strip()}"
+        ),
+        esperimento_di_verifica_pratica=(
+            "Controllare la corrispondenza esatta di tutte le cifre, massimali e percentuali con il testo d'archivio."
+        ),
+    )
+
+
 def genera_prompt_ponte_web_gratuito(
     problema: str,
     frammenti_contesto: List[Tuple[str, str]],
@@ -112,7 +159,7 @@ def risolvi_da_artigiano(
 
     query_multilingua = traduci_query_per_ricerca(problema)
     try:
-        rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=3)
+        rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=5)
     except (psycopg2.Error, requests.exceptions.RequestException, RuntimeError):
         rag = {"semaforo": "ROJO", "s_max": 0.0, "s_dominio": 0.0, "frammenti": []}
 
@@ -120,22 +167,31 @@ def risolvi_da_artigiano(
     ricerca_esterna_eseguita = False
 
     if semaforo == "ROJO":
-        piano: PianoRicercaArtigiano = llm_fn(
-            "You are a diagnostic engineer respecting Dijkstra's Law of the Excluded Miracle "
-            "(EWD401: wp(S, false) = false). Your memory does NOT contain sufficient data (Semaforo ROJO). "
-            "It is FORBIDDEN to guess or mix random solutions. Isolate certain facts, state which single "
-            "datum is missing, and formulate the exact search query. "
-            "IMPORTANT: Write all field values in the EXACT SAME LANGUAGE used in the user's problem.",
-            f"PROBLEMA IMPREVISTO:\n{problema}",
-            PianoRicercaArtigiano,
-        )
+        try:
+            piano: PianoRicercaArtigiano = llm_fn(
+                "You are a diagnostic engineer respecting Dijkstra's Law of the Excluded Miracle "
+                "(EWD401: wp(S, false) = false). Your memory does NOT contain sufficient data (Semaforo ROJO). "
+                "It is FORBIDDEN to guess or mix random solutions. Isolate certain facts, state which single "
+                "datum is missing, and formulate the exact search query. "
+                "IMPORTANT: Write all field values in the EXACT SAME LANGUAGE used in the user's problem.",
+                f"PROBLEMA IMPREVISTO:\n{problema}",
+                PianoRicercaArtigiano,
+            )
+        except (RuntimeError, requests.exceptions.RequestException) as err:
+            log.warning(
+                "LLM non raggiungibile in fase ROJO (%s): attivo piano di ricerca deterministico",
+                err,
+                extra={"code": "ART_FALLBACK_001"},
+            )
+            piano = _costruisci_piano_deterministico(problema)
+
         if cercatore_esterno_fn is not None:
             nuovi_blocchi = cercatore_esterno_fn(piano.query_chirurgica_esterna)
             if nuovi_blocchi:
                 ricerca_esterna_eseguita = True
                 try:
                     incasella_e_salva(dominio, f"Ricerca: {piano.dato_esatto_mancante}", nuovi_blocchi)
-                    rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=3)
+                    rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=5)
                     semaforo = rag["semaforo"]
                 except (psycopg2.Error, requests.exceptions.RequestException, RuntimeError):
                     rag = {
@@ -180,18 +236,27 @@ def risolvi_da_artigiano(
             f"{elenco_escluse}"
         )
 
-    soluzione: SoluzioneArtigiano = llm_fn(
-        "You are a master diagnostic engineer applying Leonardo's Principle of Necessity and Dijkstra's "
-        "Weakest Preconditions wp(S, R) (EWD401). "
-        "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding fragment from those retrieved, "
-        "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant, "
-        "and formulate ONE SINGLE causal hypothesis with its practical verification test. "
-        "IMPORTANT: Write all text fields in the EXACT SAME LANGUAGE used in the PROBLEMA below "
-        "(English, Español, Italiano, etc.), preserving all exact numbers and percentages from the context.",
-        f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
-        f"PROBLEMA:\n{problema}{vincolo_esclusioni}",
-        SoluzioneArtigiano,
-    )
+    try:
+        soluzione: SoluzioneArtigiano = llm_fn(
+            "You are a master diagnostic engineer applying Leonardo's Principle of Necessity and Dijkstra's "
+            "Weakest Preconditions wp(S, R) (EWD401). "
+            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding fragment from those retrieved, "
+            "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant, "
+            "and formulate ONE SINGLE causal hypothesis with its practical verification test. "
+            "IMPORTANT: Write all text fields in the EXACT SAME LANGUAGE used in the PROBLEMA below "
+            "(English, Español, Italiano, etc.), preserving all exact numbers and percentages from the context.",
+            f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
+            f"PROBLEMA:\n{problema}{vincolo_esclusioni}",
+            SoluzioneArtigiano,
+        )
+    except (RuntimeError, requests.exceptions.RequestException) as err:
+        log.warning(
+            "LLM non raggiungibile in fase %s (%s): attivo sintesi deterministica sui frammenti RAG",
+            semaforo,
+            err,
+            extra={"code": "ART_FALLBACK_002"},
+        )
+        soluzione = _costruisci_soluzione_deterministica(problema, rag["frammenti"], escluse_pulite)
 
     scarti_finali = list(soluzione.elementi_scartati_per_non_fare_mucchio)
     for ip_esclusa in escluse_pulite:
