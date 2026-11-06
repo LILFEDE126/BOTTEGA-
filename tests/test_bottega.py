@@ -268,7 +268,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         "post",
         lambda url, json, timeout: _FakeResp(risposte.pop(0)),
     )
-    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
+    ris = client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
     assert ris.esito == "riparato"
     assert ris.valore == 42
 
@@ -278,7 +278,7 @@ def test_client_ollama_autostabilizzazione_ewd426_e_variante_t_ewd316(monkeypatc
         lambda url, json, timeout: _FakeResp('{"json_rotto": '),
     )
     with pytest.raises(RuntimeError, match="variante t=0"):
-        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2)
+        client_ollama.chiama_ollama_json("sys", "usr", _SchemaTest, max_passi_variante=2, provider="ollama")
 
 
 def test_client_cloud_free_gemini_groq_openrouter_compatibilita(monkeypatch):
@@ -586,3 +586,52 @@ def test_risolutore_artigiano_falsificazione_sul_campo_e_prompt_ponte_web(monkey
     )
     assert "NON FARE MUCCHIO" in prompt_web
     assert "Valvola radiatore" in prompt_web
+
+
+
+def test_estrazione_pdf_e_archivio_ram_senza_postgres(monkeypatch):
+    class _FakePage:
+        def extract_text(self):
+            return (
+                "Bando voucher digitali I4.0 Anno 2022 dotazione 1.150.000,00 EUR "
+                "agevolazione 50% fino a 10.000,00 EUR oltre premialita 250,00 EUR."
+            )
+
+    class _FakePdfReader:
+        def __init__(self, stream):
+            self.pages = [_FakePage()]
+
+    monkeypatch.setattr(store_pgvector, "PdfReader", _FakePdfReader)
+    monkeypatch.setattr(
+        store_pgvector.requests,
+        "post",
+        lambda url, json=None, timeout=10: (_ for _ in ()).throw(
+            requests.exceptions.ConnectionError("Ollama spento")
+        ),
+    )
+    monkeypatch.setattr(
+        store_pgvector.psycopg2,
+        "connect",
+        lambda **kw: (_ for _ in ()).throw(
+            store_pgvector.psycopg2.OperationalError("Postgres non attivo su Streamlit Cloud")
+        ),
+    )
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    blocchi = store_pgvector.estrai_blocchi_documento("Consegna_Too_Fast_17.pdf", b"%PDF-1.7 fake")
+    assert len(blocchi) == 1
+    assert blocchi[0][0] == "Page 1"
+    assert "1.150.000,00" in blocchi[0][1]
+
+    n_salvati = store_pgvector.incasella_e_salva("tecnico", "Consegna_Too_Fast_17.pdf", blocchi)
+    assert n_salvati == 1
+
+    rag_res = store_pgvector.recupera_con_semaforo(
+        "voucher digitali 1.150.000,00 agevolazione 50%",
+        dominio="tecnico",
+        top_k=3,
+    )
+    assert rag_res["semaforo"] in ("VERDE", "AMBAR")
+    assert len(rag_res["frammenti"]) == 1
+    assert "10.000,00" in rag_res["frammenti"][0]["testo"]
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()

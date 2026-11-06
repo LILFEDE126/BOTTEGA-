@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """Layer 4 (THE): Multilingual Streamlit Dashboard (EN / ES / IT) with Free Cloud APIs,
-local PostgreSQL document uploader and Free Web Bridge for ChatGPT / DeepSeek / Gemini."""
+PDF & document archive uploader (PostgreSQL + Cloud RAM fallback) and Free Web Bridge."""
 
 import tempfile
 from pathlib import Path
+import psycopg2
 import streamlit as st
 
 from logging_bottega import log_exception
@@ -13,6 +14,7 @@ from grounding_numerico import (
     verifica_conservazione_percentuali_decimal,
 )
 from store_pgvector import (
+    estrai_blocchi_documento,
     incasella_e_salva,
     inizializza_schema,
     recupera_con_semaforo,
@@ -35,6 +37,8 @@ PROMPT_TASCHINO_UNIVERSALE = (
     "3. NUMERIC WRITE BARRIER: Never invent or round numbers, codes, or percentages not present in the source.\n"
     "4. LANGUAGE: Always reply in the exact same language used by the user (EN, ES, IT, etc.)."
 )
+
+DOMINI_DISPONIBILI = ["generale", "tecnico", "normativo"]
 
 st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
 st.title("Bottega — Engine & Diagnostic Solver")
@@ -63,35 +67,42 @@ with st.sidebar:
         st.caption("Local mode active on 127.0.0.1:11434 (Ollama).")
 
     st.divider()
-    st.header("2. Local PostgreSQL Archive")
+    st.header("2. Document & PDF Archive")
     dominio_doc = st.selectbox(
         "Target Domain:",
-        ["generale", "tecnico", "normativo"],
+        DOMINI_DISPONIBILI,
         key="dom_upload",
     )
     file_caricato = st.file_uploader(
-        "Upload a document (.txt, .md, .csv, .py) into your local Postgres:",
-        type=["txt", "md", "csv", "py"],
+        "Upload a document (.pdf, .txt, .md, .csv, .py) into the Archive:",
+        type=["pdf", "txt", "md", "csv", "py"],
     )
     if file_caricato is not None:
-        if st.button("Save to my Local PostgreSQL"):
-            testo_doc = file_caricato.getvalue().decode("utf-8", errors="replace")
-            paragrafi = [p.strip() for p in testo_doc.split("\n\n") if p.strip()]
-            blocchi_doc = [
-                (f"Paragraph {i}", p) for i, p in enumerate(paragrafi, start=1)
-            ]
+        raw_bytes = file_caricato.getvalue()
+        chiave_doc = f"{dominio_doc}:{file_caricato.name}:{len(raw_bytes)}"
+        clic_salva = st.button("Save to Archive")
+        if clic_salva or st.session_state.get("ultimo_doc_indicizzato") != chiave_doc:
             try:
-                inizializza_schema()
-                n_ins = incasella_e_salva(dominio_doc, file_caricato.name, blocchi_doc)
-                st.success(
-                    f"Saved {n_ins} new fragments in PostgreSQL (domain '{dominio_doc}')."
-                )
-            except Exception:
-                log_exception("Errore salvataggio documento in PostgreSQL", "APP_DB_001")
-                st.error(
-                    "Local PostgreSQL unreachable on 127.0.0.1:5432. "
-                    "Start the project with Docker to save documents into your database."
-                )
+                blocchi_doc = estrai_blocchi_documento(file_caricato.name, raw_bytes)
+                if not blocchi_doc:
+                    st.warning("No readable text found in the uploaded file.")
+                else:
+                    try:
+                        inizializza_schema()
+                    except psycopg2.Error:
+                        pass
+                    n_ins = incasella_e_salva(dominio_doc, file_caricato.name, blocchi_doc)
+                    st.session_state["ultimo_doc_indicizzato"] = chiave_doc
+                    st.session_state["ultimo_doc_msg"] = (
+                        f"Indexed {len(blocchi_doc)} fragments ({n_ins} new) from "
+                        f"'{file_caricato.name}' in domain '{dominio_doc}'."
+                    )
+            except Exception as err:
+                log_exception("Errore indicizzazione documento caricato", "APP_DOC_001", err)
+                st.error(f"Could not read document '{file_caricato.name}': {err}")
+
+        if st.session_state.get("ultimo_doc_msg"):
+            st.success(st.session_state["ultimo_doc_msg"])
 
 llm_selezionato_fn = costruisci_llm_fn(
     provider=provider_ui,
@@ -179,7 +190,8 @@ with tab_artigiano:
     )
     col_a, col_b = st.columns(2)
     with col_a:
-        dominio_scelto = st.selectbox("Guiding Domain:", ["generale", "tecnico", "normativo"])
+        indice_dom_default = DOMINI_DISPONIBILI.index(dominio_doc) if dominio_doc in DOMINI_DISPONIBILI else 0
+        dominio_scelto = st.selectbox("Guiding Domain:", DOMINI_DISPONIBILI, index=indice_dom_default)
         attiva_ricerca = st.checkbox(
             "Enable cascading external search (Handbook -> AI Web Search -> DuckDuckGo/Wikipedia) on ROJO",
             value=True,
@@ -243,7 +255,7 @@ with tab_ponte_web:
         rag_web = recupera_con_semaforo(query_web_tradotta, dominio=dominio_doc, top_k=3)
         if rag_web.get("frammenti"):
             frammenti_contesto_web = [
-                (f.get("sezione", "Local DB"), f.get("testo", ""))
+                (f.get("sezione", "Archive"), f.get("testo", ""))
                 for f in rag_web["frammenti"]
             ]
     except Exception:

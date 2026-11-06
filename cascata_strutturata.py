@@ -93,9 +93,9 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
     nomi_fn = " ".join(f["nome"] for f in anatomia["funzioni"])
     query_str = f"analisi architettura guardrail invarianti python {nomi_fn}".strip()
     try:
-        rag_leo = recupera_con_semaforo(query_str, "leonardo", top_k=2)
-        rag_ant = recupera_con_semaforo(query_str, "antirez", top_k=2)
-        rag_dij = recupera_con_semaforo(query_str, "dijkstra", top_k=2)
+        rag_leo = recupera_con_semaforo(query_str, "generale", top_k=2)
+        rag_ant = recupera_con_semaforo(query_str, "tecnico", top_k=2)
+        rag_dij = recupera_con_semaforo(query_str, "normativo", top_k=2)
     except (psycopg2.Error, requests.exceptions.RequestException, RuntimeError) as exc:
         log_exception("RAG non raggiungibile (%s): proseguo con sola anatomia AST", "CAS_RAG_002", exc)
         rag_leo = {"semaforo": "AMBAR", "s_max": 0.0, "s_dominio": 0.0, "frammenti": []}

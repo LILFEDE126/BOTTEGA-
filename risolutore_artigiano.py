@@ -101,7 +101,7 @@ def genera_prompt_ponte_web_gratuito(
 
 def risolvi_da_artigiano(
     problema: str,
-    dominio: str = "leonardo",
+    dominio: str = "generale",
     cercatore_esterno_fn: Optional[Callable[[str], List[Tuple[str, str]]]] = None,
     ipotesi_gia_escluse: Optional[List[str]] = None,
     llm_fn: Callable = chiama_ollama_json,
