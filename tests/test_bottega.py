@@ -703,3 +703,62 @@ def test_rotazione_modelli_gemini_su_404_503_e_fallback_deterministico_artigiano
     assert esito_fb["semaforo"] == "VERDE"
     assert esito_fb["colore_nodo_ewd496a"] == "NERO"
     assert "50%" in esito_fb["risultato"]["principio_guida_unico"]
+
+
+def test_logging_bottega_queue_handler_sette_chiavi_json_e_assenza_log_file():
+    import json
+    import logging
+    import logging.handlers
+    import time
+    import logging_bottega
+
+    assert not hasattr(logging_bottega, "LOG_FILE")
+    assert not hasattr(logging_bottega, "resolver_log_file")
+
+    logger = logging_bottega.configura_logger("test_coda_cap_7_3")
+    assert len(logger.handlers) == 1
+    assert isinstance(logger.handlers[0], logging.handlers.QueueHandler)
+
+    assert "__init__" not in logging_bottega.FormatterJSON.__dict__
+    assert "converter" not in logging_bottega.FormatterJSON.__dict__
+
+    assert logging_bottega.resolver_log_format("  JSON \n") == "json"
+    assert logging_bottega.resolver_log_format("xml_invalido") == "text"
+    assert logging_bottega.resolver_log_format(None) in ("text", "json")
+
+    fmt = logging_bottega.FormatterJSON()
+    record = logging.LogRecord(
+        name="bottega",
+        level=logging.INFO,
+        pathname="store_pgvector.py",
+        lineno=42,
+        msg="Tariffa doganale più 4,50% verificata",
+        args=(),
+        exc_info=None,
+    )
+    record.code = "RAG_RET_001"
+    record.s_max = Decimal("0.8223")
+    record.dominio = "tecnico"
+
+    riga_json = fmt.format(record)
+    assert fmt.converter is time.gmtime
+    assert "più" in riga_json
+
+    dati = json.loads(riga_json)
+    assert list(dati.keys())[:7] == [
+        "ts",
+        "level",
+        "code",
+        "logger",
+        "process",
+        "thread",
+        "msg",
+    ]
+    assert dati["code"] == "RAG_RET_001"
+    assert dati["s_max"] == "0.8223"
+    assert dati["dominio"] == "tecnico"
+
+    listener = getattr(logger, "_queue_listener", None)
+    if listener is not None:
+        listener.stop()
+
