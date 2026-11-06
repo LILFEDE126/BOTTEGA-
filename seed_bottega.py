@@ -12,6 +12,144 @@ from logging_bottega import log
 from store_pgvector import incasella_e_salva, inizializza_schema
 from client_ollama import rileva_lingua_testo, traduci_query_per_ricerca
 
+_BLOCCHI_OCR_RAGIONERIA: List[Tuple[str, str]] = [
+    (
+        "Lezione 48 - Calcolo Avviamento e Conferimento Gamma Spa",
+        "Per la costituzione della Gamma Spa, un socio conferisce 35.000 euro (35.000,00 euro) per la propria "
+        "azienda composta da: crediti verso clienti per 20.000 euro (20.000,00 euro), macchinari per 60.000 euro "
+        "(60.000,00 euro) e debiti verso fornitori per 50.000 euro (50.000,00 euro). "
+        "Calcolo del capitale netto e dell'avviamento: Totale Attivita' = 60.000 + 20.000 = 80.000 euro (80.000,00 euro); "
+        "Passivita' = 50.000 euro (50.000,00 euro); Capitale netto (valore contabile netto del complesso aziendale) "
+        "= 80.000 - 50.000 = 30.000 euro (30.000,00 euro). Poiche' il valore di conferimento riconosciuto al socio "
+        "e' 35.000 euro, l'Avviamento (goodwill) ammonta a 35.000 - 30.000 = 5.000 euro (5.000,00 euro). "
+        "Scrittura in Partita Doppia: Dare Macchinari 60.000 euro, Dare Crediti v/clienti 20.000 euro, "
+        "Dare Avviamento 5.000 euro; Avere Debiti v/fornitori 50.000 euro, Avere Soci c/sottoscrizioni 35.000 euro.",
+    ),
+    (
+        "Lezione 24 - Calcolo TFR e Rivalutazione ISTAT",
+        "Nella determinazione del TFR (Trattamento di Fine Rapporto, art. 2120 c.c.) tradizionale per aziende con "
+        "meno di 50 dipendenti: 1) Quota capitale maturata nell'anno: si dividono le retribuzioni annue lorde di "
+        "81.000 euro (81.000,00 euro) per il parametro divisore fisso 13,5, ottenendo una quota annua di "
+        "81.000 / 13,5 = 6.000,00 euro (6.000 euro). 2) Rivalutazione del fondo TFR preesistente di 25.000 euro "
+        "(25.000,00 euro) con incremento dell'indice ISTAT pari al 6%: il coefficiente di rivalutazione e' composto "
+        "da un tasso fisso dell'1,5% (pari a 25.000 * 1,5% = 375,00 euro) piu' il 75% dell'incremento dell'indice "
+        "ISTAT del 6% (ossia 75% di 6% = 4,5%, pari a 25.000 * 4,5% = 1.125,00 euro), per un coefficiente totale "
+        "del 6% (1,5% + 4,5%) e una rivalutazione lorda complessiva di 375,00 + 1.125,00 = 1.500,00 euro (1.500 euro). "
+        "3) Sulla rivalutazione maturata di 1.500,00 euro si applica l'imposta sostitutiva con aliquota dell'11% "
+        "(pari a 165,00 euro di Erario c/imposta sostitutiva TFR), con rivalutazione netta di 1.335,00 euro e "
+        "accantonamento lordo totale di 7.500,00 euro (netto al fondo TFR 7.335,00 euro).",
+    ),
+    (
+        "Lezione 50 e 56 - Aliquote IRES, IRAP e Riserva Legale art. 2430 c.c.",
+        "Negli appunti di Ragioneria: l'aliquota ordinaria per il calcolo dell'IRAP (Imposta Regionale sulle "
+        "Attivita' Produttive) applicata sul valore della produzione netta e' pari al 3,90% (3,9%); l'aliquota "
+        "dell'IRES (Imposta sul Reddito delle Societa') applicata sul reddito imponibile e' pari al 24% (24,00%). "
+        "Secondo l'articolo 2430 del codice civile (art. 2430 c.c.), dagli utili netti annuali deve essere "
+        "dedotta e accantonata a riserva legale una quota minima pari almeno alla ventesima parte degli utili "
+        "(1/20, ossia il 5% o 5,00%), finche' la riserva legale non abbia raggiunto il quinto (1/5, ossia il 20% "
+        "o 20,00%) del capitale sociale.",
+    ),
+    (
+        "Lezione 41 - Anticipo su Fatture Cliente Rossi e Costo Operazione",
+        "Un'impresa cede alla banca salvo buon fine un credito commerciale di 10.000 euro (10.000,00 euro) "
+        "nei confronti del cliente Rossi snc con scadenza a 90 giorni; la banca anticipa il 90% dell'importo "
+        "accreditando in conto corrente l'anticipo di 9.000 euro (9.000,00 euro, con scarto prudenziale del 10% "
+        "pari a 1.000 euro). Gli oneri e spese di operazione addebitati dalla banca sono pari a 35 euro (35,00 euro) "
+        "e il tasso di interesse annuo e' del 6% (6,00%). Gli interessi passivi calcolati su 9.000 euro per 90 giorni "
+        "al tasso del 6% (anno civile 365 giorni: 9.000 * 6 * 90 / 36.500) ammontano a 133,15 euro. "
+        "Il costo totale complessivo dell'operazione (sommando commissioni/oneri di 35,00 euro e interessi di "
+        "133,15 euro) e' esattamente pari a 168,15 euro (35 + 133,15 = 168,15 euro).",
+    ),
+    (
+        "Lezione 32 - Vendita Macchinario Plusvalenza e Minusvalenza",
+        "Dismissione e vendita di un macchinario con costo storico di 100.000 euro (100.000,00 euro): "
+        "Caso 1: il macchinario (costo storico 100.000 euro) e' ammortizzato per l'80% (Fondo ammortamento macchinari "
+        "= 80.000 euro), quindi il suo valore contabile netto residuo e' pari a 100.000 - 80.000 = 20.000 euro "
+        "(20.000,00 euro, pari al 20%). Se viene venduto a un prezzo di cessione di 25.000 euro (25.000,00 euro + IVA 22%), "
+        "poiche' il prezzo di vendita (25.000 euro) supera il valore contabile (20.000 euro), si rileva in Avere (VE+) "
+        "una plusvalenza ordinaria (plusvalenza patrimoniale da alienazione) di 25.000 - 20.000 = 5.000 euro (5.000,00 euro). "
+        "Caso 2: se il macchinario (costo storico 100.000 euro) e' ammortizzato per il 70% (Fondo ammortamento = 70.000 euro), "
+        "il suo valore contabile netto residuo e' pari a 100.000 - 70.000 = 30.000 euro (30.000,00 euro, pari al 30%). "
+        "Se viene venduto a 28.000 euro (28.000,00 euro), poiche' il prezzo di cessione (28.000 euro) e' inferiore al "
+        "valore contabile (30.000 euro), si rileva in Dare (VE-) una minusvalenza ordinaria (minusvalenza patrimoniale) "
+        "di 30.000 - 28.000 = 2.000 euro (2.000,00 euro).",
+    ),
+    (
+        "Lezione 16 e 17 - Principio Contabile OIC 19 Attualizzazione Debiti e Costo Ammortizzato",
+        "Secondo il principio contabile nazionale OIC 19 (Debiti, D.Lgs. 139/2015 e art. 2426 c.c.), i debiti "
+        "devono essere rilevati secondo il criterio del costo ammortizzato e devono essere attualizzati (valore attuale) "
+        "quando ricorrono due condizioni congiunte: 1) la scadenza del debito e' superiore a 12 mesi (oltre i 12 mesi, "
+        "medio-lungo termine) dalla rilevazione iniziale; 2) il tasso di interesse contrattuale (desumibile dalle "
+        "condizioni contrattuali) e' significativamente diverso dal tasso di interesse di mercato. "
+        "Il criterio del costo ammortizzato puo' non essere applicato in 2 casi: 1) per i debiti a breve termine con "
+        "scadenza inferiore o entro i 12 mesi; 2) quando i costi di transazione, le commissioni e ogni altra differenza "
+        "tra valore iniziale e valore a scadenza sono di scarso rilievo (effetti irrisori). Inoltre, sono esonerate "
+        "dall'applicazione del costo ammortizzato le societa' che redigono il bilancio in forma abbreviata (art. 2435-bis c.c.) "
+        "e le micro-imprese (art. 2435-ter c.c.), che possono valutare i debiti al valore nominale.",
+    ),
+    (
+        "Lezione 60 - Fitto Passivo Annuo Anticipato 1 Agosto e Risconto Attivo al 31 Dicembre",
+        "Scritture di assestamento e rettifica al 31 dicembre (31/12): se un'azienda paga in via anticipata in data "
+        "1 agosto (01/08) un canone annuo di fitto passivo pari a 12.000 euro (12.000,00 euro per 12 mesi dal 1/8 al "
+        "1/8 dell'anno successivo, pari a 1.000 euro al mese): "
+        "1) Il costo di competenza dell'esercizio corrente (per i 5 mesi da agosto a dicembre: agosto, settembre, "
+        "ottobre, novembre, dicembre) che resta a carico del conto Fitti passivi in Conto Economico e' pari a "
+        "12.000 * 5 / 12 = 5.000 euro (5.000,00 euro). "
+        "2) Al 31 dicembre (31/12) si rileva un risconto attivo (prepaid expense / costo sospeso rinviato al futuro "
+        "per i 7 mesi successivi da gennaio a luglio di competenza del nuovo esercizio) pari a "
+        "12.000 * 7 / 12 = 7.000 euro (7.000,00 euro). Scrittura in Partita Doppia al 31/12: "
+        "Dare Risconti attivi 7.000,00 euro (VE- costo sospeso nello Stato Patrimoniale) a Avere Fitti passivi 7.000,00 euro (VE+).",
+    ),
+    (
+        "Lezione 13 - Liquidazione e Pagamento Parcella Legale 4.000 Euro Cassa 4% IVA 22% Ritenuta 20%",
+        "La societa' Alfa Spa liquida e paga il compenso professionale (parcella) a un avvocato/legale per un onorario "
+        "base di 4.000 euro (4.000,00 euro), soggetto a contributo previdenziale Cassa Forense del 4%, IVA del 22% "
+        "e ritenuta d'acconto IRPEF del 20% sui redditi di lavoro autonomo: "
+        "1) Contributo previdenziale 4% su 4.000,00 euro = 160,00 euro (160 euro), che si somma all'onorario formando "
+        "la base imponibile IVA e il costo complessivo Spese legali e notarili (Dare, VE-) = 4.000,00 + 160,00 = 4.160,00 euro (4.160 euro). "
+        "2) IVA a credito del 22% calcolata su 4.160,00 euro (Dare, VF+) = 4.160,00 * 22% = 915,20 euro. "
+        "3) Totale fattura / Debiti v/fornitori di servizi (Avere, VF-) = 4.160,00 + 915,20 = 5.075,20 euro. "
+        "4) Ritenuta d'acconto fiscale del 20% calcolata esclusivamente sull'onorario professionale di 4.000,00 euro "
+        "(escluso il contributo previdenziale del 4%): Erario c/ritenute da versare (Avere, VF-) = 4.000,00 * 20% = 800,00 euro (800 euro). "
+        "5) Pagamento netto tramite Banca c/c (Avere, VF-) = 5.075,20 - 800,00 = 4.275,20 euro.",
+    ),
+    (
+        "Lezione 67 - Valutazione Rimanenze di Magazzino Marzo Costo Medio Ponderato LIFO e FIFO",
+        "Esercizio di valutazione delle rimanenze di magazzino del mese di marzo (31 marzo): "
+        "- 1 marzo: esistenze iniziali di 5.000 unita' al costo unitario di 12,00 euro (totale 60.000,00 euro); "
+        "- 7 marzo: scarico (issue) di 1.200 unita' (restano 3.800 unita'); "
+        "- 9 marzo: acquisto (purchase) di 700 unita' a 12,50 euro (totale 8.750,00 euro); "
+        "- 13 marzo: scarico (issue) di 1.100 unita'; "
+        "- 31 marzo: acquisto (purchase) di 500 unita' a 13,00 euro (totale 6.500,00 euro). "
+        "Quantita' finale in rimanenza al 31 marzo = 5.000 - 1.200 + 700 - 1.100 + 500 = 3.900 unita' "
+        "(totale carichi = 6.200 unita' per un valore complessivo di 60.000 + 8.750 + 6.500 = 75.250,00 euro). "
+        "Valorizzazione finale delle 3.900 unita' al 31 marzo secondo i 3 metodi: "
+        "1) Costo Medio Ponderato (Weighted Average Cost): costo medio ponderato unitario = 75.250,00 / 6.200 = 12,137 / "
+        "con metodo per movimento o periodo = valore finale rimanenze al 31 marzo pari a 47.562,00 euro (47.562 euro). "
+        "2) LIFO (Last In, First Out): le ultime unita' entrate sono le prime ad uscire; le 3.900 unita' finali sono "
+        "valorizzate per 3.400 unita' a 12,00 euro (40.800,00 euro) + 500 unita' del 31 marzo a 13,00 euro (6.500,00 euro) "
+        "= 47.300,00 euro (47.300 euro). "
+        "3) FIFO (First In, First Out): le prime unita' entrate sono le prime ad uscire (scaricate 2.300 unita' dalle "
+        "5.000 iniziali); le 3.900 unita' finali sono composte da 2.700 unita' a 12,00 euro (32.400,00 euro) + 700 unita' "
+        "del 9 marzo a 12,50 euro (8.750,00 euro) + 500 unita' del 31 marzo a 13,00 euro (6.500,00 euro) "
+        "= 47.650,00 euro (47.650 euro).",
+    ),
+    (
+        "Lezione 41 e 42 - Smobilizzo Crediti Commerciali Factoring Pro-Soluto vs Pro-Solvendo e Anticipo s.b.f.",
+        "Per smobilizzare immediatamente un credito commerciale (ad esempio di 8.000 euro o 5.000 euro con scadenza a "
+        "90 giorni) trasferendo interamente e definitivamente il rischio di insolvenza del debitore all'intermediario "
+        "finanziario (societa' di factoring) senza possibilita' di rivalsa (senza azione di regresso verso l'impresa "
+        "cedente), l'unica operazione utilizzabile e' il Factoring con clausola pro-soluto (cessione pro-soluto). "
+        "Nel factoring pro-soluto l'impresa cedente scarica immediatamente e definitivamente il conto Crediti v/clienti "
+        "in Avere (VF-) per il valore nominale (es. 8.000 euro), rileva in Dare l'accredito in Banca c/c dell'anticipo, "
+        "l'eventuale Credito v/factor per la quota trattenuta a garanzia, gli Oneri e commissioni di factoring pro-soluto "
+        "(VE-), l'IVA a credito (22%) e gli Interessi passivi di factoring (VE-). "
+        "Vanno invece escluse: 1) l'anticipazione bancaria su fatture salvo buon fine (s.b.f.); 2) lo sconto cambiario "
+        "commerciale salvo buon fine; 3) il factoring con clausola pro-solvendo, poiche' in tutte queste tre operazioni "
+        "con rivalsa il rischio di insolvenza del debitore resta interamente a carico dell'impresa cedente.",
+    ),
+]
+
 CORPUS_INGEGNERIA = [
     (
         "generale",
@@ -44,6 +182,7 @@ CORPUS_INGEGNERIA = [
                 "che gocciola nello scarico. Ipotesi 2 (esterna): perdita occulta nei collettori sotto pavimento. "
                 "Esperimento binario: chiudere le valvole di mandata e ritorno sotto caldaia per 1 ora.",
             ),
+            *_BLOCCHI_OCR_RAGIONERIA,
         ],
     ),
     (
@@ -254,10 +393,6 @@ def cerca_nel_prontuario_esterno(
     provider: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
-    trovati = cerca_nel_prontuario_locale(query)
-    if trovati:
-        return trovati
-
     chiave_attiva = (api_key or os.getenv("LLM_API_KEY") or config.LLM_API_KEY or "").strip()
     provider_attivo = (provider or os.getenv("LLM_PROVIDER") or config.LLM_PROVIDER or "ollama").strip().lower()
 
@@ -266,14 +401,14 @@ def cerca_nel_prontuario_esterno(
             if provider_attivo == "gemini":
                 url_gemini = (
                     "https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"gemini-3.5-flash-lite:generateContent?key={chiave_attiva}"
+                    f"gemini-2.5-flash:generateContent?key={chiave_attiva}"
                 )
                 payload_g = {
                     "contents": [
                         {
                             "parts": [
                                 {
-                                    "text": f"Search the web for official technical facts and exact numbers for: {query}"
+                                    "text": f"Search official technical facts and exact numbers for: {query}"
                                 }
                             ]
                         }
@@ -308,6 +443,10 @@ def cerca_nel_prontuario_esterno(
                     return [(f"Web Search AI (OpenRouter Online): {query}", testo_or)]
         except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
             pass
+
+    trovati = cerca_nel_prontuario_locale(query)
+    if trovati:
+        return trovati
 
     try:
         url_ddg = "https://api.duckduckgo.com/"

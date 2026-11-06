@@ -960,6 +960,8 @@ def test_deduplicazione_file_duplicati_ragioneria_multilingua_e_cascata_rojo_ver
     )
     assert rag_rojo["semaforo"] == "ROJO"
 
+    assert not hasattr(store_pgvector, "_BLOCCHI_OCR_RAGIONERIA")
+    assert hasattr(seed_bottega, "_BLOCCHI_OCR_RAGIONERIA")
     trovati_oic34 = seed_bottega.cerca_nel_prontuario_locale(q_oic34)
     assert len(trovati_oic34) == 1
     assert "OIC 34" in trovati_oic34[0][0]

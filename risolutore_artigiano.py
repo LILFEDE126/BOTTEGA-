@@ -99,6 +99,8 @@ def _istruzione_lingua_tassativa(lingua: str) -> str:
             "'invariante_violato', 'ipotesi_causale_unica', 'azione_correttiva_singola', "
             "'esperimento_di_verifica_pratica') ÍNTEGRAMENTE EN ESPAÑOL. PROHIBIDO dejar frases en italiano "
             "en 'principio_guida_unico' o 'elementi_scartati_per_non_fare_mucchio': tradúcelas al español "
+            "(por ejemplo traduce siempre 'attualizzarsi/attualizzazione' -> 'actualizarse/actualización', "
+            "'scadenza' -> 'vencimiento', 'tasso di interesse' -> 'tipo de interés', 'scarso rilievo' -> 'escasa importancia') "
             "manteniendo idénticos todos los números, porcentajes e importes."
         )
     return (
