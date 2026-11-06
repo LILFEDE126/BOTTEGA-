@@ -119,6 +119,17 @@ GLOSSARIO_MULTILINGUA_IT = {
     "anticipo": "anticipo",
     "facturas": "fatture",
     "arrendamiento": "leasing",
+    "advance": "anticipo",
+    "supplier": "fornitore",
+    "invoice": "fattura",
+    "bank": "banca",
+    "loan": "mutuo",
+    "mortgage": "mutuo",
+    "préstamo": "mutuo",
+    "prestamo": "mutuo",
+    "reembolsa": "rimborsa",
+    "cuota": "quota",
+    "obligaciones": "obbligazionario",
 }
 
 PAROLE_SPIA_LINGUA = {
@@ -180,7 +191,7 @@ def rileva_lingua_testo(testo: str) -> str:
 def traduci_query_per_ricerca(query: str) -> str:
     """Normalizes and translates EN/ES technical terms into Italian equivalents so the hybrid
     RAG engine can match the internal knowledge base regardless of the user's input language."""
-    parole_originali = re.findall(r"\w+|\d+[.,]\d+", query.lower())
+    parole_originali = re.findall(r"\d+(?:[.,/]\d+)+|\w+", query.lower())
     tradotte = []
     for p in parole_originali:
         tradotte.append(GLOSSARIO_MULTILINGUA_IT.get(p, p))

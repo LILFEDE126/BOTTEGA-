@@ -88,7 +88,7 @@ STOPWORDS_RICERCA_COMUNI = {
 }
 
 PATRON_CODICE_NORMATIVO = re.compile(
-    r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu)\s*\d*\b|\b\d{1,4}/\d{4}\b"
+    r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b|\b\d{1,4}/\d{4}\b"
 )
 
 

@@ -361,6 +361,51 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "An undertaking must report on a sustainability topic if it is material from either the impact perspective, "
         "the financial perspective, or both.",
     ),
+    (
+        "Emendamenti OIC 16 e OIC 31 (2024) Fondi Smantellamento, Rimozione Cespite e Ripristino del Sito",
+        "Con gli emendamenti ai principi contabili nazionali OIC 16 (Immobilizzazioni materiali) e OIC 31 "
+        "(Fondi per rischi e oneri), entrati in vigore per i bilanci degli esercizi aventi inizio dal 1 gennaio 2024, "
+        "la contabilizzazione degli obblighi di smantellamento, rimozione di un cespite e ripristino del sito "
+        "segue un modello unitario (modello a componente): "
+        "1) Rilevazione iniziale: quando l'impresa ha un'obbligazione attuale (legale o contrattuale) di smantellare "
+        "il bene e ripristinare il sito al termine dell'utilizzo, iscrive nel passivo dello Stato Patrimoniale un "
+        "apposito fondo per oneri (Fondo smantellamento e ripristino) pari al valore attuale della stima dei costi "
+        "futuri attualizzati (se l'effetto temporale e' rilevante e l'orizzonte supera i 12 mesi) e, in contropartita "
+        "in Dare, capitalizza lo stesso importo ad incremento diretto del costo storico dell'immobilizzazione materiale sottostante; "
+        "2) Rilevazione successiva: il costo capitalizzato viene sistematicamente ammortizzato lungo la vita utile "
+        "residua del cespite (voce B10b del Conto Economico), mentre il fondo passivo viene adeguato annualmente "
+        "per il trascorrere del tempo rilevando l'onere finanziario da attualizzazione nella classe C (Proventi e oneri finanziari).",
+    ),
+    (
+        "Ley Crea y Crece (Ley 18/2022) en Espana Facturacion Electronica Obligatoria B2B y Plazo Maximo 60 Dias",
+        "En Espana, la Ley 18/2022 de creacion y crecimiento de empresas (Ley Crea y Crece) introduce dos obligaciones "
+        "estructurales para todas las empresas y profesionales autonomos en sus relaciones comerciales B2B (Business-to-Business): "
+        "1) Facturacion electronica obligatoria B2B: todas las empresas y autonomos deben expedir, remitir y recibir "
+        "facturas electronicas estructuradas en sus operaciones comerciales con otras empresas y profesionales, "
+        "garantizando la interconexion e interoperabilidad gratuita de las soluciones tecnologicas y la comunicacion "
+        "obligatoria de los estados de la factura (aceptacion, rechazo o pago efectivo). El plazo de entrada en vigor "
+        "es de 1 ano desde la aprobacion del desarrollo reglamentario para empresas con facturacion anual superior a "
+        "8.000.000 de euros (8 millones de euros), y de 2 anos para el resto de pymes y autonomos; "
+        "2) Control estricto de la morosidad (plazo maximo de 60 dias): conforme a la Ley 3/2004 de lucha contra la "
+        "morosidad, el plazo maximo legal de pago entre empresas es de 60 dias naturales desde la recepcion de las "
+        "mercancias o prestacion de los servicios (30 dias por defecto si no hay pacto expreso), y las empresas que "
+        "incumplan el plazo maximo de 60 dias no pueden acceder a subvenciones publicas ni ser entidades colaboradoras.",
+    ),
+    (
+        "OECD Pillar Two Global Minimum Tax (EU Directive 2022/2523) 15% Effective Rate & 750 Million Euro Threshold",
+        "Under the OECD/G20 Pillar Two Global Anti-Base Erosion (GloBE) rules, implemented in the European Union "
+        "through Council Directive (EU) 2022/2523 (and in Italy via D.Lgs. 209/2023 effective from 2024), large "
+        "multinational enterprise (MNE) groups and large-scale domestic groups are subject to a global minimum "
+        "effective corporate tax rate of 15%: "
+        "1) Revenue threshold (750 million euros): the rules apply to any group whose ultimate parent entity has "
+        "annual consolidated revenues of at least 750.000.000 euros (750 million euros) in its consolidated financial "
+        "statements in at least 2 (two) of the 4 (four) fiscal years immediately preceding the tested fiscal year; "
+        "2) Top-up tax mechanism (QDMTT, IIR, UTPR): if the jurisdictional effective tax rate (ETR) of the group's "
+        "constituent entities in a given jurisdiction falls below the 15% minimum rate, a 'top-up tax' is collected "
+        "to bring the effective taxation up to 15% (after deducting the Substance-Based Income Exclusion for payroll "
+        "and tangible assets), applied through a Qualified Domestic Minimum Top-up Tax (QDMTT), the Income Inclusion "
+        "Rule (IIR), or the Undertaxed Profits Rule (UTPR).",
+    ),
 ]
 
 STOPWORDS_PRONTUARIO = {
