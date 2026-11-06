@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """Layer 4 (THE): Multilingual Streamlit Dashboard (EN / ES / IT) with Free Cloud APIs,
-automatic API key detection, PDF & document archive uploader and Free Web Bridge."""
+automatic API key detection, live word-by-word answer streaming, PDF archive and Free Web Bridge."""
 
+import re
 import tempfile
+import time
 from pathlib import Path
 import psycopg2
 import streamlit as st
@@ -15,6 +17,7 @@ from grounding_numerico import (
     verifica_conservazione_percentuali_decimal,
 )
 from store_pgvector import (
+    conta_frammenti_archivio_ram,
     estrai_blocchi_documento,
     incasella_e_salva,
     inizializza_schema,
@@ -41,6 +44,14 @@ PROMPT_TASCHINO_UNIVERSALE = (
 
 DOMINI_DISPONIBILI = ["generale", "tecnico", "normativo"]
 PROVIDERS_DISPONIBILI = ["gemini", "groq", "openrouter", "ollama", "deepseek", "openai"]
+
+
+def _stream_testo_parole(testo: str):
+    """Yields words preserving markdown newlines for real-time streaming in Streamlit."""
+    for token in re.findall(r"\S+\s*", testo):
+        yield token
+        time.sleep(0.01)
+
 
 st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
 st.title("Bottega — Engine & Diagnostic Solver")
@@ -103,7 +114,8 @@ with st.sidebar:
         raw_bytes = file_caricato.getvalue()
         chiave_doc = f"{dominio_doc}:{file_caricato.name}:{len(raw_bytes)}"
         clic_salva = st.button("Save to Archive")
-        if clic_salva or st.session_state.get("ultimo_doc_indicizzato") != chiave_doc:
+        in_ram = conta_frammenti_archivio_ram(file_caricato.name)
+        if clic_salva or st.session_state.get("ultimo_doc_indicizzato") != chiave_doc or in_ram == 0:
             try:
                 blocchi_doc = estrai_blocchi_documento(file_caricato.name, raw_bytes)
                 if not blocchi_doc:
@@ -192,7 +204,7 @@ with tab_codice:
                     try:
                         with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade..."):
                             referto = esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
-                        st.markdown(referto)
+                        st.write_stream(_stream_testo_parole(referto))
                         st.download_button(
                             "Download Markdown Report",
                             referto,
@@ -236,7 +248,14 @@ with tab_artigiano:
             ]
             cercatore_fn = _cercatore_cascata_ui if attiva_ricerca else None
             try:
-                with st.spinner("Translating search, checking RAG Semaphore, wp(S,R) & Tri-Color Write Barrier..."):
+                with st.status("Streaming diagnostic analysis (PDF Archive, RAG Semaphore & Write Barrier)...", expanded=True) as stato_diag:
+                    if file_caricato is not None and conta_frammenti_archivio_ram(file_caricato.name) == 0:
+                        blocchi_sync = estrai_blocchi_documento(file_caricato.name, file_caricato.getvalue())
+                        if blocchi_sync:
+                            incasella_e_salva(dominio_doc, file_caricato.name, blocchi_sync)
+                    tot_ram = conta_frammenti_archivio_ram()
+                    st.write(f"1. Archivio attivo in memoria: **{tot_ram} frammenti** pronti per la verifica.")
+                    st.write("2. Ricerca ibrida RRF (EWD472), calcolo precondizione wp(S, R) e filtro Zero Mucchio...")
                     esito = risolvi_da_artigiano(
                         problema_utente,
                         dominio=dominio_scelto,
@@ -244,18 +263,37 @@ with tab_artigiano:
                         ipotesi_gia_escluse=lista_escluse,
                         llm_fn=llm_selezionato_fn,
                     )
-                st.info(
-                    f"Semaphore: {esito['semaforo']} (s_max={esito['s_max']}) | "
-                    f"Mode: {esito['modalita']} | "
-                    f"External search triggered: {esito['ricerca_esterna_eseguita']} | "
-                    f"Tri-Color Node (EWD496A): {esito['colore_nodo_ewd496a']}"
-                )
-                st.json(esito["risultato"])
+                    st.write(
+                        f"3. Semaforo: **{esito['semaforo']}** (s_max={esito['s_max']}) | "
+                        f"Nodo Tri-Colore (EWD496A): **{esito['colore_nodo_ewd496a']}** "
+                        f"(Percentuali conservate: {esito['percentuali_conservate']})"
+                    )
+                    stato_diag.update(
+                        label=(
+                            f"Analisi completata — Semaforo: {esito['semaforo']} (s_max={esito['s_max']}) | "
+                            f"Barriera Numerica (EWD496A): Nodo {esito['colore_nodo_ewd496a']}"
+                        ),
+                        state="complete",
+                        expanded=False,
+                    )
+
+                st.subheader("Risposta Finale (Metodo Artigiano — Zero Mucchio)")
+                testo_discorsivo = esito.get("risposta_discorsiva", "")
+                st.write_stream(_stream_testo_parole(testo_discorsivo))
+
+                with st.expander("Dettagli Tecnici: Frammenti PDF Estratti & Schema JSON (THE / EWD401 / EWD496A)"):
+                    frammenti_letti = esito.get("frammenti_usati", [])
+                    if frammenti_letti:
+                        st.markdown("**Frammenti certificati estratti dal PDF / Archivio:**")
+                        for idx_f, txt_f in enumerate(frammenti_letti, start=1):
+                            st.info(f"**Frammento {idx_f}:**\n{txt_f}")
+                    st.markdown("**Oggetto Strutturato JSON (Pydantic Validated):**")
+                    st.json(esito["risultato"])
             except Exception as err:
                 log_exception("Errore risolutore artigiano Streamlit", "APP_ARTIGIANO_001", err)
                 st.error(
                     f"Unable to reach the selected AI provider ({err}). "
-                    "Check the API key in the sidebar or use Tab 3 (Free Web Bridge)."
+                    "Check the sidebar or use Tab 3 (Free Web Bridge)."
                 )
 
 with tab_ponte_web:

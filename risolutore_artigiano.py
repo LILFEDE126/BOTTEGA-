@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Layer 3 (THE): Closed-loop diagnostic solver (Zero Clutter / Zero Mucchio).
-Supports any input language (EN, ES, IT, etc.) with automatic search translation and deterministic RAG fallback."""
+Supports any input language (EN, ES, IT, etc.) with automatic search translation,
+natural-language final response synthesis and deterministic RAG fallback."""
 
 from typing import Callable, List, Literal, Optional, Tuple
 import psycopg2
@@ -35,6 +36,10 @@ class PianoRicercaArtigiano(BaseModel):
 
 class SoluzioneArtigiano(BaseModel):
     stato_memoria: Literal["SOLUZIONE_FONDATA"] = "SOLUZIONE_FONDATA"
+    risposta_finale_discorsiva: str = Field(
+        default="",
+        description="Clear, complete, natural-language final answer written normally for a non-technical reader, directly answering the question using only the verified numbers from the context",
+    )
     principio_guida_unico: str = Field(
         description="The SINGLE rule or source selected among retrieved fragments to solve the case"
     )
@@ -55,6 +60,41 @@ class SoluzioneArtigiano(BaseModel):
     )
     esperimento_di_verifica_pratica: str = Field(
         description="How to objectively measure whether postcondition R is satisfied"
+    )
+
+
+def formatta_risposta_artigiano_leggibile(risultato_dict: dict, modalita: str) -> str:
+    """Formats the structured Pydantic output into a clear, normal, human-readable Markdown response."""
+    if modalita == "RICERCA_PRIMA_DI_AGIRE":
+        fatti = "\n".join(f"- {f}" for f in risultato_dict.get("fatti_accertati_nel_problema", []))
+        return (
+            "### Stop Onesto (Semaforo ROJO — Dati Insufficienti in Memoria)\n\n"
+            "Per non inventare cifre o fare ipotesi a caso, il sistema si e' fermato prima di rispondere:\n\n"
+            f"**Fatti accertati nella richiesta:**\n{fatti or '- Nessun dato aggiuntivo'}\n\n"
+            f"**Dato esatto mancante:** {risultato_dict.get('dato_esatto_mancante', '')}\n\n"
+            f"**Ricerca consigliata:** `{risultato_dict.get('query_chirurgica_esterna', '')}`\n\n"
+            f"**Verifica preliminare da eseguire:** {risultato_dict.get('ispezione_preliminare_sul_campo', '')}"
+        )
+
+    discorsiva = (risultato_dict.get("risposta_finale_discorsiva") or "").strip()
+    principio = risultato_dict.get("principio_guida_unico", "")
+    causa = risultato_dict.get("ipotesi_causale_unica", "")
+    azione = risultato_dict.get("azione_correttiva_singola", "")
+    verifica = risultato_dict.get("esperimento_di_verifica_pratica", "")
+    precond = risultato_dict.get("precondizione_wp_richiesta", "")
+    invariante = risultato_dict.get("invariante_violato", "")
+    scarti = risultato_dict.get("elementi_scartati_per_non_fare_mucchio", [])
+    scarti_md = "\n".join(f"- {s}" for s in scarti) if scarti else "- Nessun elemento spurio rilevato."
+
+    intro = f"{discorsiva}\n\n---\n\n" if discorsiva else ""
+    return (
+        f"{intro}"
+        f"**1. Risposta e Diagnosi Principale:**\n{causa}\n\n"
+        f"**2. Cosa Fare in Pratica (Azione Consigliata):**\n{azione}\n\n"
+        f"**3. Regola / Fonte Ufficiale Applicata (Zero Mucchio):**\n{principio}\n\n"
+        f"**4. Verifica Pratica di Controllo:**\n{verifica}\n\n"
+        f"**5. Condizione di Partenza ed Equilibrio:**\n- *Precondizione:* {precond}\n- *Vincolo:* {invariante}\n\n"
+        f"**6. Voci o Ipotesi Escluse (per non mescolare soluzioni):**\n{scarti_md}"
     )
 
 
@@ -87,6 +127,10 @@ def _costruisci_soluzione_deterministica(
         scartati.append(f"[Falsificata sul campo] {ip_escl}")
 
     return SoluzioneArtigiano(
+        risposta_finale_discorsiva=(
+            f"In base ai documenti analizzati nell'archivio per il quesito ({problema.strip()}), "
+            f"la fonte di riferimento stabilisce quanto segue: {principale}"
+        ),
         principio_guida_unico=principale,
         elementi_scartati_per_non_fare_mucchio=scartati,
         precondizione_wp_richiesta=(
@@ -211,6 +255,7 @@ def risolvi_da_artigiano(
                 piano.query_chirurgica_esterna,
                 extra={"code": "ART_ROJO_001"},
             )
+            piano_dict = piano.model_dump()
             return {
                 "semaforo": semaforo,
                 "s_max": float(arrotonda_esatto_el_x8(rag["s_max"], 4)),
@@ -219,9 +264,28 @@ def risolvi_da_artigiano(
                 "ipotesi_escluse_applicate": list(ipotesi_gia_escluse or []),
                 "colore_nodo_ewd496a": "GRIGIO",
                 "percentuali_conservate": True,
-                "risultato": piano.model_dump(),
+                "risultato": piano_dict,
+                "risposta_discorsiva": formatta_risposta_artigiano_leggibile(piano_dict, "RICERCA_PRIMA_DI_AGIRE"),
+                "frammenti_usati": [],
                 "cifre_non_ancorate": [],
             }
+
+    if (
+        cercatore_esterno_fn is not None
+        and not ricerca_esterna_eseguita
+        and any(k in problema.lower() for k in ("bando", "voucher", "camera di commercio", "reggio emilia"))
+    ):
+        blocchi_normativi = cercatore_esterno_fn(problema)
+        testi_esistenti = " ".join(f.get("testo", "") for f in rag.get("frammenti", []))
+        for sez_n, txt_n in blocchi_normativi:
+            if txt_n not in testi_esistenti:
+                rag["frammenti"].append({
+                    "id": len(rag["frammenti"]) + 100,
+                    "titolo": "Prontuario Normativo",
+                    "sezione": sez_n,
+                    "testo": f"[{dominio.upper()}] {sez_n}: {txt_n}",
+                    "similitudine": 0.85,
+                })
 
     contesto_rag = "\n".join(
         f"[Frammento {i}] {f['testo']}" for i, f in enumerate(rag["frammenti"], start=1)
@@ -240,11 +304,15 @@ def risolvi_da_artigiano(
         soluzione: SoluzioneArtigiano = llm_fn(
             "You are a master diagnostic engineer applying Leonardo's Principle of Necessity and Dijkstra's "
             "Weakest Preconditions wp(S, R) (EWD401). "
-            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding fragment from those retrieved, "
+            "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer (4-6 sentences) "
+            "that any person can easily read and understand, directly answering the user's question with the exact "
+            "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "
+            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding principle from those retrieved, "
             "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant, "
             "and formulate ONE SINGLE causal hypothesis with its practical verification test. "
+            "CRITICAL NUMERIC RULE: Every single number or percentage you write MUST appear identically in FRAMMENTI RECUPERATI or PROBLEMA. "
             "IMPORTANT: Write all text fields in the EXACT SAME LANGUAGE used in the PROBLEMA below "
-            "(English, Español, Italiano, etc.), preserving all exact numbers and percentages from the context.",
+            "(English, Español, Italiano, etc.).",
             f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
             f"PROBLEMA:\n{problema}{vincolo_esclusioni}",
             SoluzioneArtigiano,
@@ -280,6 +348,7 @@ def risolvi_da_artigiano(
             extra={"code": "ART_PCT_001"},
         )
 
+    sol_dict = soluzione.model_dump()
     return {
         "semaforo": semaforo,
         "s_max": float(arrotonda_esatto_el_x8(rag["s_max"], 4)),
@@ -288,6 +357,8 @@ def risolvi_da_artigiano(
         "ipotesi_escluse_applicate": escluse_pulite,
         "colore_nodo_ewd496a": colore_nodo,
         "percentuali_conservate": pct_ok,
-        "risultato": soluzione.model_dump(),
+        "risultato": sol_dict,
+        "risposta_discorsiva": formatta_risposta_artigiano_leggibile(sol_dict, "AZIONE_SINGOLA_VERIFICABILE"),
+        "frammenti_usati": [f.get("testo", "") for f in rag.get("frammenti", [])],
         "cifre_non_ancorate": cifre_errate,
     }

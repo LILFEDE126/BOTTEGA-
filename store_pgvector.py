@@ -6,7 +6,7 @@ from contextlib import contextmanager
 import hashlib
 import io
 import re
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import execute_values
 from pgvector.psycopg2 import register_vector
@@ -59,6 +59,13 @@ TERMINI_ECONOMICI_AFFINI = {
     "marketing",
     "business",
 }
+
+
+def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
+    """Returns the number of indexed fragments currently stored in the in-memory RAM archive."""
+    if titolo is None:
+        return len(_ARCHIVIO_MEMORIA_RAM)
+    return sum(1 for item in _ARCHIVIO_MEMORIA_RAM if item.get("titolo") == titolo)
 
 
 def _suddividi_testo_in_blocchi(testo: str, prefisso: str, max_caratteri: int = 2000) -> List[Tuple[str, str]]:
@@ -332,6 +339,7 @@ def _recupera_da_archivio_ram(
 
     valutati: List[Dict[str, Any]] = []
     cerca_costi = bool(set(parole_q) & TERMINI_ECONOMICI_AFFINI)
+    denominatore_copertura = max(1, min(len(parole_q), 6))
 
     for item in candidati:
         sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
@@ -342,8 +350,8 @@ def _recupera_da_archivio_ram(
             if "€" in testo_low or "euro" in testo_low:
                 bonus_economico += 2
             match_count += bonus_economico
-        copertura = (match_count / max(1, len(parole_q))) if parole_q else 0.0
-        sim_effettiva = max(sim_raw, min(0.95, 0.48 + 0.45 * min(1.0, copertura))) if match_count > 0 else sim_raw
+        copertura = (match_count / denominatore_copertura) if parole_q else 0.0
+        sim_effettiva = max(sim_raw, min(0.95, 0.52 + 0.43 * min(1.0, copertura))) if match_count > 0 else sim_raw
         valutati.append({
             "id": item["id"],
             "titolo": item["titolo"],
@@ -362,7 +370,7 @@ def _recupera_da_archivio_ram(
     ordinati = fondi_rrf(lista_vett, lista_it, lista_simple, top_k=limite_k)
     ha_match = bool(con_match)
     if ha_match and s_dom < 0.35:
-        s_dom = 0.50
+        s_dom = 0.55
     colore, s_max = valuta_semaforo(ordinati, s_dominio=s_dom, ha_match_lessicale=ha_match)
     return {
         "semaforo": colore,
