@@ -456,7 +456,7 @@ STOPWORDS_PRONTUARIO = {
     "quali", "cosa", "come", "what", "which", "under", "cual", "como",
     "bilancio", "perdita", "esercizio", "ammortamento", "passivo", "riserva",
     "compensazione", "balance", "reserve", "credit", "depreciation", "mesi",
-    "months", "liters", "hour", "pasivo", "reserva", "compensacion",
+    "months", "liters", "hour", "pasivo", "reserva", "compensacion", "portata",
 }
 
 
@@ -476,7 +476,7 @@ def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
         if match_alfa == 0:
             continue
         match_n = sum(2 if any(c.isdigit() for c in p) else 1 for p in parole if p in blocco_lower)
-        if match_n >= 2 or (match_n == 1 and len(parole) <= 3):
+        if match_n >= 2:
             valutati.append((match_n, sezione, testo))
     valutati.sort(key=lambda item: item[0], reverse=True)
     return [(sez, txt) for _, sez, txt in valutati[:1]]
