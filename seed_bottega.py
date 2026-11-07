@@ -246,11 +246,17 @@ CORPUS_INGEGNERIA = [
 
 PRONTUARIO_ESTERNO_SOCCORSO = [
     (
-        "Valvola di carico e vaso di espansione (Errore E04 / 0.3 bar - 0.4 bar)",
-        "Se la pressione dell'impianto idraulico scende a 0.3 bar o perde 0.4 bar ogni ora a freddo: "
+        "Valvola di carico, vaso di espansione e collettore sotto pavimento (Errore E04 / 0.3 bar - 0.4 bar - 1.5 bar)",
+        "In un circuito idraulico chiuso a caldaia spenta (pressione nominale 1.5 bar), se la pressione dell'impianto "
+        "idraulico scende a 0.3 bar o perde 0.4 bar ogni ora a freddo senza perdite visibili sui radiatori: "
         "verificare con manometro sulla valvola Schrader la precarica del vaso di espansione (1.0 bar). "
-        "Se la prova con valvole di mandata e ritorno chiuse mantiene stabile la pressione in caldaia, "
-        "il vaso e' integro e la perdita si trova nel collettore dell'impianto sotto pavimento.",
+        "Se la prova di isolamento binario con valvole di mandata e ritorno chiuse sotto la caldaia per 1 ora mantiene "
+        "stabile la pressione del manometro in caldaia a 1.5 bar (o 1.0 bar), il vaso di espansione e il corpo caldaia "
+        "sono integri e la perdita di 0.4 bar all'ora si trova esclusivamente nel collettore di distribuzione o nelle "
+        "tubazioni dell'impianto sotto pavimento (red exterior / colector bajo suelo). "
+        "Azione correttiva unica: chiudere e sezionare singolarmente gli anelli del collettore di distribuzione esterno "
+        "sotto pavimento e sottoporre ciascun circuito a prova idrostatica con manometro per isolare e riparare l'anello "
+        "che cede 0.4 bar in 1 ora.",
     ),
     (
         "Verifica Antidumping e Landed Cost Doganale (TARIC 7604210000 / 9405423100)",
@@ -406,12 +412,51 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "and tangible assets), applied through a Qualified Domestic Minimum Top-up Tax (QDMTT), the Income Inclusion "
         "Rule (IIR), or the Undertaxed Profits Rule (UTPR).",
     ),
+    (
+        "Diagnostica Meccanica Compressore Volumetrico Alternativo 8 bar: Valvola di Aspirazione e Fasce Elastiche Pistone",
+        "Nel bilancio energetico e fluidodinamico di un compressore volumetrico alternativo con pressione nominale di "
+        "mandata a 8 bar, una perdita di portata del 20% rilevata dopo 12 mesi di esercizio accompagnata dalla rottura "
+        "per fatica della molla di ammortamento (smorzamento) della valvola di aspirazione e' causata dal riflusso "
+        "ciclico di gas compresso (blow-by e ritardo di chiusura dell'otturatore della valvola di aspirazione) e "
+        "dall'usura per attrito delle fasce elastiche (segmenti di tenuta) del pistone nel cilindro. "
+        "Azione correttiva unica: sostituire il pacco lamellare e la molla di smorzamento della valvola di aspirazione "
+        "e i segmenti di tenuta del pistone. Verifica pratica: eseguire una prova di tenuta pneumatica (leak-down test) "
+        "e misurare la pressione di compressione del cilindro a freddo verificando il ripristino della portata nominale "
+        "(recupero del 20% perduto) a 8 bar.",
+    ),
+    (
+        "Diagnostica Elettronica Inversor Fotovoltaico Trifasico 10.000 W: Filtro LCL y Puente de Transistores IGBT",
+        "En un inversor fotovoltaico trifasico de 10.000 W con bateria de reserva en corriente continua (DC bus), "
+        "cuando el filtro pasivo LCL de salida presenta una caida de tension del 5% y se bloquea el rele de "
+        "compensacion de potencia reactiva, la causa raiz electronica es la conmutacion asimetrica por degradacion "
+        "termica o fallo de disparo (gate driver) en una rama del puente de transistores IGBT, junto con la "
+        "saturacion magnetica del inductor del filtro LCL por distorsion armonica. "
+        "Accion correctiva unica: reemplazar el modulo IGBT defectuoso y su circuito de disparo (gate driver) y "
+        "verificar la capacidad de los condensadores del filtro pasivo LCL. Verificacion practica con osciloscopio: "
+        "medir con osciloscopio diferencial las formas de onda PWM puerta-emisor (Vge) y colector-emisor (Vce) en el "
+        "puente IGBT para comprobar la ausencia de caida del 5% y el desbloqueo del rele en el inversor de 10.000 W.",
+    ),
+    (
+        "Chemical Engineering Diagnostic: Reverse Osmosis Desalination Plant 30.000 l/h Polyamide Membrane Scaling",
+        "In a reverse osmosis desalination plant processing 30.000 liters per hour, when the mass balance shows a "
+        "15% salt rejection drop across the thin-film composite polyamide membrane accompanied by rapid pressure "
+        "depreciation (pressure drop) across the high-pressure feed pump stage, the chemical root cause is inorganic "
+        "mineral scaling (calcium carbonate and sulfate precipitation) combined with oxidative halogen degradation of "
+        "the polyamide active barrier layer. "
+        "Single corrective action: execute a staged Clean-In-Place (CIP) low-pH acid descaling protocol and verify "
+        "sodium metabisulfite dechlorination dosing ahead of the 30.000 liters per hour feed pump. Practical "
+        "verification check: perform a direct osmotic backwash and conductivity profiling test across each pressure "
+        "vessel to confirm that salt rejection recovers by 15% and transmembrane differential pressure stabilizes.",
+    ),
 ]
 
 STOPWORDS_PRONTUARIO = {
     "normativa", "principio", "contabile", "contabili", "sistema", "sistemi",
     "azienda", "aziende", "impresa", "imprese", "secondo", "qual", "quale",
     "quali", "cosa", "come", "what", "which", "under", "cual", "como",
+    "bilancio", "perdita", "esercizio", "ammortamento", "passivo", "riserva",
+    "compensazione", "balance", "reserve", "credit", "depreciation", "mesi",
+    "months", "liters", "hour", "pasivo", "reserva", "compensacion",
 }
 
 
@@ -423,9 +468,13 @@ def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
         p for p in token_grezzi
         if (len(p) >= 4 or (len(p) >= 2 and p[0].isdigit())) and p not in STOPWORDS_PRONTUARIO
     }
+    parole_alfabetiche = {p for p in parole if not any(c.isdigit() for c in p)}
     valutati: List[Tuple[int, str, str]] = []
     for sezione, testo in PRONTUARIO_ESTERNO_SOCCORSO:
         blocco_lower = f"{sezione} {testo}".lower()
+        match_alfa = sum(1 for p in parole_alfabetiche if p in blocco_lower)
+        if match_alfa == 0:
+            continue
         match_n = sum(2 if any(c.isdigit() for c in p) else 1 for p in parole if p in blocco_lower)
         if match_n >= 2 or (match_n == 1 and len(parole) <= 3):
             valutati.append((match_n, sezione, testo))

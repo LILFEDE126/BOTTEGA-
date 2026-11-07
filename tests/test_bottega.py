@@ -1029,6 +1029,69 @@ def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(tmp_p
     assert "Dijkstra" not in prompt_ponte
 
 
+def test_guardia_anti_trappola_polisemica_blocca_falso_verde_su_ragioneria(monkeypatch):
+    frammento_ragioneria_trappola = (
+        "[GENERALE] Appunti Ragioneria OIC 19 > Page 18\n\n"
+        "Nel bilancio di esercizio dopo 12 mesi si rileva una perdita su crediti del 20% "
+        "e una quota di ammortamento. Il passivo di 10.000 euro e la riserva legale del 5% "
+        "in compensazione con i BOT da 30.000 euro e aliquota del 15% seguono il principio OIC 19."
+    )
+
+    q_it = (
+        "Nel bilancio energetico di un compressore volumetrico alternativo con pressione di mandata a 8 bar, "
+        "si registra una perdita di portata del 20% dopo 12 mesi di esercizio e la rottura della molla di "
+        "ammortamento della valvola di aspirazione: qual e' la causa sulle fasce elastiche del pistone?"
+    )
+    q_es = (
+        "En un inversor fotovoltaico trifasico de 10.000 W con bateria de reserva en corriente continua, "
+        "el filtro pasivo LCL presenta una caida de tension del 5% y se bloquea el rele de compensacion: "
+        "cual es el fallo en el puente de transistores IGBT y que medicion con osciloscopio realizar?"
+    )
+    q_en = (
+        "In a reverse osmosis desalination plant processing 30.000 liters per hour, the mass balance "
+        "shows a 15% salt rejection drop across the polyamide membrane and a rapid pressure depreciation "
+        "in the high-pressure feed pump: what is the chemical scaling root cause and backwash check?"
+    )
+
+    for query_trappola in (q_it, q_es, q_en):
+        q_trad = client_ollama.traduci_query_per_ricerca(query_trappola)
+        n_spec, ratio_spec = store_pgvector._copertura_termini_specifici(
+            query_trappola, q_trad, frammento_ragioneria_trappola
+        )
+        assert n_spec == 0
+        assert ratio_spec == 0.0
+
+    q_vera_ragioneria = (
+        "Come si rileva nel bilancio di esercizio la quota di ammortamento e la riserva legale "
+        "secondo il principio contabile OIC 19?"
+    )
+    n_ok, ratio_ok = store_pgvector._copertura_termini_specifici(
+        q_vera_ragioneria, q_vera_ragioneria, frammento_ragioneria_trappola
+    )
+    assert n_ok >= 2
+    assert ratio_ok >= 0.35
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="generale", top_k=3: {"semaforo": "ROJO", "s_max": 0.18, "frammenti": []},
+    )
+    esito = risolutore_artigiano.risolvi_da_artigiano(
+        q_it,
+        dominio="generale",
+        cercatore_esterno_fn=None,
+        llm_fn=lambda sys_p, usr_p, schema: risolutore_artigiano.PianoRicercaArtigiano(
+            fatti_accertati_nel_problema=["Compressore volumetrico a 8 bar", "Perdita portata 20%"],
+            dato_esatto_mancante="Curva di tenuta valvola aspirazione e fasce pistone",
+            query_chirurgica_esterna="compressore volumetrico alternativo valvola aspirazione fasce pistone",
+            ispezione_preliminare_sul_campo="Misurare compressione cilindro a freddo",
+        ),
+    )
+    assert esito["semaforo"] == "ROJO"
+    assert esito["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+
+
+
 
 
 

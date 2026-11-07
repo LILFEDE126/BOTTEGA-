@@ -91,6 +91,50 @@ PATRON_CODICE_NORMATIVO = re.compile(
     r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b|\b\d{1,4}/\d{4}\b"
 )
 
+PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
+    "perdita", "perdite", "bilancio", "bilanci", "valore", "valori",
+    "controllo", "controlli", "sistema", "sistemi", "esercizio", "esercizi",
+    "effetto", "effetti", "causa", "radice", "azione", "correttiva",
+    "unica", "regola", "metodo", "calcolo", "verifica", "esame",
+    "analisi", "stato", "parte", "punto", "caso", "casi", "modo",
+    "tempo", "anni", "anno", "mesi", "mese", "giorni", "giorno",
+    "attivo", "attivi", "passivo", "passivi", "riserva", "riserve",
+    "fondo", "fondi", "credito", "crediti", "debito", "debiti",
+    "quota", "quote", "tasso", "tassi", "limite", "limiti",
+    "normale", "nominale", "totale", "totali", "generale", "generali",
+    "tecnico", "tecnici", "normativo", "normativi", "documento", "documenti",
+    "archivio", "secondo", "quale", "quali", "quando", "perche", "come",
+    "cuenta", "valor", "valores", "control", "sistema", "ejercicio",
+    "efecto", "causa", "accion", "regla", "metodo", "calculo",
+    "activo", "pasivo", "reserva", "plazo", "limite", "total",
+    "segun", "cual", "cuales", "cuando", "como", "porque", "debe",
+    "balance", "value", "values", "control", "system", "exercise",
+    "effect", "cause", "action", "rule", "method", "check",
+    "active", "passive", "reserve", "limit", "total", "account",
+    "according", "which", "what", "when", "where", "must", "should",
+})
+
+
+def _copertura_termini_specifici(
+    query_originale: str,
+    query_tradotta: str,
+    testo_frammento: str,
+) -> Tuple[int, float]:
+    """Calculates how many non-generic domain-specific nouns (>= 5 chars) from the query appear in the fragment."""
+    testo_combinato_q = f"{query_originale} {query_tradotta}".lower()
+    token_q = {
+        t for t in re.findall(r"[a-zàèéìòùáéíóúñü]{5,}", testo_combinato_q)
+        if t not in PAROLE_POLISEMICHE_TRASVERSALI and t not in STOPWORDS_RICERCA_COMUNI
+    }
+    if not token_q:
+        return (1, 1.0)
+    testo_f_lower = testo_frammento.lower()
+    trovati = sum(1 for t in token_q if t in testo_f_lower)
+    if trovati <= 1 and len(token_q) >= 8:
+        return (0, 0.0)
+    rapporto = trovati / len(token_q)
+    return (trovati, rapporto)
+
 
 def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
     """Returns the number of indexed fragments currently stored in the in-memory RAM archive."""
@@ -492,6 +536,14 @@ def _recupera_da_archivio_ram(
             match_count += bonus_economico
         copertura = (match_count / (denominatore_copertura * 2)) if parole_q else 0.0
         sim_effettiva = max(sim_raw, min(0.95, 0.52 + 0.43 * min(1.0, copertura))) if match_count > 0 else sim_raw
+
+        n_spec, ratio_spec = _copertura_termini_specifici(query, q_bassa, testo_low)
+        min_richiesti = 1 if len(query.split()) <= 5 else 2
+        ha_ancoraggio_reale = (n_spec >= min_richiesti) or (ratio_spec >= 0.35)
+        if not ha_ancoraggio_reale:
+            sim_effettiva = min(sim_effettiva, 0.18)
+            match_count = 0
+
         valutati.append({
             "id": item["id"],
             "titolo": item["titolo"],
@@ -502,8 +554,9 @@ def _recupera_da_archivio_ram(
         })
 
     limite_k = max(top_k, 5)
-    lista_vett = sorted(valutati, key=lambda x: (x["similitudine"], x["match_count"]), reverse=True)[:20]
     con_match = [x for x in valutati if x["match_count"] > 0]
+    base_vett = con_match if con_match else valutati
+    lista_vett = sorted(base_vett, key=lambda x: (x["similitudine"], x["match_count"]), reverse=True)[:20]
     lista_it = sorted(con_match, key=lambda x: (x["match_count"], x["similitudine"]), reverse=True)[:20]
     lista_simple = list(lista_it)
 
