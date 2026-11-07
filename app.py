@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.07.v6"
+_VERSIONE_MODULI_THE = "2026.11.07.v7"
 
 
 def _allinea_moduli_in_memoria() -> None:

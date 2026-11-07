@@ -96,6 +96,13 @@ GLOSSARIO_MULTILINGUA_IT = {
     "units": "unita",
     "maquinaria": "macchinario",
     "machinery": "macchinario",
+    "incorporation": "costituzione conferimento",
+    "partner": "socio",
+    "contributes": "conferisce apporto",
+    "receivables": "crediti",
+    "payables": "debiti passivita",
+    "equity": "capitale netto patrimonio",
+    "goodwill": "avviamento",
     "amortizada": "ammortizzato",
     "plusvalía": "plusvalenza",
     "plusvalia": "plusvalenza",
@@ -327,7 +334,7 @@ def chiama_ollama_json(
                 time.sleep(2 ** (max_passi_variante - t_variante))
         except requests.exceptions.HTTPError as err:
             status_code = err.response.status_code if err.response is not None else 0
-            if usa_post_reale and status_code in (401, 402, 403) and cfg["provider"] != "gemini":
+            if usa_post_reale and status_code in (400, 401, 402, 403, 404) and cfg["provider"] != "gemini":
                 chiave_g = risolvi_chiave_api(provider="gemini")
                 if chiave_g:
                     log.warning(

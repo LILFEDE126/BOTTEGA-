@@ -125,6 +125,14 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "pressure", "depreciation", "performed", "running", "caused",
     "excessive", "timeout", "rates", "between", "recovery", "procedure",
     "adjusted", "configuration", "bilanciamento", "nodi", "nodo",
+    "iscritto", "iscritta", "iscritti", "iscritte", "netto", "netta",
+    "incremento", "incrementi", "riduce", "riduzione", "industriale",
+    "industriali", "impianto", "impianti", "isola", "isolare", "centrale",
+    "centrali", "strumentale", "assenza", "verificare", "contabile",
+    "materiali", "flusso", "flussi", "annuo", "annua", "acquisizione",
+    "ore", "minuti", "minuto", "secondi", "fatture", "fattura", "subiscono",
+    "continui", "codice", "appena", "supera", "operazioni", "nonostante",
+    "impostato", "risolvere", "singola", "verificabile", "scatta", "blocco",
 })
 
 

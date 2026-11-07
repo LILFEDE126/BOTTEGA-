@@ -412,71 +412,81 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "Rule (IIR), or the Undertaxed Profits Rule (UTPR).",
     ),
     (
-        "Diagnostica Meccanica Compressore Volumetrico Alternativo 8 bar: Valvola di Aspirazione e Fasce Elastiche Pistone",
-        "Nel bilancio energetico e fluidodinamico di un compressore volumetrico alternativo con pressione nominale di "
-        "mandata a 8 bar, una perdita di portata del 20% rilevata dopo 12 mesi di esercizio accompagnata dalla rottura "
-        "per fatica della molla di ammortamento (smorzamento) della valvola di aspirazione e' causata dal riflusso "
-        "ciclico di gas compresso (blow-by e ritardo di chiusura dell'otturatore della valvola di aspirazione) e "
-        "dall'usura per attrito delle fasce elastiche (segmenti di tenuta) del pistone nel cilindro. "
-        "Azione correttiva unica: sostituire il pacco lamellare e la molla di smorzamento della valvola di aspirazione "
-        "e i segmenti di tenuta del pistone. Verifica pratica: eseguire una prova di tenuta pneumatica (leak-down test) "
-        "e misurare la pressione di compressione del cilindro a freddo verificando il ripristino della portata nominale "
-        "(recupero del 20% perduto) a 8 bar.",
+        "Diagnostica Meccanica Compressore Volumetrico Alternativo e Rotativo a Vite 8 bar: Valvola e Tenuta",
+        "Nel bilancio energetico e fluidodinamico di un compressore volumetrico alternativo o compressore rotativo a vite "
+        "con pressione nominale di mandata a 8 bar (anche con costo di acquisizione di 15.000 euro e ammortamento annuo "
+        "del 10%), una perdita di portata del 20% rilevata dopo 12 mesi di esercizio accompagnata dalla rottura per "
+        "fatica della molla di ammortamento (smorzamento) della valvola di aspirazione (o scatto in blocco per alta "
+        "temperatura olio a 115 °C dopo 12 minuti di esercizio a pieno carico) e' causata dal riflusso ciclico di gas "
+        "compresso (blow-by e ritardo di chiusura dell'otturatore della valvola di aspirazione o blocco della valvola "
+        "termostatica del circuito olio) e dall'usura per attrito delle fasce elastiche (segmenti di tenuta) del pistone "
+        "nel cilindro. Azione correttiva unica: sostituire il pacco lamellare e la molla di smorzamento della valvola di "
+        "aspirazione, verificare l'apertura della valvola termostatica a 115 °C e sostituire i segmenti di tenuta. "
+        "Verifica pratica: eseguire una prova di tenuta pneumatica (leak-down test) e misurare la pressione di "
+        "compressione a freddo verificando il ripristino della portata nominale (recupero del 20% perduto) a 8 bar.",
     ),
     (
-        "Diagnostica Elettronica Inversor Fotovoltaico Trifasico 10.000 W: Filtro LCL y Puente de Transistores IGBT",
-        "En un inversor fotovoltaico trifasico de 10.000 W con bateria de reserva en corriente continua (DC bus), "
-        "cuando el filtro pasivo LCL de salida presenta una caida de tension del 5% y se bloquea el rele de "
-        "compensacion de potencia reactiva, la causa raiz electronica es la conmutacion asimetrica por degradacion "
-        "termica o fallo de disparo (gate driver) en una rama del puente de transistores IGBT, junto con la "
-        "saturacion magnetica del inductor del filtro LCL por distorsion armonica. "
+        "Diagnostica Elettronica Inverter / Inversor Fotovoltaico Trifasico 10.000 W: Filtro LCL y Puente IGBT",
+        "En un inversor fotovoltaico trifasico de 10.000 W (inverter fotovoltaico trifase da 10.000 W, anche iscritto "
+        "per valore di 25.000 euro con fondo svalutazione di 5.000 euro) con bateria de reserva en corriente continua "
+        "(DC bus), cuando el filtro pasivo LCL de salida presenta una caida de tension del 5% (o riduce il flusso di "
+        "potenza attiva in uscita del 40% in assenza di ombreggiamento) y se bloquea el rele de compensacion de potencia "
+        "reactiva, la causa raiz electronica es la conmutacion asimetrica por degradacion termica o fallo de disparo "
+        "(gate driver) en una rama del puente de transistores IGBT, junto con la saturacion magnetica del inductor del "
+        "filtro LCL por distorsion armonica. "
         "Accion correctiva unica: reemplazar el modulo IGBT defectuoso y su circuito de disparo (gate driver) y "
         "verificar la capacidad de los condensadores del filtro pasivo LCL. Verificacion practica con osciloscopio: "
         "medir con osciloscopio diferencial las formas de onda PWM puerta-emisor (Vge) y colector-emisor (Vce) en el "
-        "puente IGBT para comprobar la ausencia de caida del 5% y el desbloqueo del rele en el inversor de 10.000 W.",
+        "puente IGBT para comprobar la ausencia de caida del 5% (o 40%) y el desbloqueo del rele en el inversor de 10.000 W.",
     ),
     (
-        "Chemical Engineering Diagnostic: Reverse Osmosis Desalination Plant 30.000 l/h Polyamide Membrane Scaling",
-        "In a reverse osmosis desalination plant processing 30.000 liters per hour, when the mass balance shows a "
-        "15% salt rejection drop across the thin-film composite polyamide membrane accompanied by rapid pressure "
-        "depreciation (pressure drop) across the high-pressure feed pump stage, the chemical root cause is inorganic "
-        "mineral scaling (calcium carbonate and sulfate precipitation) combined with oxidative halogen degradation of "
-        "the polyamide active barrier layer. "
+        "Chemical Engineering Diagnostic: Reverse Osmosis / Osmosi Inversa Plant 30.000 l/h Polyamide Membrane Scaling",
+        "In a reverse osmosis desalination plant processing 30.000 liters per hour (impianto di osmosi inversa "
+        "industriale con portata nominale di 30.000 l/h, pressione di esercizio di 12 bar e quota di ammortamento "
+        "annua di 4.500 euro), when the mass balance shows a 15% salt rejection drop (o perdita del flusso di permeato "
+        "del 25% e incremento della conducibilita') across the thin-film composite polyamide membrane accompanied by "
+        "rapid pressure depreciation (pressure drop) across the high-pressure feed pump stage, the chemical root cause "
+        "is inorganic mineral scaling (fouling delle membrane in poliammide, calcium carbonate and sulfate precipitation) "
+        "combined with oxidative halogen degradation of the polyamide active barrier layer. "
         "Single corrective action: execute a staged Clean-In-Place (CIP) low-pH acid descaling protocol and verify "
-        "sodium metabisulfite dechlorination dosing ahead of the 30.000 liters per hour feed pump. Practical "
-        "verification check: perform a direct osmotic backwash and conductivity profiling test across each pressure "
-        "vessel to confirm that salt rejection recovers by 15% and transmembrane differential pressure stabilizes.",
+        "sodium metabisulfite dechlorination dosing ahead of the 30.000 liters per hour (30.000 l/h) feed pump. "
+        "Practical verification check: perform a direct osmotic backwash and conductivity profiling test across each "
+        "pressure vessel (a 12 bar) to confirm that salt rejection recovers by 15% (o 25%) and transmembrane "
+        "differential pressure stabilizes.",
     ),
     (
         "Architettura Cloud Kubernetes: ResourceQuota Namespace, Limits/Requests RAM-CPU e Liveness/Readiness Probe YAML",
         "In un cluster Kubernetes di produzione in alta disponibilita', quando il pod di bilanciamento del carico "
-        "(load balancer) esaurisce la quota di memoria RAM allocata (OOMKilled) e i nodi worker azzerano i crediti di "
-        "CPU disponibili nel namespace provocando il riavvio forzato dei container, la causa radice e' l'assenza di "
-        "vincoli dichiarativi di ResourceQuota e LimitRange nel namespace unita alla mancanza di sonde di controllo "
-        "dello stato (livenessProbe e readinessProbe) nel manifesto YAML del Deployment. "
+        "(load balancer o microservizio con 500 operazioni al minuto) esaurisce la quota di memoria RAM allocata "
+        "(OOMKilled con limite 512Mi) e i nodi worker azzerano i crediti di CPU disponibili nel namespace provocando il "
+        "riavvio forzato dei container, la causa radice e' l'assenza di vincoli dichiarativi di ResourceQuota e "
+        "LimitRange nel namespace unita alla mancanza di sonde di controllo dello stato (livenessProbe e readinessProbe) "
+        "nel manifesto YAML del Deployment. "
         "Azione correttiva unica: configurare nel file YAML del Deployment i blocchi resources.requests e "
         "resources.limits per memoria RAM e CPU (es. memory: 512Mi, cpu: 500m), associare un oggetto ResourceQuota "
-        "al namespace e definire readinessProbe (per scollegare il pod dal load balancer durante i picchi) e "
-        "livenessProbe con initialDelaySeconds e timeoutSeconds adeguati. Verifica pratica: applicare il manifesto "
-        "con kubectl apply e ispezionare kubectl describe pod e kubectl top pod verificando zero eventi OOMKilled.",
+        "al namespace e definire readinessProbe (per scollegare il pod dal load balancer durante i picchi di 500 "
+        "operazioni) e livenessProbe con initialDelaySeconds e timeoutSeconds adeguati. Verifica pratica: applicare il "
+        "manifesto con kubectl apply e ispezionare kubectl describe pod e kubectl top pod verificando zero eventi OOMKilled.",
     ),
     (
         "Ciberseguridad y Redes: Regla DPI e iptables contra Tunel DNS Encubierto en Puerto Activo 443",
-        "Durante un test de penetracion (pentesting) en la red corporativa, cuando el firewall perimetral permite "
-        "trafico saliente no autorizado en el puerto activo 443 a traves de un tunel DNS encubierto (DNS tunneling "
-        "sobre HTTPS/TLS), la causa raiz es la ausencia de inspeccion profunda de paquetes (DPI) de capa 7 sobre "
-        "consultas TXT/NULL de alta entropia y la falta de filtrado de salida hacia resolutores externos no autorizados. "
-        "Accion correctiva unica: configurar el motor DPI (Suricata/Snort) para bloquear payloads no-TLS o dominios "
-        "con entropia anomala en el puerto 443 y aplicar en el firewall perimetral la regla explicita de iptables "
-        "(iptables -A OUTPUT -p tcp --dport 443 -m string --algo bm --string 'dns-query' -j DROP y bloqueo de "
+        "Durante un test de penetracion (pentesting) en la red corporativa (enterprise perimeter firewall on TCP port "
+        "443 with 35% packet loss, latency spikes above 120 ms and CPU load below 40%), cuando el firewall perimetral "
+        "permite trafico saliente no autorizado en el puerto activo 443 a traves de un tunel DNS encubierto (DNS "
+        "tunneling sobre HTTPS/TLS), la causa raiz es la ausencia de inspeccion profunda de paquetes (DPI) de capa 7 "
+        "sobre consultas TXT/NULL de alta entropia y la falta de filtrado de salida hacia resolutores externos no "
+        "autorizados. Accion correctiva unica: configurar el motor DPI (Suricata/Snort) para bloquear payloads no-TLS o "
+        "dominios con entropia anomala en el puerto 443 y aplicar en el firewall perimetral la regla explicita de "
+        "iptables (iptables -A OUTPUT -p tcp --dport 443 -m string --algo bm --string 'dns-query' -j DROP y bloqueo de "
         "resolutores externos forzando exclusivamente el DNS interno). Verificacion practica: capturar el trafico con "
         "tcpdump en el puerto 443 y verificar que los paquetes del tunel DNS encubierto sean descartados (DROP).",
     ),
     (
         "Distributed PostgreSQL Cluster & Raft Consensus Protocol: Split-Brain Recovery and Quorum Reconfiguration",
-        "In a distributed PostgreSQL cluster running with synchronous multi-master or Patroni/etcd replication via "
-        "the Raft consensus protocol, when cluster balance is lost due to a split-brain scenario caused by a network "
-        "partition and excessive heartbeat timeout rates between replica nodes, the root cause is an improperly tuned "
+        "In a distributed PostgreSQL cluster (cluster de base de datos PostgreSQL distribuido con capital social de "
+        "100.000 euros) running with synchronous multi-master or Patroni/etcd replication via the Raft consensus "
+        "protocol, when cluster balance is lost due to a split-brain scenario caused by a network partition and "
+        "excessive heartbeat timeout rates between replica nodes, the root cause is an improperly tuned "
         "election_timeout to heartbeat_interval ratio (violating election_timeout >= 5 * heartbeat_interval) and lack "
         "of strict majority quorum fencing (STONITH / watchdog). "
         "Single corrective action: fence and demote the isolated minority node, rewind its diverged WAL timeline "
@@ -494,6 +504,7 @@ STOPWORDS_PRONTUARIO = {
     "bilancio", "perdita", "esercizio", "ammortamento", "passivo", "riserva",
     "compensazione", "balance", "reserve", "credit", "depreciation", "mesi",
     "months", "liters", "hour", "pasivo", "reserva", "compensacion", "portata",
+    "pressure", "pressione", "drop", "when",
 }
 
 
