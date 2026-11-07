@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.07.v3"
+_VERSIONE_MODULI_THE = "2026.11.07.v4"
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -37,34 +37,44 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
         or not hasattr(config, "risolvi_chiave_api")
     )
-    if not necessita_reload:
-        return
+    if necessita_reload:
+        archivio_precedente = list(getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", []))
+        moduli_ordinati = (
+            config,
+            logging_bottega,
+            anatomia_ast,
+            geometria_semaforo,
+            grounding_numerico,
+            ispezione_moduli,
+            presidio_concorrenza,
+            store_pgvector,
+            client_ollama,
+            seed_bottega,
+            cascata_strutturata,
+            risolutore_artigiano,
+        )
+        for modulo in moduli_ordinati:
+            importlib.reload(modulo)
 
-    archivio_precedente = list(getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", []))
-    moduli_ordinati = (
-        config,
-        logging_bottega,
-        anatomia_ast,
-        geometria_semaforo,
-        grounding_numerico,
-        ispezione_moduli,
-        presidio_concorrenza,
-        store_pgvector,
-        client_ollama,
-        seed_bottega,
-        cascata_strutturata,
-        risolutore_artigiano,
-    )
-    for modulo in moduli_ordinati:
-        importlib.reload(modulo)
+        if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
+            for voce in archivio_precedente:
+                if "testo" in voce:
+                    voce["testo"] = store_pgvector.normalizza_spazi_testo_pdf(voce["testo"])
+            store_pgvector._ARCHIVIO_MEMORIA_RAM.extend(archivio_precedente)
 
-    if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
-        for voce in archivio_precedente:
-            if "testo" in voce:
-                voce["testo"] = store_pgvector.normalizza_spazi_testo_pdf(voce["testo"])
-        store_pgvector._ARCHIVIO_MEMORIA_RAM.extend(archivio_precedente)
+        st.session_state["_versione_moduli_the"] = _VERSIONE_MODULI_THE
 
-    st.session_state["_versione_moduli_the"] = _VERSIONE_MODULI_THE
+    archivio_sess_corrente = st.session_state.get("documenti_archivio_sessione", {})
+    if archivio_sess_corrente:
+        titoli_in_ram = {
+            v.get("titolo") for v in getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", [])
+        }
+        for nome_doc_s, meta_doc_s in archivio_sess_corrente.items():
+            blocchi_s = meta_doc_s.get("blocchi") or []
+            if blocchi_s and nome_doc_s not in titoli_in_ram:
+                store_pgvector.incasella_e_salva(
+                    meta_doc_s.get("dominio", "generale"), nome_doc_s, blocchi_s
+                )
 
 
 _allinea_moduli_in_memoria()
