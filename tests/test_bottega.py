@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 5 (THE): Complete suite of 26 pure unit tests (zero network, zero DB, zero LLM).
+"""Layer 5 (THE): Complete suite of 35 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
 from decimal import Decimal
@@ -588,7 +588,6 @@ def test_risolutore_artigiano_falsificazione_sul_campo_e_prompt_ponte_web(monkey
     assert "Valvola radiatore" in prompt_web
 
 
-
 def test_estrazione_pdf_e_archivio_ram_senza_postgres(monkeypatch):
     class _FakePage:
         def extract_text(self):
@@ -635,7 +634,6 @@ def test_estrazione_pdf_e_archivio_ram_senza_postgres(monkeypatch):
     assert len(rag_res["frammenti"]) == 1
     assert "10.000,00" in rag_res["frammenti"][0]["testo"]
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
-
 
 
 def test_rotazione_modelli_gemini_su_404_503_e_fallback_deterministico_artigiano(monkeypatch):
@@ -1034,32 +1032,58 @@ def test_guardia_anti_trappola_polisemica_blocca_falso_verde_su_ragioneria(monke
         "[GENERALE] Appunti Ragioneria OIC 19 > Page 18\n\n"
         "Nel bilancio di esercizio dopo 12 mesi si rileva una perdita su crediti del 20% "
         "e una quota di ammortamento. Il passivo di 10.000 euro e la riserva legale del 5% "
-        "in compensazione con i BOT da 30.000 euro e aliquota del 15% seguono il principio OIC 19."
+        "in compensazione con i BOT da 30.000 euro e aliquota del 15% seguono il principio OIC 19. "
+        "Gestione di immobili civili da parte di un'impresa meccanica, regolare tenuta delle scritture "
+        "contabili, registrazione in maniera continua e continuativa che rappresenta un debito e costi "
+        "della produzione con disponibilita liquide."
     )
 
-    q_it = (
+    trappole = (
         "Nel bilancio energetico di un compressore volumetrico alternativo con pressione di mandata a 8 bar, "
         "si registra una perdita di portata del 20% dopo 12 mesi di esercizio e la rottura della molla di "
-        "ammortamento della valvola di aspirazione: qual e' la causa sulle fasce elastiche del pistone?"
-    )
-    q_es = (
+        "ammortamento della valvola di aspirazione: qual e' la causa meccanica radice e quale verifica va "
+        "eseguita sulla tenuta delle fasce elastiche del pistone?",
         "En un inversor fotovoltaico trifasico de 10.000 W con bateria de reserva en corriente continua, "
-        "el filtro pasivo LCL presenta una caida de tension del 5% y se bloquea el rele de compensacion: "
-        "cual es el fallo en el puente de transistores IGBT y que medicion con osciloscopio realizar?"
-    )
-    q_en = (
+        "el filtro pasivo LCL presenta una caida de tension del 5% y se bloquea el rele de compensacion de "
+        "potencia reactiva: cual es el fallo electronico en el puente de transistores IGBT y que medicion "
+        "con osciloscopio se debe realizar?",
         "In a reverse osmosis desalination plant processing 30.000 liters per hour, the mass balance "
         "shows a 15% salt rejection drop across the polyamide membrane and a rapid pressure depreciation "
-        "in the high-pressure feed pump: what is the chemical scaling root cause and backwash check?"
+        "in the high-pressure feed pump: what is the chemical scaling root cause and which osmotic backwash "
+        "check must be performed?",
+        "In un cluster Kubernetes di produzione in alta disponibilita, il pod di bilanciamento del carico "
+        "(load balancer) esaurisce la quota di memoria RAM allocata e i nodi worker azzerano i crediti di "
+        "CPU disponibili nel namespace, provocando il riavvio forzato dei container: qual e' la strategia "
+        "di resource quota e l'azione di health check da configurare nel file YAML per evitare il crash?",
+        "Durante un test de penetracion (pentesting) en la red corporativa de la empresa en el ejercicio "
+        "fiscal actual, se detecta que el firewall perimetral permite trafico saliente no autorizado en el "
+        "puerto activo 443 a traves de un tunel DNS encubierto: cual es la regla de filtrado DPI y que "
+        "comando de iptables se debe aplicar para bloquear este canal pasivo de exfiltracion de datos?",
+        "In a distributed PostgreSQL cluster running with synchronous multi-master replication via the Raft "
+        "consensus protocol, the cluster balance is lost due to a split-brain scenario caused by a network "
+        "partition and excessive heartbeat timeout rates between replica nodes: what is the leader election "
+        "recovery procedure and how must the consensus quorum configuration be adjusted?",
     )
 
-    for query_trappola in (q_it, q_es, q_en):
+    monkeypatch.setattr(store_pgvector, "_OLLAMA_EMBED_OFFLINE", True)
+    monkeypatch.setattr(store_pgvector, "_POSTGRES_OFFLINE", True)
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    store_pgvector.incasella_e_salva(
+        "generale",
+        "Appunti_Ragioneria_Completi.pdf",
+        [("Page 18", frammento_ragioneria_trappola)],
+    )
+
+    for query_trappola in trappole:
         q_trad = client_ollama.traduci_query_per_ricerca(query_trappola)
         n_spec, ratio_spec = store_pgvector._copertura_termini_specifici(
             query_trappola, q_trad, frammento_ragioneria_trappola
         )
         assert n_spec == 0
         assert ratio_spec == 0.0
+        esito_ram = store_pgvector.recupera_con_semaforo(q_trad, dominio="generale", top_k=5)
+        assert esito_ram["semaforo"] == "ROJO"
+        assert esito_ram["frammenti"] == []
 
     q_vera_ragioneria = (
         "Come si rileva nel bilancio di esercizio la quota di ammortamento e la riserva legale "
@@ -1071,27 +1095,40 @@ def test_guardia_anti_trappola_polisemica_blocca_falso_verde_su_ragioneria(monke
     assert n_ok >= 2
     assert ratio_ok >= 0.35
 
-    monkeypatch.setattr(
-        risolutore_artigiano,
-        "recupera_con_semaforo",
-        lambda q, dominio="generale", top_k=3: {"semaforo": "ROJO", "s_max": 0.18, "frammenti": []},
-    )
-    esito = risolutore_artigiano.risolvi_da_artigiano(
-        q_it,
+    esito_stop = risolutore_artigiano.risolvi_da_artigiano(
+        trappole[3],
         dominio="generale",
         cercatore_esterno_fn=None,
         llm_fn=lambda sys_p, usr_p, schema: risolutore_artigiano.PianoRicercaArtigiano(
-            fatti_accertati_nel_problema=["Compressore volumetrico a 8 bar", "Perdita portata 20%"],
-            dato_esatto_mancante="Curva di tenuta valvola aspirazione e fasce pistone",
-            query_chirurgica_esterna="compressore volumetrico alternativo valvola aspirazione fasce pistone",
-            ispezione_preliminare_sul_campo="Misurare compressione cilindro a freddo",
+            fatti_accertati_nel_problema=["Cluster Kubernetes load balancer OOMKilled"],
+            dato_esatto_mancante="Specifica ResourceQuota e livenessProbe YAML",
+            query_chirurgica_esterna="kubernetes resourcequota limits livenessprobe yaml",
+            ispezione_preliminare_sul_campo="Eseguire kubectl describe pod sul load balancer",
         ),
     )
-    assert esito["semaforo"] == "ROJO"
-    assert esito["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    assert esito_stop["semaforo"] == "ROJO"
+    assert esito_stop["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
+def test_isolamento_chiavi_provider_e_routing_trasparente_su_gemini(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
+    monkeypatch.setenv("LLM_API_KEY", "AQ.ChiaveSoloPerGoogleGemini")
 
+    assert config.ha_chiave_dedicata_provider("gemini") is True
+    assert config.ha_chiave_dedicata_provider("deepseek") is False
+    assert config.ha_chiave_dedicata_provider("openai") is False
+    assert config.ha_chiave_dedicata_provider("groq") is False
+    assert config.ha_chiave_dedicata_provider("ollama") is False
 
+    cfg_ds_senza_chiave = config.get_llm_endpoint_config(provider="deepseek", api_key=None)
+    assert cfg_ds_senza_chiave["provider"] == "gemini"
+    assert "generativelanguage.googleapis.com" in cfg_ds_senza_chiave["chat_url"]
 
-
+    cfg_ds_con_chiave = config.get_llm_endpoint_config(provider="deepseek", api_key="sk-deepseek-reale")
+    assert cfg_ds_con_chiave["provider"] == "deepseek"
+    assert cfg_ds_con_chiave["api_key"] == "sk-deepseek-reale"
+    assert "api.deepseek.com" in cfg_ds_con_chiave["chat_url"]

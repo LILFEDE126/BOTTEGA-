@@ -112,7 +112,30 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "effect", "cause", "action", "rule", "method", "check",
     "active", "passive", "reserve", "limit", "total", "account",
     "according", "which", "what", "when", "where", "must", "should",
+    "produzione", "disponibilita", "disponibili", "disponibile", "carico",
+    "scarico", "memoria", "allocata", "azzerano", "provocando", "riavvio",
+    "forzato", "strategia", "configurare", "evitare", "energetico",
+    "pressione", "mandata", "registra", "portata", "rottura", "molla",
+    "meccanica", "eseguita", "eseguire", "tenuta", "corrente", "corriente",
+    "continua", "presenta", "caida", "tensione", "tension", "bloquea",
+    "compensacion", "compensazione", "potencia", "potenza", "fallo",
+    "puente", "medicion", "realizar", "attuale", "actual", "uscita",
+    "saliente", "entrata", "applicare", "aplicar", "bloquear", "canale",
+    "canal", "datos", "processing", "liters", "shows", "across", "rapid",
+    "pressure", "depreciation", "performed", "running", "caused",
+    "excessive", "timeout", "rates", "between", "recovery", "procedure",
+    "adjusted", "configuration", "bilanciamento", "nodi", "nodo",
 })
+
+
+def _ha_match_parola_o_radice(parola_q: str, parole_frammento: set[str]) -> bool:
+    """Checks exact word match or shared 6-char morphological stem on whole words only."""
+    if parola_q in parole_frammento:
+        return True
+    if len(parola_q) >= 6:
+        radice = parola_q[:6]
+        return any(pf.startswith(radice) for pf in parole_frammento if len(pf) >= 6)
+    return False
 
 
 def _copertura_termini_specifici(
@@ -120,17 +143,29 @@ def _copertura_termini_specifici(
     query_tradotta: str,
     testo_frammento: str,
 ) -> Tuple[int, float]:
-    """Calculates how many non-generic domain-specific nouns (>= 5 chars) from the query appear in the fragment."""
-    testo_combinato_q = f"{query_originale} {query_tradotta}".lower()
+    """Calculates how many non-generic domain-specific whole words (>= 5 chars) from the query appear in the fragment."""
+    testo_q_norm = re.sub(r"[àá]", "a", f"{query_originale} {query_tradotta}".lower())
+    testo_q_norm = re.sub(r"[èé]", "e", testo_q_norm)
+    testo_q_norm = re.sub(r"[ìí]", "i", testo_q_norm)
+    testo_q_norm = re.sub(r"[òó]", "o", testo_q_norm)
+    testo_q_norm = re.sub(r"[ùúü]", "u", testo_q_norm)
+
     token_q = {
-        t for t in re.findall(r"[a-zàèéìòùáéíóúñü]{5,}", testo_combinato_q)
+        t for t in re.findall(r"[a-zñ]{5,}", testo_q_norm)
         if t not in PAROLE_POLISEMICHE_TRASVERSALI and t not in STOPWORDS_RICERCA_COMUNI
     }
     if not token_q:
         return (1, 1.0)
-    testo_f_lower = testo_frammento.lower()
-    trovati = sum(1 for t in token_q if t in testo_f_lower)
-    if trovati <= 1 and len(token_q) >= 8:
+
+    testo_f_norm = re.sub(r"[àá]", "a", testo_frammento.lower())
+    testo_f_norm = re.sub(r"[èé]", "e", testo_f_norm)
+    testo_f_norm = re.sub(r"[ìí]", "i", testo_f_norm)
+    testo_f_norm = re.sub(r"[òó]", "o", testo_f_norm)
+    testo_f_norm = re.sub(r"[ùúü]", "u", testo_f_norm)
+    parole_f = set(re.findall(r"[a-zñ]{5,}", testo_f_norm))
+
+    trovati = sum(1 for t in token_q if _ha_match_parola_o_radice(t, parole_f))
+    if trovati <= 1 and len(token_q) >= 5:
         return (0, 0.0)
     rapporto = trovati / len(token_q)
     return (trovati, rapporto)
@@ -539,7 +574,7 @@ def _recupera_da_archivio_ram(
 
         n_spec, ratio_spec = _copertura_termini_specifici(query, q_bassa, testo_low)
         min_richiesti = 1 if len(query.split()) <= 5 else 2
-        ha_ancoraggio_reale = (n_spec >= min_richiesti) or (ratio_spec >= 0.35)
+        ha_ancoraggio_reale = (n_spec >= min_richiesti) and (ratio_spec >= 0.28)
         if not ha_ancoraggio_reale:
             sim_effettiva = min(sim_effettiva, 0.18)
             match_count = 0
@@ -553,10 +588,17 @@ def _recupera_da_archivio_ram(
             "match_count": match_count,
         })
 
-    limite_k = max(top_k, 5)
     con_match = [x for x in valutati if x["match_count"] > 0]
-    base_vett = con_match if con_match else valutati
-    lista_vett = sorted(base_vett, key=lambda x: (x["similitudine"], x["match_count"]), reverse=True)[:20]
+    if not con_match:
+        return {
+            "semaforo": "ROJO",
+            "s_max": 0.18,
+            "s_dominio": 0.18,
+            "frammenti": [],
+        }
+
+    limite_k = max(top_k, 5)
+    lista_vett = sorted(con_match, key=lambda x: (x["similitudine"], x["match_count"]), reverse=True)[:20]
     lista_it = sorted(con_match, key=lambda x: (x["match_count"], x["similitudine"]), reverse=True)[:20]
     lista_simple = list(lista_it)
 

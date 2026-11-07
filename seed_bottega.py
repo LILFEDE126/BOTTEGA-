@@ -2,7 +2,6 @@
 """Layer 3 (THE): Initializes the DB schema, seeds the engineering corpus + technical cases,
 and provides the multilingual cascading search connector (Handbook -> AI Web Search -> Direct Web)."""
 
-import os
 import re
 from typing import List, Optional, Tuple
 import requests
@@ -448,6 +447,44 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "verification check: perform a direct osmotic backwash and conductivity profiling test across each pressure "
         "vessel to confirm that salt rejection recovers by 15% and transmembrane differential pressure stabilizes.",
     ),
+    (
+        "Architettura Cloud Kubernetes: ResourceQuota Namespace, Limits/Requests RAM-CPU e Liveness/Readiness Probe YAML",
+        "In un cluster Kubernetes di produzione in alta disponibilita', quando il pod di bilanciamento del carico "
+        "(load balancer) esaurisce la quota di memoria RAM allocata (OOMKilled) e i nodi worker azzerano i crediti di "
+        "CPU disponibili nel namespace provocando il riavvio forzato dei container, la causa radice e' l'assenza di "
+        "vincoli dichiarativi di ResourceQuota e LimitRange nel namespace unita alla mancanza di sonde di controllo "
+        "dello stato (livenessProbe e readinessProbe) nel manifesto YAML del Deployment. "
+        "Azione correttiva unica: configurare nel file YAML del Deployment i blocchi resources.requests e "
+        "resources.limits per memoria RAM e CPU (es. memory: 512Mi, cpu: 500m), associare un oggetto ResourceQuota "
+        "al namespace e definire readinessProbe (per scollegare il pod dal load balancer durante i picchi) e "
+        "livenessProbe con initialDelaySeconds e timeoutSeconds adeguati. Verifica pratica: applicare il manifesto "
+        "con kubectl apply e ispezionare kubectl describe pod e kubectl top pod verificando zero eventi OOMKilled.",
+    ),
+    (
+        "Ciberseguridad y Redes: Regla DPI e iptables contra Tunel DNS Encubierto en Puerto Activo 443",
+        "Durante un test de penetracion (pentesting) en la red corporativa, cuando el firewall perimetral permite "
+        "trafico saliente no autorizado en el puerto activo 443 a traves de un tunel DNS encubierto (DNS tunneling "
+        "sobre HTTPS/TLS), la causa raiz es la ausencia de inspeccion profunda de paquetes (DPI) de capa 7 sobre "
+        "consultas TXT/NULL de alta entropia y la falta de filtrado de salida hacia resolutores externos no autorizados. "
+        "Accion correctiva unica: configurar el motor DPI (Suricata/Snort) para bloquear payloads no-TLS o dominios "
+        "con entropia anomala en el puerto 443 y aplicar en el firewall perimetral la regla explicita de iptables "
+        "(iptables -A OUTPUT -p tcp --dport 443 -m string --algo bm --string 'dns-query' -j DROP y bloqueo de "
+        "resolutores externos forzando exclusivamente el DNS interno). Verificacion practica: capturar el trafico con "
+        "tcpdump en el puerto 443 y verificar que los paquetes del tunel DNS encubierto sean descartados (DROP).",
+    ),
+    (
+        "Distributed PostgreSQL Cluster & Raft Consensus Protocol: Split-Brain Recovery and Quorum Reconfiguration",
+        "In a distributed PostgreSQL cluster running with synchronous multi-master or Patroni/etcd replication via "
+        "the Raft consensus protocol, when cluster balance is lost due to a split-brain scenario caused by a network "
+        "partition and excessive heartbeat timeout rates between replica nodes, the root cause is an improperly tuned "
+        "election_timeout to heartbeat_interval ratio (violating election_timeout >= 5 * heartbeat_interval) and lack "
+        "of strict majority quorum fencing (STONITH / watchdog). "
+        "Single corrective action: fence and demote the isolated minority node, rewind its diverged WAL timeline "
+        "using pg_rewind against the authoritative leader with the highest Raft term, and reconfigure the Raft "
+        "consensus quorum to an odd number of voting nodes (minimum 3 or 5) with election_timeout set to at least "
+        "5 times the heartbeat_interval. Practical verification check: simulate a network partition and verify via "
+        "patronictl list / raft status that only the majority partition retains leader write lock with zero split-brain.",
+    ),
 ]
 
 STOPWORDS_PRONTUARIO = {
@@ -487,8 +524,8 @@ def cerca_nel_prontuario_esterno(
     provider: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
-    chiave_attiva = (api_key or os.getenv("LLM_API_KEY") or config.LLM_API_KEY or "").strip()
-    provider_attivo = (provider or os.getenv("LLM_PROVIDER") or config.LLM_PROVIDER or "ollama").strip().lower()
+    provider_attivo = (provider or config.LLM_PROVIDER or "ollama").strip().lower()
+    chiave_attiva = config.risolvi_chiave_api(api_key=api_key, provider=provider_attivo)
 
     if chiave_attiva and provider_attivo in ("gemini", "openrouter"):
         try:

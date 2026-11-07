@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.07.v5"
+_VERSIONE_MODULI_THE = "2026.11.07.v6"
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -35,7 +35,7 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(store_pgvector, "conta_frammenti_archivio_ram")
         or not hasattr(store_pgvector, "normalizza_spazi_testo_pdf")
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
-        or not hasattr(config, "risolvi_chiave_api")
+        or not hasattr(config, "ha_chiave_dedicata_provider")
     )
     if necessita_reload:
         archivio_precedente = list(getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", []))
@@ -155,37 +155,47 @@ with st.sidebar:
         "Select AI Provider:",
         PROVIDERS_DISPONIBILI,
         index=idx_provider_default,
-        help="Gemini (Google AI Studio), Groq and OpenRouter offer a Free Tier without credit card.",
+        help="Gemini (Google AI Studio) is pre-configured out-of-the-box. Other providers can use a custom key or auto-route through Gemini Cloud.",
     )
     fn_risolvi_chiave = getattr(config, "risolvi_chiave_api", None)
-    chiave_auto = fn_risolvi_chiave() if callable(fn_risolvi_chiave) else getattr(config, "LLM_API_KEY", "")
+    chiave_dedicata = (
+        fn_risolvi_chiave(provider=provider_ui)
+        if callable(fn_risolvi_chiave)
+        else getattr(config, "LLM_API_KEY", "")
+    )
     api_key_ui = ""
     model_ui = ""
     if provider_ui != "ollama":
-        if chiave_auto:
+        if chiave_dedicata:
             st.success(f"Automatic {provider_ui.upper()} API Key active (Ready to use).")
             with st.expander("Optional: Override API Key or Model"):
                 api_key_ui = st.text_input(
                     f"Custom API Key ({provider_ui.upper()}):",
                     type="password",
-                    help="Leave blank to use the built-in automatic key.",
+                    help="Leave blank to use the active key.",
                 )
                 model_ui = st.text_input(
                     "Model (optional, press Enter for default):",
                     placeholder="e.g. gemini-3.5-flash-lite or openrouter/free",
                 )
         else:
+            st.info(
+                f"No dedicated {provider_ui.upper()} key set — automatically routing via built-in Gemini Cloud "
+                f"(or enter your {provider_ui.upper()} API key below)."
+            )
             api_key_ui = st.text_input(
-                f"API Key ({provider_ui.upper()}):",
+                f"Optional {provider_ui.upper()} API Key:",
                 type="password",
-                help="Enter your API key or set LLM_API_KEY in .env / Streamlit Secrets.",
+                help=f"Enter your {provider_ui.upper()} key, or leave blank to use the built-in Gemini Cloud engine.",
             )
             model_ui = st.text_input(
-                "Model (optional, press Enter for free default):",
-                placeholder="e.g. gemini-3.5-flash-lite or openrouter/free",
+                "Model (optional, press Enter for default):",
+                placeholder=f"Default for {provider_ui}",
             )
     else:
-        st.caption("Local mode active on 127.0.0.1:11434 (Ollama).")
+        st.info(
+            "Local Ollama mode (127.0.0.1:11434) — automatically falls back to built-in Gemini Cloud when running on Streamlit Cloud."
+        )
 
     st.divider()
     st.header("2. Document & PDF Archive")
@@ -310,7 +320,11 @@ with st.sidebar:
                     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
                 st.rerun()
 
-chiave_effettiva_ui = api_key_ui.strip() if api_key_ui.strip() else (chiave_auto if provider_ui != "ollama" else None)
+chiave_effettiva_ui = (
+    api_key_ui.strip()
+    if api_key_ui.strip()
+    else (chiave_dedicata if provider_ui != "ollama" else None)
+)
 
 llm_selezionato_fn = client_ollama.costruisci_llm_fn(
     provider=provider_ui,

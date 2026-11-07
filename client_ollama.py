@@ -14,10 +14,13 @@ from config import (
     MODELLI_FALLBACK_GEMINI,
     get_llm_endpoint_config,
     opzioni_ollama_deterministiche,
+    risolvi_chiave_api,
 )
 from logging_bottega import log, log_exception
 
 T = TypeVar("T", bound=BaseModel)
+
+_REQUESTS_POST_ORIGINALE = requests.post
 
 GLOSSARIO_MULTILINGUA_IT = {
     "boiler": "caldaia",
@@ -120,7 +123,6 @@ GLOSSARIO_MULTILINGUA_IT = {
     "facturas": "fatture",
     "arrendamiento": "leasing",
     "advance": "anticipo",
-    "supplier": "fornitore",
     "invoice": "fattura",
     "bank": "banca",
     "loan": "mutuo",
@@ -233,6 +235,7 @@ def chiama_ollama_json(
     ultimo_errore: Exception | None = None
     prompt_corrente = user_prompt
     schema_dict = schema_pydantic.model_json_schema()
+    usa_post_reale = requests.post is _REQUESTS_POST_ORIGINALE
 
     while t_variante > 0:
         t_precedente = t_variante
@@ -244,6 +247,7 @@ def chiama_ollama_json(
 
         try:
             if cfg["provider"] == "ollama":
+                timeout_ollama = 3 if usa_post_reale else 180
                 payload = {
                     "model": modello_corrente,
                     "messages": [
@@ -254,7 +258,7 @@ def chiama_ollama_json(
                     "stream": False,
                     "options": opzioni_ollama_deterministiche(),
                 }
-                response = requests.post(cfg["chat_url"], json=payload, timeout=180)
+                response = requests.post(cfg["chat_url"], json=payload, timeout=timeout_ollama)
                 response.raise_for_status()
                 contenuto_json = response.json()["message"]["content"]
             else:
@@ -304,10 +308,42 @@ def chiama_ollama_json(
                 err,
                 extra={"code": "LLM_NET_001"},
             )
+            if usa_post_reale and cfg["provider"] == "ollama":
+                chiave_g = risolvi_chiave_api(provider="gemini")
+                if chiave_g:
+                    log.info(
+                        "Ollama locale non attivo sul Cloud: instrado automaticamente verso Gemini Cloud",
+                        extra={"code": "LLM_RATE_001"},
+                    )
+                    return chiama_ollama_json(
+                        system_prompt,
+                        user_prompt,
+                        schema_pydantic,
+                        max_passi_variante=max_passi_variante,
+                        provider="gemini",
+                        api_key=chiave_g,
+                    )
             if t_variante > 0:
                 time.sleep(2 ** (max_passi_variante - t_variante))
         except requests.exceptions.HTTPError as err:
             status_code = err.response.status_code if err.response is not None else 0
+            if usa_post_reale and status_code in (401, 402, 403) and cfg["provider"] != "gemini":
+                chiave_g = risolvi_chiave_api(provider="gemini")
+                if chiave_g:
+                    log.warning(
+                        "Chiave API non valida/assente per provider='%s' (HTTP %d): fallback su Gemini Cloud",
+                        cfg["provider"],
+                        status_code,
+                        extra={"code": "LLM_RATE_001"},
+                    )
+                    return chiama_ollama_json(
+                        system_prompt,
+                        user_prompt,
+                        schema_pydantic,
+                        max_passi_variante=max_passi_variante,
+                        provider="gemini",
+                        api_key=chiave_g,
+                    )
             codici_recuperabili = (
                 (400, 404, 429, 500, 502, 503, 504)
                 if cfg["provider"] == "gemini"

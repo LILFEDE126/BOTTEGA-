@@ -221,6 +221,14 @@ def _costruisci_piano_deterministico(problema: str, lingua: str = "it") -> Piano
     )
 
 
+def _sintetizza_etichetta_frammento(testo_frammento: str, max_len: int = 180) -> str:
+    """Extracts a clean, concise title/summary from a long RAG fragment to avoid repeating 3,500-char dumps."""
+    compatto = " ".join(testo_frammento.strip().split())
+    if len(compatto) <= max_len:
+        return compatto
+    return f"{compatto[:max_len].rstrip()}..."
+
+
 def _costruisci_soluzione_deterministica(
     problema: str,
     frammenti: List[dict],
@@ -230,19 +238,20 @@ def _costruisci_soluzione_deterministica(
     """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
     when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
     principale = frammenti[0]["testo"] if frammenti else problema.strip()
+    principale_breve = _sintetizza_etichetta_frammento(principale, max_len=280)
     tag_scarto = _ETICHETTE_SCARTATO.get(lingua, _ETICHETTE_SCARTATO["it"])
     tag_fals = _ETICHETTE_FALSIFICATA.get(lingua, _ETICHETTE_FALSIFICATA["it"])
-    scartati = [f"{tag_scarto} {f['testo']}" for f in frammenti[1:]]
+    scartati = [
+        f"{tag_scarto} {_sintetizza_etichetta_frammento(f['testo'], max_len=160)}"
+        for f in frammenti[1:]
+    ]
     for ip_escl in escluse_pulite:
         scartati.append(f"{tag_fals} {ip_escl}")
 
     if lingua == "en":
         return SoluzioneArtigiano(
-            risposta_finale_discorsiva=(
-                f"Based on the documents analyzed in the archive for the query ({problema.strip()}), "
-                f"the primary reference source establishes the following: {principale}"
-            ),
-            principio_guida_unico=principale,
+            risposta_finale_discorsiva=principale,
+            principio_guida_unico=principale_breve,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
                 "Direct compliance verification on the fragments extracted from the official archive."
@@ -250,7 +259,7 @@ def _costruisci_soluzione_deterministica(
             invariante_violato=(
                 "Alignment between the problem requirements and the certified parameters in the documentary source."
             ),
-            ipotesi_causale_unica=f"Direct documentary match from the priority source: {principale}",
+            ipotesi_causale_unica=f"Direct documentary match from the priority source: {principale_breve}",
             azione_correttiva_singola=(
                 f"Apply exclusively the parameters and constraints of the selected source to the case: {problema.strip()}"
             ),
@@ -260,11 +269,8 @@ def _costruisci_soluzione_deterministica(
         )
     if lingua == "es":
         return SoluzioneArtigiano(
-            risposta_finale_discorsiva=(
-                f"Según los documentos analizados en el archivo para la consulta ({problema.strip()}), "
-                f"la fuente de referencia establece lo siguiente: {principale}"
-            ),
-            principio_guida_unico=principale,
+            risposta_finale_discorsiva=principale,
+            principio_guida_unico=principale_breve,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
                 "Verificación directa de conformidad sobre los fragmentos extraídos del archivo oficial."
@@ -272,7 +278,7 @@ def _costruisci_soluzione_deterministica(
             invariante_violato=(
                 "Alineación entre los requisitos del problema y los parámetros certificados en la fuente documental."
             ),
-            ipotesi_causale_unica=f"Respaldo documental directo de la fuente prioritaria: {principale}",
+            ipotesi_causale_unica=f"Respaldo documental directo de la fuente prioritaria: {principale_breve}",
             azione_correttiva_singola=(
                 f"Aplicar exclusivamente los parámetros y límites de la fuente seleccionada al caso: {problema.strip()}"
             ),
@@ -281,11 +287,8 @@ def _costruisci_soluzione_deterministica(
             ),
         )
     return SoluzioneArtigiano(
-        risposta_finale_discorsiva=(
-            f"In base ai documenti analizzati nell'archivio per il quesito ({problema.strip()}), "
-            f"la fonte di riferimento stabilisce quanto segue: {principale}"
-        ),
-        principio_guida_unico=principale,
+        risposta_finale_discorsiva=principale,
+        principio_guida_unico=principale_breve,
         elementi_scartati_per_non_fare_mucchio=scartati,
         precondizione_wp_richiesta=(
             "Verifica diretta di conformita' sui frammenti estratti dall'archivio ufficiale."
@@ -293,7 +296,7 @@ def _costruisci_soluzione_deterministica(
         invariante_violato=(
             "Allineamento tra i requisiti del problema e i parametri certificati nella fonte documentale."
         ),
-        ipotesi_causale_unica=f"Riscontro documentale diretto dalla fonte prioritaria: {principale}",
+        ipotesi_causale_unica=f"Riscontro documentale diretto dalla fonte prioritaria: {principale_breve}",
         azione_correttiva_singola=(
             f"Applicare esclusivamente i parametri e i vincoli della fonte selezionata al caso: {problema.strip()}"
         ),

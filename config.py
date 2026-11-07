@@ -23,6 +23,14 @@ MODELLI_FALLBACK_GEMINI = (
     "gemini-2.5-flash",
 )
 
+_VARIABILI_CHIAVE_PER_PROVIDER = MappingProxyType({
+    "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY"),
+    "groq": ("GROQ_API_KEY",),
+    "openrouter": ("OPENROUTER_API_KEY",),
+    "deepseek": ("DEEPSEEK_API_KEY",),
+    "openai": ("OPENAI_API_KEY",),
+})
+
 
 def _decodifica_chiave_cloud_default() -> str:
     """Reconstructs the fallback Google AI Studio key so the cloud app works out-of-the-box."""
@@ -63,10 +71,25 @@ LLM_API_KEY = (
 ).strip()
 
 
-def risolvi_chiave_api(api_key: Optional[str] = None) -> str:
-    """Resolves the active Cloud LLM API key from explicit arg, Streamlit Secrets, .env or built-in fallback."""
+def risolvi_chiave_api(api_key: Optional[str] = None, provider: Optional[str] = None) -> str:
+    """Resolves the active Cloud LLM API key for the requested provider without leaking Gemini's key to other providers."""
     if api_key is not None and api_key.strip():
         return api_key.strip()
+
+    prov = (provider or "gemini").strip().lower()
+    if prov in _VARIABILI_CHIAVE_PER_PROVIDER and prov != "gemini":
+        for nome_var in _VARIABILI_CHIAVE_PER_PROVIDER[prov]:
+            da_secret = _leggi_secret_streamlit(nome_var)
+            if da_secret:
+                return da_secret
+            da_env = os.getenv(nome_var)
+            if da_env is not None and da_env.strip():
+                return da_env.strip()
+        llm_env_generica = os.getenv("LLM_API_KEY") or _leggi_secret_streamlit("LLM_API_KEY") or ""
+        if llm_env_generica.strip() and not llm_env_generica.strip().startswith("AQ."):
+            return llm_env_generica.strip()
+        return ""
+
     for nome_var in ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
         da_secret = _leggi_secret_streamlit(nome_var)
         if da_secret:
@@ -75,6 +98,14 @@ def risolvi_chiave_api(api_key: Optional[str] = None) -> str:
         if da_env is not None:
             return da_env.strip()
     return LLM_API_KEY.strip()
+
+
+def ha_chiave_dedicata_provider(provider: str, api_key: Optional[str] = None) -> bool:
+    """Returns True if the selected provider has a valid dedicated API key configured."""
+    prov = (provider or "gemini").strip().lower()
+    if prov == "ollama":
+        return False
+    return bool(risolvi_chiave_api(api_key=api_key, provider=prov))
 
 
 def get_db_config() -> dict:
@@ -130,7 +161,8 @@ def get_llm_endpoint_config(
     api_key: Optional[str] = None,
     model: Optional[str] = None,
 ) -> dict:
-    """Returns endpoint URL, model name and API key for local Ollama or Cloud API providers."""
+    """Returns endpoint URL, model name and API key for local Ollama or Cloud API providers.
+    If a non-Gemini cloud provider is selected without its dedicated API key, transparently routes to Gemini."""
     prov = (provider or LLM_PROVIDER or "gemini").strip().lower()
     if prov == "ollama":
         return {
@@ -142,9 +174,24 @@ def get_llm_endpoint_config(
     if prov not in PROVIDER_CLOUD_CONFIG:
         raise ValueError(f"Provider LLM non supportato: '{prov}'.")
 
+    chiave_specifica = (
+        api_key.strip()
+        if (api_key is not None and api_key.strip())
+        else risolvi_chiave_api(api_key=None, provider=prov)
+    )
+    if not chiave_specifica and prov != "gemini":
+        chiave_fallback_gemini = risolvi_chiave_api(api_key=None, provider="gemini")
+        if chiave_fallback_gemini:
+            info_g = PROVIDER_CLOUD_CONFIG["gemini"]
+            return {
+                "provider": "gemini",
+                "chat_url": info_g["chat_url"],
+                "model": info_g["default_model"],
+                "api_key": chiave_fallback_gemini,
+            }
+
     info = PROVIDER_CLOUD_CONFIG[prov]
-    chiave = (api_key.strip() if (api_key is not None and api_key.strip()) else risolvi_chiave_api(api_key))
-    if not chiave:
+    if not chiave_specifica:
         raise RuntimeError(
             f"Chiave API mancante per il provider '{prov}'. Imposta LLM_API_KEY o inseriscila nella UI."
         )
@@ -152,7 +199,7 @@ def get_llm_endpoint_config(
         "provider": prov,
         "chat_url": info["chat_url"],
         "model": model or info["default_model"],
-        "api_key": chiave,
+        "api_key": chiave_specifica,
     }
 
 
