@@ -530,7 +530,8 @@ def risolvi_da_artigiano(
             "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding principle from those retrieved, "
             "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant, "
             "and formulate ONE SINGLE causal hypothesis with its practical verification test. "
-            "CRITICAL NUMERIC RULE: Every single number or percentage you write MUST appear identically in FRAMMENTI RECUPERATI or PROBLEMA.\n\n"
+            "CRITICAL NUMERIC RULE: Every single number or percentage you write MUST appear identically in FRAMMENTI RECUPERATI or PROBLEMA. "
+            "Do NOT write intermediate arithmetic steps or numbers that are not explicitly written in FRAMMENTI RECUPERATI or PROBLEMA.\n\n"
             f"{blocco_lingua}",
             f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
             f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"

@@ -133,16 +133,18 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "ore", "minuti", "minuto", "secondi", "fatture", "fattura", "subiscono",
     "continui", "codice", "appena", "supera", "operazioni", "nonostante",
     "impostato", "risolvere", "singola", "verificabile", "scatta", "blocco",
+    "costo", "costi", "attiva", "pieno", "piena", "diagnostica", "diagnostico",
+    "immobilizzazioni", "immobilizzazione", "svalutazione", "ammortamento",
 })
 
 
 def _ha_match_parola_o_radice(parola_q: str, parole_frammento: set[str]) -> bool:
-    """Checks exact word match or shared 6-char morphological stem on whole words only."""
+    """Checks exact word match or shared morphological stem (stripping final inflection vowel/s) on whole words only."""
     if parola_q in parole_frammento:
         return True
     if len(parola_q) >= 6:
-        radice = parola_q[:6]
-        return any(pf.startswith(radice) for pf in parole_frammento if len(pf) >= 6)
+        radice = parola_q[:-2] if parola_q.endswith("es") and len(parola_q) >= 7 else parola_q[:-1]
+        return any(pf.startswith(radice) and abs(len(pf) - len(parola_q)) <= 2 for pf in parole_frammento)
     return False
 
 
