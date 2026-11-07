@@ -968,5 +968,67 @@ def test_deduplicazione_file_duplicati_ragioneria_multilingua_e_cascata_rojo_ver
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
+def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(tmp_path, monkeypatch):
+    import cascata_strutturata
+
+    codice_sample = (
+        "CACHE_FATTURE = []\n"
+        "def elabora(valore):\n"
+        "    CACHE_FATTURE.append(valore)\n"
+        "    return valore\n"
+    )
+    res_ast = analizza_codice_ast(codice_sample)
+    assert res_ast["usi_global_mutabili"] == 1
+
+    file_py = tmp_path / "sample_audit.py"
+    file_py.write_text(codice_sample, encoding="utf-8")
+
+    monkeypatch.setattr(
+        cascata_strutturata,
+        "recupera_con_semaforo",
+        lambda q, dom, top_k=2: {"semaforo": "VERDE", "s_max": 0.90, "s_dominio": 0.85, "frammenti": []},
+    )
+
+    def finto_llm_cascata(sys_p, usr_p, schema):
+        if schema is cascata_strutturata.OutputLeonardo:
+            return cascata_strutturata.OutputLeonardo(
+                osservazione_architetturale="Struttura semplice a 1 funzione.",
+                scomposizione_moduli=["Modulo puro"],
+                complessita_inutile_rilevata=["Lista mutabile globale"],
+                proposta_semplificata="Eliminare stato mutabile.",
+            )
+        if schema is cascata_strutturata.OutputAntirez:
+            return cascata_strutturata.OutputAntirez(
+                criticita_sicurezza_e_limiti=["Race condition su lista globale"],
+                guardrail_mancanti=["Validazione input"],
+                valutazione_originalita="Codice minimale.",
+                test_consigliati=["Test concorrenza"],
+            )
+        return cascata_strutturata.OutputDijkstra(
+            dominio_e_codominio="int -> int",
+            invarianti=["Nessuna mutazione globale"],
+            complessita_big_o="O(1)",
+            codice_raffinato_finale="def elabora(valore: int) -> int:\n    return valore",
+            voto_finale=8,
+        )
+
+    referto = cascata_strutturata.esegui_cascata(str(file_py), llm_fn=finto_llm_cascata)
+    assert "## 1. Strato L" in referto
+    assert "## 2. Strato A" in referto
+    assert "## 3. Strato D" in referto
+    assert "Semafori RAG**: Strato L" in referto
+    assert "Leonardo" not in referto
+    assert "antirez" not in referto
+    assert "Dijkstra" not in referto
+
+    prompt_ponte = risolutore_artigiano.genera_prompt_ponte_web_gratuito(
+        "Verifica bilancio", [("Sez 1", "Dato 100 euro")]
+    )
+    assert "Strato L + Strato A + Strato D" in prompt_ponte
+    assert "Leonardo" not in prompt_ponte
+    assert "Dijkstra" not in prompt_ponte
+
+
+
 
 

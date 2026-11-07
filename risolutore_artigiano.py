@@ -54,7 +54,7 @@ class SoluzioneArtigiano(BaseModel):
         description="Which conservation equilibrium (pressure, accounting balance, data state) broke"
     )
     ipotesi_causale_unica: str = Field(
-        description="The SINGLE simplest root cause (Leonardo's Principle of Necessity)"
+        description="The SINGLE simplest root cause (Strato L Principle of Necessity)"
     )
     azione_correttiva_singola: str = Field(
         description="The single targeted intervention to execute step-by-step without mixing alternatives"
@@ -324,13 +324,13 @@ def genera_prompt_ponte_web_gratuito(
             )
 
     return (
-        "Agisci come un maestro artigiano e ingegnere diagnostico (Metodo Leonardo + Dijkstra EWD401).\n"
+        "Agisci come un ingegnere diagnostico rigoroso (Architettura Strato L + Strato A + Strato D — wp(S, R)).\n"
         "LINGUA / LANGUAGE / IDIOMA: Rispondi nella STESSA LINGUA usata nel PROBLEMA qui sotto "
         "(Reply in the exact same language used in the problem below: English, Español, Italiano, etc.).\n"
         "REGOLE TASSATIVE:\n"
         "1. NON FARE MUCCHIO (ZERO CLUTTER): Scegli UN SOLO principio guida dal contesto qui sotto e dichiara "
         "esplicitamente quali altri frammenti o ipotesi hai scartato.\n"
-        "2. ZERO CIFRE INVENTATE: Ogni numero, percentuale, importo o pressione che scrivi DEVE esistere "
+        "2. ZERO CIFRE INVENTATE: Ogni numero, percentuale, importo o parametro che scrivi DEVE esistere "
         "identico nel Contesto o nel Problema qui sotto.\n"
         "3. STRUTTURA OBBLIGATORIA DELLA RISPOSTA:\n"
         "   - Principio guida scelto / Selected guiding principle:\n"
@@ -370,8 +370,8 @@ def risolvi_da_artigiano(
         try:
             piano: PianoRicercaArtigiano = llm_fn(
                 f"{blocco_lingua}\n\n"
-                "You are a diagnostic engineer respecting Dijkstra's Law of the Excluded Miracle "
-                "(EWD401: wp(S, false) = false). Your memory does NOT contain sufficient data (Semaforo ROJO). "
+                "You are a diagnostic engineer respecting the Law of the Excluded Miracle "
+                "(Strato D: wp(S, false) = false). Your memory does NOT contain sufficient data (Semaforo ROJO). "
                 "It is FORBIDDEN to guess or mix random solutions. Isolate certain facts, state which single "
                 "datum is missing, and formulate the exact search query.",
                 f"PROBLEMA IMPREVISTO:\n{problema}\n\n{blocco_lingua}",
@@ -463,8 +463,8 @@ def risolvi_da_artigiano(
     try:
         soluzione: SoluzioneArtigiano = llm_fn(
             f"{blocco_lingua}\n\n"
-            "You are a master diagnostic engineer applying Leonardo's Principle of Necessity and Dijkstra's "
-            "Weakest Preconditions wp(S, R) (EWD401). "
+            "You are a master diagnostic engineer applying Strato L (Principle of Necessity), Strato A (Pragmatic Guardrails), "
+            "and Strato D (Weakest Preconditions wp(S, R)). "
             "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer (4-6 sentences) "
             "that any person can easily read and understand, directly answering the user's question with the exact "
             "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "

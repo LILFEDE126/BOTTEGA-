@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 3 (THE): 3-Layer Code Review Cascade (Leonardo -> antirez -> Dijkstra) with EWD426
+"""Layer 3 (THE): 3-Layer Code Review Cascade (Strato L -> Strato A -> Strato D) with EWD426
 Self-Stabilization, EL X8 Exact Rounding (EWD145) and Tri-Color Write Barrier (EWD496A)."""
 
 import json
@@ -78,7 +78,7 @@ def _formatta_frammenti_rag(risultato_rag: dict) -> str:
 
 
 def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str:
-    """Runs AST/THE inspection, hybrid RAG retrieval and the 3 sequential judgment layers."""
+    """Runs AST/THE inspection, hybrid RAG retrieval and the 3 sequential judgment layers (Strato L, Strato A, Strato D)."""
     percorso = Path(file_path)
     if not percorso.is_file():
         raise FileNotFoundError(f"File non trovato: {file_path}")
@@ -106,35 +106,38 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
     ctx_ant = _formatta_frammenti_rag(rag_ant)
     ctx_dij = _formatta_frammenti_rag(rag_dij)
 
-    log.info("[Passo 2/4] Strato 1/3: Leonardo", extra={"code": "CAS_LEO_001"})
+    log.info("[Passo 2/4] Strato 1/3: Strato L", extra={"code": "CAS_LEO_001"})
     t0 = time.perf_counter()
     out_leo = llm_fn(
-        "Sei il primo strato (Leonardo): analizza l'anatomia empirica AST del codice, "
-        "separa calcolo puro e I/O e individua ogni complessita' superflua. Rispondi in italiano.",
-        f"PRINCIPI LEONARDO:\n{ctx_leo}\n\nANATOMIA AST:\n{anatomia_json}\n\n"
+        "Sei il primo strato (Strato L — Osservazione e Semplicita'): analizza l'anatomia empirica AST del codice, "
+        "separa calcolo puro e I/O e individua ogni complessita' superflua. Non citare nomi propri di autori nei testi; "
+        "usa esclusivamente i termini Strato L, Strato A, Strato D. Rispondi in italiano.",
+        f"PRINCIPI STRATO L:\n{ctx_leo}\n\nANATOMIA AST:\n{anatomia_json}\n\n"
         f"CODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
         OutputLeonardo,
     )
     t_leo = arrotonda_esatto_el_x8(time.perf_counter() - t0, 2)
 
-    log.info("[Passo 3/4] Strato 2/3: antirez", extra={"code": "CAS_ANT_001"})
+    log.info("[Passo 3/4] Strato 2/3: Strato A", extra={"code": "CAS_ANT_001"})
     t0 = time.perf_counter()
     out_anti = llm_fn(
-        "Sei il secondo strato (antirez): individua i punti di rottura in produzione, "
-        "gli except nudi, i timeout mancanti, i lock mal gestiti e i test di rottura. Rispondi in italiano.",
-        f"PRINCIPI ANTIREZ:\n{ctx_ant}\n\nANALISI LEONARDO:\n{out_leo.model_dump_json(indent=2)}\n\n"
+        "Sei il secondo strato (Strato A — Guardrail e Pragmatismo): individua i punti di rottura in produzione, "
+        "gli except nudi, i timeout mancanti, i lock mal gestiti e i test di rottura. Non citare nomi propri di autori; "
+        "usa esclusivamente Strato L, Strato A, Strato D. Rispondi in italiano.",
+        f"PRINCIPI STRATO A:\n{ctx_ant}\n\nANALISI STRATO L:\n{out_leo.model_dump_json(indent=2)}\n\n"
         f"ANATOMIA AST:\n{anatomia_json}\n\nCODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
         OutputAntirez,
     )
     t_anti = arrotonda_esatto_el_x8(time.perf_counter() - t0, 2)
 
-    log.info("[Passo 4/4] Strato 3/3: Dijkstra", extra={"code": "CAS_DIJ_001"})
+    log.info("[Passo 4/4] Strato 3/3: Strato D", extra={"code": "CAS_DIJ_001"})
     t0 = time.perf_counter()
     out_dijk = llm_fn(
-        "Sei il terzo strato (Dijkstra): formalizza dominio, codominio, invarianti, complessita' Big-O "
-        "e riscrivi il codice Python completo applicando le osservazioni di Leonardo e i guardrail di antirez.",
-        f"PRINCIPI DIJKSTRA:\n{ctx_dij}\n\nANALISI LEONARDO:\n{out_leo.model_dump_json(indent=2)}\n\n"
-        f"ANALISI ANTIREZ:\n{out_anti.model_dump_json(indent=2)}\n\n"
+        "Sei il terzo strato (Strato D — Rigore Formale e Refactoring): formalizza dominio, codominio, invarianti, "
+        "complessita' Big-O e riscrivi il codice Python completo applicando le osservazioni dello Strato L e i guardrail "
+        "dello Strato A. Non citare nomi propri di autori nei testi; usa esclusivamente Strato L, Strato A, Strato D.",
+        f"PRINCIPI STRATO D:\n{ctx_dij}\n\nANALISI STRATO L:\n{out_leo.model_dump_json(indent=2)}\n\n"
+        f"ANALISI STRATO A:\n{out_anti.model_dump_json(indent=2)}\n\n"
         f"CODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
         OutputDijkstra,
     )
@@ -173,25 +176,25 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
         f"- **Cicli privi di variante t (EWD316)**: {anatomia['cicli_senza_variante']}\n"
         f"- **Variabili globali mutabili (EWD35)**: {anatomia['usi_global_mutabili']}\n"
         f"- **Violazioni Gerarchia THE (EWD196)**: {anatomia['violazioni_gerarchia_the'] or 'Nessuna'}\n"
-        f"- **Semafori RAG**: Leonardo `{rag_leo['semaforo']}` (s_max={rag_leo['s_max']}) | "
-        f"antirez `{rag_ant['semaforo']}` (s_max={rag_ant['s_max']}) | "
-        f"Dijkstra `{rag_dij['semaforo']}` (s_max={rag_dij['s_max']})\n"
+        f"- **Semafori RAG**: Strato L `{rag_leo['semaforo']}` (s_max={rag_leo['s_max']}) | "
+        f"Strato A `{rag_ant['semaforo']}` (s_max={rag_ant['s_max']}) | "
+        f"Strato D `{rag_dij['semaforo']}` (s_max={rag_dij['s_max']})\n"
         f"- **Barriera Tri-Colore Grounding (EWD496A)**: {stato_grounding}\n\n"
         f"```dot\n{anatomia['dot_graph']}\n```\n\n"
         f"---\n\n"
-        f"## 1. Strato Leonardo — Osservazione e Semplicita' ({t_leo}s)\n"
+        f"## 1. Strato L — Osservazione e Semplicita' ({t_leo}s)\n"
         f"**Osservazione architetturale:** {out_leo.osservazione_architetturale}\n\n"
         f"**Scomposizione in moduli:**\n{scomposizione_md}\n\n"
         f"**Complessita' superflua rilevata:**\n{complessita_md}\n\n"
         f"**Proposta di semplificazione:** {out_leo.proposta_semplificata}\n\n"
         f"---\n\n"
-        f"## 2. Strato antirez — Guardrail e Pragmatismo ({t_anti}s)\n"
+        f"## 2. Strato A — Guardrail e Pragmatismo ({t_anti}s)\n"
         f"**Criticita' e punti di rottura:**\n{criticita_md}\n\n"
         f"**Guardrail obbligatori:**\n{guardrail_md}\n\n"
         f"**Valutazione solidita':** {out_anti.valutazione_originalita}\n\n"
         f"**Test di rottura consigliati:**\n{test_md}\n\n"
         f"---\n\n"
-        f"## 3. Strato Dijkstra — Rigore Formale e Refactoring ({t_dijk}s)\n"
+        f"## 3. Strato D — Rigore Formale e Refactoring ({t_dijk}s)\n"
         f"- **Dominio e Codominio:** {out_dijk.dominio_e_codominio}\n"
         f"- **Complessita' Asintotica:** `{out_dijk.complessita_big_o}`\n"
         f"- **Voto Ingegneristico al codice originale:** **{out_dijk.voto_finale}/10**\n\n"

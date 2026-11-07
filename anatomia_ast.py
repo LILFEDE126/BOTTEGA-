@@ -78,7 +78,7 @@ def analizza_codice_ast(codice: str) -> Dict[str, Any]:
         if isinstance(nodo, ast.ExceptHandler):
             if nodo.type is None:
                 totale_except_nudi += 1
-            elif isinstance(nodo.type, ast.Name) and nodo.type.id in ("Exception", "BaseException"):
+            elif isinstance(sub_type := nodo.type, ast.Name) and sub_type.id in ("Exception", "BaseException"):
                 totale_except_generici += 1
         elif isinstance(nodo, ast.Global):
             usi_global_mutabili += len(nodo.names)
@@ -93,7 +93,11 @@ def analizza_codice_ast(codice: str) -> Dict[str, Any]:
             import_rilevati.append(nodo.module.split(".")[0])
 
     for nodo in albero.body:
-        if isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef)):
+        if isinstance(nodo, ast.Assign) and isinstance(nodo.value, (ast.List, ast.Dict, ast.Set)):
+            usi_global_mutabili += len(nodo.targets)
+        elif isinstance(nodo, ast.AnnAssign) and isinstance(nodo.value, (ast.List, ast.Dict, ast.Set)):
+            usi_global_mutabili += 1
+        elif isinstance(nodo, (ast.FunctionDef, ast.AsyncFunctionDef)):
             info_fn, archi = _analizza_nodo_funzione(nodo)
             funzioni.append(info_fn)
             archi_chiamate.extend(archi)
