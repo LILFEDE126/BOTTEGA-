@@ -203,6 +203,86 @@ def _copertura_termini_specifici(
     return (trovati, rapporto)
 
 
+PAROLE_CALENDARIO_E_TEMPO = frozenset({
+    "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto",
+    "settembre", "ottobre", "novembre", "dicembre",
+    "enero", "febrero", "abril", "mayo", "junio", "julio", "septiembre", "octubre",
+    "noviembre", "diciembre",
+    "january", "february", "march", "april", "june", "july", "august", "september",
+    "october", "november", "december",
+    "lunedi", "martedi", "mercoledi", "giovedi", "venerdi", "sabato", "domenica",
+    "lunes", "martes", "miercoles", "jueves", "viernes", "domingo",
+    "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+    "oggi", "domani", "ieri", "dopodomani", "stasera", "stanotte", "stamattina", "prossimo",
+    "prossima", "prossimi", "settimana", "weekend", "today", "tomorrow", "yesterday",
+    "tonight", "next", "week", "hoy", "manana", "ayer", "pasado", "semana", "proximo", "proxima",
+})
+
+
+def _normalizza_accenti_minuscolo(testo: str) -> str:
+    """Lowercases text and folds Italian/Spanish accented vowels to their plain form."""
+    testo_n = re.sub(r"[àáâ]", "a", testo.lower())
+    testo_n = re.sub(r"[èéê]", "e", testo_n)
+    testo_n = re.sub(r"[ìíî]", "i", testo_n)
+    testo_n = re.sub(r"[òóô]", "o", testo_n)
+    return re.sub(r"[ùúüû]", "u", testo_n)
+
+
+def estrai_nomi_propri_query(query_originale: str) -> set[str]:
+    """Collects capitalized words that do not open a sentence in the original query (places, companies, people)."""
+    nomi: set[str] = set()
+    for frase in re.split(r"[.!?¿¡\n:;]+", query_originale or ""):
+        parole_frase = re.findall(r"[A-Za-zÀ-ÿñÑ]+", frase)
+        for parola in parole_frase[1:]:
+            if len(parola) >= 3 and parola[0].isupper() and not parola.isupper():
+                nomi.add(_normalizza_accenti_minuscolo(parola))
+    return nomi
+
+
+def estrai_nomi_propri_frammento(testo_frammento: str) -> set[str]:
+    """Words that appear only capitalized in the fragment and at least once in mid-sentence position."""
+    stato: Dict[str, List[bool]] = {}
+    for m in re.finditer(r"[A-Za-zÀ-ÿñÑ]{3,}", testo_frammento or ""):
+        parola = m.group(0)
+        if parola.isupper():
+            continue
+        chiave = _normalizza_accenti_minuscolo(parola)
+        voce = stato.setdefault(chiave, [True, False])
+        if not parola[0].isupper():
+            voce[0] = False
+            continue
+        prefisso = testo_frammento[max(0, m.start() - 2):m.start()]
+        if re.match(r"[a-zà-ÿ0-9,] ", prefisso):
+            voce[1] = True
+    return {chiave for chiave, (sempre_maiuscola, meta_frase) in stato.items() if sempre_maiuscola and meta_frase}
+
+
+def ha_termine_tematico(query_originale: str, query_tradotta: str, testo_frammento: str) -> bool:
+    """Strato A guard: a shared place, company or person name or a shared date never proves a shared subject.
+    At least one subject word of the query (not a proper name, not a calendar word) must appear in the fragment."""
+    testo_q_norm = _normalizza_accenti_minuscolo(f"{query_originale} {query_tradotta}")
+    nomi_propri = estrai_nomi_propri_query(query_originale) | estrai_nomi_propri_frammento(testo_frammento)
+    parole_f = set(re.findall(r"[a-zñ]{3,}", _normalizza_accenti_minuscolo(testo_frammento)))
+
+    token_forti = {
+        t for t in re.findall(r"[a-zñ]{5,}", testo_q_norm)
+        if t not in PAROLE_POLISEMICHE_TRASVERSALI and t not in STOPWORDS_RICERCA_COMUNI
+    }
+    soggetto_forte = {t for t in token_forti if t not in nomi_propri and t not in PAROLE_CALENDARIO_E_TEMPO}
+    if soggetto_forte:
+        return any(_ha_match_parola_o_radice(t, parole_f) for t in soggetto_forte)
+
+    token_tutti = set(re.findall(r"[a-zñ]{4,}", testo_q_norm))
+    solo_nomi_o_date = {t for t in token_tutti if t in nomi_propri or t in PAROLE_CALENDARIO_E_TEMPO}
+    soggetto_debole = {
+        t for t in token_tutti
+        if t not in nomi_propri and t not in PAROLE_CALENDARIO_E_TEMPO and t not in STOPWORDS_RICERCA_COMUNI
+    }
+    if soggetto_debole:
+        return any(_ha_match_parola_o_radice(t, parole_f) for t in soggetto_debole)
+    return not solo_nomi_o_date
+
+
 def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
     """Returns the number of indexed fragments currently stored in the in-memory RAM archive."""
     if titolo is None:
@@ -433,7 +513,7 @@ def incasella_e_salva(dominio: str, titolo: str, blocchi: List[Tuple[str, str]])
     """Deduplicates blocks via content-based SHA-256, computes embeddings outside the lock and updates
     PostgreSQL or the in-memory session archive when running on cloud without local PostgreSQL."""
     global _POSTGRES_OFFLINE
-    righe_grezze: List[Tuple[str, str, str]] = []
+    righe_grezze: List[Tuple[str, str, str, str]] = []
     hash_visti_batch = set()
     for sezione, contenuto in blocchi:
         if not contenuto or not contenuto.strip():
@@ -443,7 +523,7 @@ def incasella_e_salva(dominio: str, titolo: str, blocchi: List[Tuple[str, str]])
         h = hashlib.sha256(impronta_contenuto.encode("utf-8")).hexdigest()
         if h not in hash_visti_batch:
             hash_visti_batch.add(h)
-            righe_grezze.append((sezione.strip(), ancorato, h))
+            righe_grezze.append((sezione.strip(), ancorato, h, f"{sezione.strip()}\n\n{contenuto.strip()}"))
 
     if not righe_grezze:
         return 0
@@ -466,6 +546,7 @@ def incasella_e_salva(dominio: str, titolo: str, blocchi: List[Tuple[str, str]])
                     "titolo": titolo,
                     "sezione": righe[i][0],
                     "testo": righe[i][1],
+                    "corpo": righe[i][3],
                     "hash_text": righe[i][2],
                     "embedding": vettori[i],
                 })
@@ -590,7 +671,10 @@ def _recupera_da_archivio_ram(
 
     for item in candidati:
         sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
-        testo_low = item["testo"].lower()
+        testo_valutato = item["testo"]
+        if str(item.get("titolo", "")).startswith("Ricerca:") and item.get("corpo"):
+            testo_valutato = item["corpo"]
+        testo_low = testo_valutato.lower()
         token_set_low = set(re.findall(r"\d+(?:[.,]\d+)+|\w+", testo_low))
         match_count = 0
         for p in parole_q:
@@ -608,6 +692,8 @@ def _recupera_da_archivio_ram(
         n_spec, ratio_spec = _copertura_termini_specifici(query, q_bassa, testo_low)
         min_richiesti = 1 if len(query.split()) <= 5 else 2
         ha_ancoraggio_reale = (n_spec >= min_richiesti) and (ratio_spec >= 0.28)
+        if ha_ancoraggio_reale and not ha_termine_tematico(query, q_bassa, testo_valutato):
+            ha_ancoraggio_reale = False
         if not ha_ancoraggio_reale:
             sim_effettiva = min(sim_effettiva, 0.18)
             match_count = 0

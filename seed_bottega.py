@@ -8,7 +8,7 @@ import requests
 
 import config
 from logging_bottega import log
-from store_pgvector import incasella_e_salva, inizializza_schema
+from store_pgvector import ha_termine_tematico, incasella_e_salva, inizializza_schema
 from client_ollama import rileva_lingua_testo, traduci_query_per_ricerca
 
 _BLOCCHI_OCR_RAGIONERIA: List[Tuple[str, str]] = [
@@ -565,6 +565,8 @@ def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
             for p in parole
         )
         if not ha_match_titolo:
+            continue
+        if not ha_termine_tematico(query, query_tradotta, f"{sezione} {testo}"):
             continue
         if match_alfa < 2 and not any(p in token_blocco for p in parole if any(c.isdigit() for c in p)):
             continue

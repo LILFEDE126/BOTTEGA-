@@ -1239,3 +1239,40 @@ def test_articolo_45_costituzione_non_fa_falso_verde_su_gamma_spa_45000_e_auto_g
     assert esito_on["ricerca_esterna_eseguita"] is True
     assert esito_on["colore_nodo_ewd496a"] == "NERO"
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+
+def test_domanda_meteo_reggio_emilia_non_aggancia_bando_voucher_camera_commercio():
+    query_meteo = "Che tempo fa a Reggio Emilia domani 10 novembre"
+    trovati_prontuario = seed_bottega.cerca_nel_prontuario_locale(query_meteo)
+    assert trovati_prontuario == []
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    bando_entry = [
+        item for item in seed_bottega.PRONTUARIO_ESTERNO_SOCCORSO
+        if "Bando Voucher" in item[0]
+    ][0]
+    store_pgvector.incasella_e_salva("generale", bando_entry[0], [(bando_entry[0], bando_entry[1])])
+
+    rag_meteo = store_pgvector.recupera_con_semaforo(query_meteo, dominio="generale", top_k=5)
+    assert rag_meteo["semaforo"] == "ROJO"
+    assert rag_meteo["frammenti"] == []
+
+    esito_stop = risolutore_artigiano.risolvi_da_artigiano(
+        query_meteo,
+        dominio="generale",
+        cercatore_esterno_fn=None,
+    )
+    assert esito_stop["semaforo"] == "ROJO"
+    assert esito_stop["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    assert esito_stop["colore_nodo_ewd496a"] == "GRIGIO"
+
+    query_vera_bando = "Quali spese sono ammissibili per il bando voucher digitali I4.0 della Camera di Commercio di Reggio Emilia?"
+    trovati_bando = seed_bottega.cerca_nel_prontuario_locale(query_vera_bando)
+    assert len(trovati_bando) == 1
+    assert "Bando Voucher" in trovati_bando[0][0]
+
+    rag_bando = store_pgvector.recupera_con_semaforo(query_vera_bando, dominio="generale", top_k=5)
+    assert rag_bando["semaforo"] == "VERDE"
+    assert len(rag_bando["frammenti"]) >= 1
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
