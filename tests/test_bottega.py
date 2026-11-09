@@ -966,8 +966,9 @@ def test_deduplicazione_file_duplicati_ragioneria_multilingua_e_cascata_rojo_ver
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
-def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(tmp_path, monkeypatch):
+def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(monkeypatch):
     import cascata_strutturata
+    import tempfile
 
     codice_sample = (
         "CACHE_FATTURE = []\n"
@@ -977,9 +978,6 @@ def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(tmp_p
     )
     res_ast = analizza_codice_ast(codice_sample)
     assert res_ast["usi_global_mutabili"] == 1
-
-    file_py = tmp_path / "sample_audit.py"
-    file_py.write_text(codice_sample, encoding="utf-8")
 
     monkeypatch.setattr(
         cascata_strutturata,
@@ -1010,7 +1008,10 @@ def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(tmp_p
             voto_finale=8,
         )
 
-    referto = cascata_strutturata.esegui_cascata(str(file_py), llm_fn=finto_llm_cascata)
+    with tempfile.TemporaryDirectory() as td:
+        file_py = Path(td) / "sample_audit.py"
+        file_py.write_text(codice_sample, encoding="utf-8")
+        referto = cascata_strutturata.esegui_cascata(str(file_py), llm_fn=finto_llm_cascata)
     assert "## 1. Strato L" in referto
     assert "## 2. Strato A" in referto
     assert "## 3. Strato D" in referto
@@ -1132,3 +1133,63 @@ def test_isolamento_chiavi_provider_e_routing_trasparente_su_gemini(monkeypatch)
     assert cfg_ds_con_chiave["provider"] == "deepseek"
     assert cfg_ds_con_chiave["api_key"] == "sk-deepseek-reale"
     assert "api.deepseek.com" in cfg_ds_con_chiave["chat_url"]
+
+
+def test_ancora_articolo_45_costituzione_e_autoguarigione_falso_verde(monkeypatch):
+    def finto_conn(**kwargs):
+        raise store_pgvector.psycopg2.OperationalError("PostgreSQL locale non attivo")
+
+    def finto_post_off(url, json=None, timeout=10):
+        raise requests.exceptions.ConnectionError("Ollama spento")
+
+    monkeypatch.setattr(store_pgvector.psycopg2, "connect", finto_conn)
+    monkeypatch.setattr(store_pgvector.requests, "post", finto_post_off)
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+    frammento_gamma_45mila = (
+        "Per la costituzione della Gamma Spa il socio conferisce un fabbricato dal valore di 200.000 euro e "
+        "crediti v/clienti per 45.000 euro. Cosa prevede l'articolo 2430 del c.c. sulla riserva legale del 20% "
+        "prima delle modifiche del d.lgs 139/2015."
+    )
+    store_pgvector.incasella_e_salva(
+        "generale",
+        "paniere_ragioneria_gamma.pdf",
+        [("Page 33", frammento_gamma_45mila)],
+    )
+
+    q_art45 = "Qual è il contenuto dell'articolo 45 della Costituzione italiana e quali modifiche storiche ha subito?"
+    rag_off = store_pgvector.recupera_con_semaforo(q_art45, dominio="generale", top_k=5)
+    assert rag_off["semaforo"] == "ROJO"
+    assert rag_off["frammenti"] == []
+
+    esito_on = risolutore_artigiano.risolvi_da_artigiano(
+        q_art45,
+        dominio="generale",
+        cercatore_esterno_fn=seed_bottega.cerca_nel_prontuario_locale,
+        llm_fn=lambda sys_p, usr_p, schema: (
+            risolutore_artigiano.PianoRicercaArtigiano(
+                fatti_accertati_nel_problema=["Articolo 45 della Costituzione"],
+                dato_esatto_mancante="Testo art. 45 Cost.",
+                query_chirurgica_esterna="articolo 45 costituzione cooperazione artigianato",
+                ispezione_preliminare_sul_campo="Verifica testo costituzionale",
+            )
+            if schema is risolutore_artigiano.PianoRicercaArtigiano
+            else risolutore_artigiano.SoluzioneArtigiano(
+                risposta_finale_discorsiva=(
+                    "L'articolo 45 della Costituzione (entrata in vigore il 1 gennaio 1948) riconosce al comma 1 la funzione "
+                    "sociale della cooperazione a carattere di mutualita' e al comma 2 la tutela dell'artigianato (Legge 443/1985)."
+                ),
+                principio_guida_unico="Articolo 45 della Costituzione Italiana (Comma 1 e Comma 2)",
+                elementi_scartati_per_non_fare_mucchio=["Gamma Spa 45.000 euro", "Articolo 2430 c.c."],
+                precondizione_wp_richiesta="Tutela costituzionale cooperazione e artigianato dal 1948",
+                invariante_violato="Nessuna revisione costituzionale subita dal testo dell'articolo 45 dal 1947",
+                ipotesi_causale_unica="Attuazione tramite Legge Basevi 1577/1947, Legge 443/1985 e D.Lgs. 6/2003",
+                azione_correttiva_singola="Verificare i requisiti di mutualita' prevalente agli artt. 2511-2514 c.c.",
+                esperimento_di_verifica_pratica="Controllo statuto cooperativa e iscrizione albo imprese artigiane Legge 443/1985",
+            )
+        ),
+    )
+    assert esito_on["semaforo"] == "VERDE"
+    assert esito_on["ricerca_esterna_eseguita"] is True
+    assert esito_on["colore_nodo_ewd496a"] == "NERO"
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()

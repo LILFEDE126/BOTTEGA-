@@ -88,7 +88,9 @@ STOPWORDS_RICERCA_COMUNI = {
 }
 
 PATRON_CODICE_NORMATIVO = re.compile(
-    r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b|\b\d{1,4}/\d{4}\b"
+    r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b"
+    r"|\bart(?:\.|icolo)?\s*\d+(?:-(?:bis|ter|quater))?\b"
+    r"|\b\d{1,4}/\d{4}\b"
 )
 
 PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
@@ -135,7 +137,21 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "impostato", "risolvere", "singola", "verificabile", "scatta", "blocco",
     "costo", "costi", "attiva", "pieno", "piena", "diagnostica", "diagnostico",
     "immobilizzazioni", "immobilizzazione", "svalutazione", "ammortamento",
+    "costituzione", "articolo", "articoli", "modifica", "modifiche",
+    "storico", "storica", "storiche", "storia", "italiano", "italiana",
+    "italiani", "italiane", "legge", "leggi", "previsto", "prevede",
+    "relativa", "relative", "relativo", "relativi", "contenuto", "subito",
 })
+
+
+def _ancora_normativa_presente(ancora: str, testo: str) -> bool:
+    """Checks whether a specific normative reference (including 'articolo N' / 'art. N') exists in the fragment."""
+    m_art = re.match(r"^art(?:\.|icolo)?\s*(\d+(?:-(?:bis|ter|quater))?)$", ancora.strip())
+    if m_art:
+        num_art = re.escape(m_art.group(1))
+        patron_art = rf"\bart(?:\.|icolo|t\.)?\s*{num_art}\b"
+        return bool(re.search(patron_art, testo.lower()))
+    return bool(re.search(rf"\b{re.escape(ancora.strip())}\b", testo.lower()))
 
 
 def _ha_match_parola_o_radice(parola_q: str, parole_frammento: set[str]) -> bool:
@@ -532,7 +548,7 @@ def _recupera_da_archivio_ram(
     ancore_richieste = [m.strip() for m in PATRON_CODICE_NORMATIVO.findall(q_bassa) if m.strip()]
     if ancore_richieste:
         presente_in_ram = all(
-            any(anc in item["testo"].lower() for item in _ARCHIVIO_MEMORIA_RAM)
+            any(_ancora_normativa_presente(anc, item["testo"]) for item in _ARCHIVIO_MEMORIA_RAM)
             for anc in ancore_richieste
         )
         if not presente_in_ram:
@@ -569,9 +585,10 @@ def _recupera_da_archivio_ram(
     for item in candidati:
         sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
         testo_low = item["testo"].lower()
+        token_set_low = set(re.findall(r"\d+(?:[.,]\d+)+|\w+", testo_low))
         match_count = 0
         for p in parole_q:
-            if p in testo_low:
+            if p in token_set_low:
                 if any(c.isdigit() for c in p):
                     match_count += 3
                 else:

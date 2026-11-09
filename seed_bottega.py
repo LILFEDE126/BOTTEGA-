@@ -495,6 +495,22 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "5 times the heartbeat_interval. Practical verification check: simulate a network partition and verify via "
         "patronictl list / raft status that only the majority partition retains leader write lock with zero split-brain.",
     ),
+    (
+        "Articolo 45 della Costituzione Italiana: Cooperazione a Carattere di Mutualita' (Comma 1) e Artigianato (Comma 2)",
+        "L'articolo 45 della Costituzione della Repubblica Italiana (Titolo III - Rapporti economici, entrata in vigore "
+        "il 1 gennaio 1948) dispone: "
+        "Comma 1: 'La Repubblica riconosce la funzione sociale della cooperazione a carattere di mutualita' e senza fini "
+        "di speculazione privata. La legge ne promuove e favorisce l'incremento con i mezzi piu' idonei e ne assicura, "
+        "con gli opportuni controlli, il carattere e le finalita'.' "
+        "Comma 2: 'La legge provvede alla tutela e allo sviluppo dell'artigianato.' "
+        "Storia e modifiche: il testo dell'articolo 45 della Costituzione (approvato dall'Assemblea Costituente il 14 "
+        "maggio 1947) non ha mai subito modifiche o revisioni costituzionali dal 1948 ad oggi. La sua attuazione storica "
+        "nella legislazione ordinaria e' avvenuta tramite la Legge Basevi (D.Lgs.C.P.S. 1577/1947), la Legge Quadro per "
+        "l'Artigianato (Legge 8 agosto 1985, n. 443), la riforma costituzionale del Titolo V (L.Cost. 3/2001, che ha "
+        "attribuito l'artigianato alla competenza residuale regionale ex art. 117 comma 4 Cost.) e la riforma del diritto "
+        "societario (D.Lgs. 6/2003, artt. 2511-2514 c.c.), che ha distinto tra cooperative a mutualita' prevalente e "
+        "cooperative a mutualita' diversa.",
+    ),
 ]
 
 STOPWORDS_PRONTUARIO = {
@@ -541,28 +557,32 @@ def cerca_nel_prontuario_esterno(
     if chiave_attiva and provider_attivo in ("gemini", "openrouter"):
         try:
             if provider_attivo == "gemini":
-                url_gemini = (
-                    "https://generativelanguage.googleapis.com/v1beta/models/"
-                    f"gemini-2.5-flash:generateContent?key={chiave_attiva}"
-                )
-                payload_g = {
-                    "contents": [
-                        {
-                            "parts": [
+                for mod_g in ("gemini-2.5-flash", *config.MODELLI_FALLBACK_GEMINI):
+                    try:
+                        url_gemini = (
+                            "https://generativelanguage.googleapis.com/v1beta/models/"
+                            f"{mod_g}:generateContent?key={chiave_attiva}"
+                        )
+                        payload_g = {
+                            "contents": [
                                 {
-                                    "text": f"Search official technical facts and exact numbers for: {query}"
+                                    "parts": [
+                                        {
+                                            "text": f"Search official technical facts and exact numbers for: {query}"
+                                        }
+                                    ]
                                 }
-                            ]
+                            ],
+                            "tools": [{"google_search": {}}],
                         }
-                    ],
-                    "tools": [{"google_search": {}}],
-                }
-                r_ai = requests.post(url_gemini, json=payload_g, timeout=15)
-                r_ai.raise_for_status()
-                parti = r_ai.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                testo_web = " ".join(p.get("text", "") for p in parti).strip()
-                if testo_web:
-                    return [(f"Web Search AI (Gemini Grounding): {query}", testo_web)]
+                        r_ai = requests.post(url_gemini, json=payload_g, timeout=15)
+                        r_ai.raise_for_status()
+                        parti = r_ai.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+                        testo_web = " ".join(p.get("text", "") for p in parti).strip()
+                        if testo_web:
+                            return [(f"Web Search AI (Gemini Grounding): {query[:80]}", testo_web)]
+                    except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
+                        continue
             elif provider_attivo == "openrouter":
                 url_or = "https://openrouter.ai/api/v1/chat/completions"
                 r_or = requests.post(

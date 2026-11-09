@@ -347,6 +347,33 @@ def genera_prompt_ponte_web_gratuito(
     )
 
 
+_SPIE_DATO_ASSENTE_NEI_FRAMMENTI = (
+    "non è presente alcun riferimento",
+    "non e' presente alcun riferimento",
+    "non è possibile formulare una risposta",
+    "impossibilità di rispondere",
+    "impossibilita' di rispondere",
+    "omettendo totalmente",
+    "estranei alla norma",
+    "non contengono informazioni",
+    "no reference to",
+    "not present in the retrieved",
+    "impossible to answer",
+    "no contiene ninguna referencia",
+    "imposibilidad de responder",
+)
+
+
+def _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione: SoluzioneArtigiano) -> bool:
+    """Detects when the LLM explicitly states that the retrieved fragments do not cover the user's topic."""
+    testo_check = (
+        f"{soluzione.risposta_finale_discorsiva} "
+        f"{soluzione.ipotesi_causale_unica} "
+        f"{soluzione.azione_correttiva_singola}"
+    ).lower()
+    return any(spia in testo_check for spia in _SPIE_DATO_ASSENTE_NEI_FRAMMENTI)
+
+
 def risolvi_da_artigiano(
     problema: str,
     dominio: str = "generale",
@@ -548,6 +575,59 @@ def risolvi_da_artigiano(
         soluzione = _costruisci_soluzione_deterministica(
             problema, rag["frammenti"], escluse_pulite, lingua=lingua_rilevata
         )
+
+    if not ricerca_esterna_eseguita and _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione):
+        if cercatore_esterno_fn is not None:
+            nuovi_blocchi_recupero = cercatore_esterno_fn(problema)
+            if nuovi_blocchi_recupero:
+                ricerca_esterna_eseguita = True
+                rag = {
+                    "semaforo": "VERDE",
+                    "s_max": 0.95,
+                    "s_dominio": 0.90,
+                    "frammenti": [
+                        {"id": idx, "testo": f"[{dominio.upper()}] {sez}: {txt}", "similitudine": 0.95}
+                        for idx, (sez, txt) in enumerate(nuovi_blocchi_recupero, start=1)
+                    ],
+                }
+                semaforo = "VERDE"
+                contesto_rag = "\n".join(
+                    f"[Frammento {i}] {f['testo']}" for i, f in enumerate(rag["frammenti"], start=1)
+                )
+                try:
+                    soluzione = llm_fn(
+                        f"{blocco_lingua}\n\n"
+                        "You are a master diagnostic engineer applying Strato L, Strato A, and Strato D. "
+                        "Answer the user's question directly using the verified external fragments below.\n\n"
+                        f"{blocco_lingua}",
+                        f"FRAMMENTI RECUPERATI (VERDE):\n{contesto_rag}\n\n"
+                        f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
+                        f"{blocco_lingua}",
+                        SoluzioneArtigiano,
+                    )
+                except (RuntimeError, requests.exceptions.RequestException):
+                    soluzione = _costruisci_soluzione_deterministica(
+                        problema, rag["frammenti"], escluse_pulite, lingua=lingua_rilevata
+                    )
+        else:
+            piano_auto = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
+            piano_dict = piano_auto.model_dump()
+            return {
+                "semaforo": "ROJO",
+                "s_max": 0.18,
+                "modalita": "RICERCA_PRIMA_DI_AGIRE",
+                "lingua": lingua_rilevata,
+                "ricerca_esterna_eseguita": False,
+                "ipotesi_escluse_applicate": escluse_pulite,
+                "colore_nodo_ewd496a": "GRIGIO",
+                "percentuali_conservate": True,
+                "risultato": piano_dict,
+                "risposta_discorsiva": formatta_risposta_artigiano_leggibile(
+                    piano_dict, "RICERCA_PRIMA_DI_AGIRE", lingua=lingua_rilevata
+                ),
+                "frammenti_usati": [],
+                "cifre_non_ancorate": [],
+            }
 
     tag_fals_uscita = _ETICHETTE_FALSIFICATA.get(lingua_rilevata, _ETICHETTE_FALSIFICATA["it"])
     scarti_finali = list(soluzione.elementi_scartati_per_non_fare_mucchio)
