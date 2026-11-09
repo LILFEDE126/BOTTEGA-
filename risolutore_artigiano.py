@@ -355,6 +355,7 @@ _SPIE_DATO_ASSENTE_NEI_FRAMMENTI = (
     "impossibilita' di rispondere",
     "omettendo totalmente",
     "estranei alla norma",
+    "trattano esclusivamente argomenti di",
     "non contengono informazioni",
     "no reference to",
     "not present in the retrieved",
@@ -632,8 +633,14 @@ def risolvi_da_artigiano(
     tag_fals_uscita = _ETICHETTE_FALSIFICATA.get(lingua_rilevata, _ETICHETTE_FALSIFICATA["it"])
     scarti_finali = list(soluzione.elementi_scartati_per_non_fare_mucchio)
     for ip_esclusa in escluse_pulite:
-        if not any(ip_esclusa.lower() in s.lower() for s in scarti_finali):
+        indice_match = next(
+            (i for i, s in enumerate(scarti_finali) if ip_esclusa.lower() in s.lower()),
+            None,
+        )
+        if indice_match is None:
             scarti_finali.append(f"{tag_fals_uscita} {ip_esclusa}")
+        elif tag_fals_uscita not in scarti_finali[indice_match]:
+            scarti_finali[indice_match] = f"{tag_fals_uscita} {scarti_finali[indice_match]}"
     soluzione.elementi_scartati_per_non_fare_mucchio = scarti_finali
 
     testo_uscita = (

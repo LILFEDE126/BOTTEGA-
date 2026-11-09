@@ -90,6 +90,7 @@ STOPWORDS_RICERCA_COMUNI = {
 PATRON_CODICE_NORMATIVO = re.compile(
     r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b"
     r"|\bart(?:\.|icolo)?\s*\d+(?:-(?:bis|ter|quater))?\b"
+    r"|\bl\.?\s*\d{1,4}/\d{4}\b"
     r"|\b\d{1,4}/\d{4}\b"
 )
 
@@ -141,6 +142,11 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "storico", "storica", "storiche", "storia", "italiano", "italiana",
     "italiani", "italiane", "legge", "leggi", "previsto", "prevede",
     "relativa", "relative", "relativo", "relativi", "contenuto", "subito",
+    "comma", "diritto", "procedimento", "termine", "termini", "conclusione",
+    "interesse", "interessi", "istituto", "merito", "principi", "principio",
+    "ciclo", "rendimiento", "trabajo", "maximo", "máximo", "opera", "entre",
+    "establece", "sobre", "window", "phase", "phases", "during", "behave",
+    "protocol", "transmission", "avoidance", "start",
 })
 
 

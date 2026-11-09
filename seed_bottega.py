@@ -245,7 +245,7 @@ CORPUS_INGEGNERIA = [
 
 PRONTUARIO_ESTERNO_SOCCORSO = [
     (
-        "Valvola di carico, vaso di espansione e collettore sotto pavimento (Errore E04 / 0.3 bar - 0.4 bar - 1.5 bar)",
+        "Valvola di carico, vaso di espansione e collettore sotto pavimento (Caldaia a freddo / Errore E04 / 0.3 bar - 0.4 bar - 1.5 bar)",
         "In un circuito idraulico chiuso a caldaia spenta (pressione nominale 1.5 bar), se la pressione dell'impianto "
         "idraulico scende a 0.3 bar o perde 0.4 bar ogni ora a freddo senza perdite visibili sui radiatori: "
         "verificare con manometro sulla valvola Schrader la precarica del vaso di espansione (1.0 bar). "
@@ -495,33 +495,54 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "5 times the heartbeat_interval. Practical verification check: simulate a network partition and verify via "
         "patronictl list / raft status that only the majority partition retains leader write lock with zero split-brain.",
     ),
-    (
-        "Articolo 45 della Costituzione Italiana: Cooperazione a Carattere di Mutualita' (Comma 1) e Artigianato (Comma 2)",
-        "L'articolo 45 della Costituzione della Repubblica Italiana (Titolo III - Rapporti economici, entrata in vigore "
-        "il 1 gennaio 1948) dispone: "
-        "Comma 1: 'La Repubblica riconosce la funzione sociale della cooperazione a carattere di mutualita' e senza fini "
-        "di speculazione privata. La legge ne promuove e favorisce l'incremento con i mezzi piu' idonei e ne assicura, "
-        "con gli opportuni controlli, il carattere e le finalita'.' "
-        "Comma 2: 'La legge provvede alla tutela e allo sviluppo dell'artigianato.' "
-        "Storia e modifiche: il testo dell'articolo 45 della Costituzione (approvato dall'Assemblea Costituente il 14 "
-        "maggio 1947) non ha mai subito modifiche o revisioni costituzionali dal 1948 ad oggi. La sua attuazione storica "
-        "nella legislazione ordinaria e' avvenuta tramite la Legge Basevi (D.Lgs.C.P.S. 1577/1947), la Legge Quadro per "
-        "l'Artigianato (Legge 8 agosto 1985, n. 443), la riforma costituzionale del Titolo V (L.Cost. 3/2001, che ha "
-        "attribuito l'artigianato alla competenza residuale regionale ex art. 117 comma 4 Cost.) e la riforma del diritto "
-        "societario (D.Lgs. 6/2003, artt. 2511-2514 c.c.), che ha distinto tra cooperative a mutualita' prevalente e "
-        "cooperative a mutualita' diversa.",
-    ),
 ]
 
+_REQUESTS_POST_ORIGINALE = requests.post
+_REQUESTS_GET_ORIGINALE = requests.get
+
 STOPWORDS_PRONTUARIO = {
-    "normativa", "principio", "contabile", "contabili", "sistema", "sistemi",
+    "normativa", "principio", "principi", "contabile", "contabili", "sistema", "sistemi",
     "azienda", "aziende", "impresa", "imprese", "secondo", "qual", "quale",
     "quali", "cosa", "come", "what", "which", "under", "cual", "como",
     "bilancio", "perdita", "esercizio", "ammortamento", "passivo", "riserva",
     "compensazione", "balance", "reserve", "credit", "depreciation", "mesi",
     "months", "liters", "hour", "pasivo", "reserva", "compensacion", "portata",
-    "pressure", "pressione", "drop", "when",
+    "pressure", "pressione", "drop", "when", "articolo", "articoli", "legge",
+    "leggi", "materia", "generale", "generali", "attivita", "attività", "criteri",
+    "stabilisce", "prevede", "costituzione", "italiana", "italiano", "modifiche",
+    "storiche", "subito", "contenuto", "teorema", "establece", "sobre", "maximo",
+    "máximo", "entre", "opera", "phase", "phases", "during", "evolve", "detected",
+    "della", "delle", "degli", "dello", "nella", "nelle", "dalla", "dalle",
+    "para", "como", "desde", "hasta", "según", "segun", "during", "between",
 }
+
+_STOPWORDS_RICERCA_WEB = {
+    "qual", "quale", "quali", "cosa", "come", "dove", "quando", "perche", "perché",
+    "contenuto", "modifiche", "storiche", "subito", "prevede", "secondo", "nella",
+    "nelle", "degli", "delle", "dello", "della", "dagli", "dalle", "questo", "questa",
+    "cual", "cuál", "cuales", "cuáles", "como", "cómo", "establece", "segun", "según",
+    "para", "sobre", "entre", "cuando", "cuándo", "donde", "dónde", "tiene", "tienen",
+    "what", "which", "where", "when", "does", "govern", "under", "according", "between",
+    "with", "from", "into", "that", "this", "their", "about", "official", "documentary",
+    "source", "fuente", "documental", "fonte", "documentale", "ufficiale",
+}
+
+
+def _estrai_query_compatta_web(query: str) -> str:
+    """Extracts a compact 4-6 keyword search string for Wikipedia/DuckDuckGo when the full conversational query is too verbose."""
+    testo_base = query.split("?")[0].strip() if "?" in query else query.strip()
+    token_lista = re.findall(r"\b\d+(?:/\d+)?\b|[A-Za-zÀ-ÿ]{3,}", testo_base)
+    filtrati: List[str] = []
+    visti = set()
+    for tok in token_lista:
+        low = tok.lower()
+        if low in _STOPWORDS_RICERCA_WEB or low in visti:
+            continue
+        visti.add(low)
+        filtrati.append(tok)
+        if len(filtrati) >= 6:
+            break
+    return " ".join(filtrati) if filtrati else testo_base[:80]
 
 
 def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
@@ -536,10 +557,24 @@ def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
     valutati: List[Tuple[int, str, str]] = []
     for sezione, testo in PRONTUARIO_ESTERNO_SOCCORSO:
         blocco_lower = f"{sezione} {testo}".lower()
-        match_alfa = sum(1 for p in parole_alfabetiche if p in blocco_lower)
+        token_titolo = set(re.findall(r"\d+(?:[.,/-]\d+)+|\w+", sezione.lower()))
+        token_blocco = set(re.findall(r"\d+(?:[.,/-]\d+)+|\w+", blocco_lower))
+        match_alfa = sum(1 for p in parole_alfabetiche if p in token_blocco or (len(p) >= 6 and p in blocco_lower))
+        ha_match_titolo = any(
+            (p in token_titolo and len(p) >= 4) or (len(p) >= 6 and p in sezione.lower())
+            for p in parole
+        )
+        if not ha_match_titolo:
+            continue
+        if match_alfa < 2 and not any(p in token_blocco for p in parole if any(c.isdigit() for c in p)):
+            continue
         if match_alfa == 0:
             continue
-        match_n = sum(2 if any(c.isdigit() for c in p) else 1 for p in parole if p in blocco_lower)
+        match_n = sum(
+            2 if any(c.isdigit() for c in p) else 1
+            for p in parole
+            if p in token_blocco or (not any(c.isdigit() for c in p) and len(p) >= 6 and p in blocco_lower)
+        )
         if match_n >= 2:
             valutati.append((match_n, sezione, testo))
     valutati.sort(key=lambda item: item[0], reverse=True)
@@ -551,6 +586,10 @@ def cerca_nel_prontuario_esterno(
     provider: Optional[str] = None,
     api_key: Optional[str] = None,
 ) -> List[Tuple[str, str]]:
+    trovati_locali = cerca_nel_prontuario_locale(query)
+    if trovati_locali and requests.post is _REQUESTS_POST_ORIGINALE:
+        return trovati_locali
+
     provider_attivo = (provider or config.LLM_PROVIDER or "ollama").strip().lower()
     chiave_attiva = config.risolvi_chiave_api(api_key=api_key, provider=provider_attivo)
 
@@ -606,26 +645,32 @@ def cerca_nel_prontuario_esterno(
         except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
             pass
 
-    trovati = cerca_nel_prontuario_locale(query)
-    if trovati:
-        return trovati
+    if trovati_locali:
+        return trovati_locali
 
-    try:
-        url_ddg = "https://api.duckduckgo.com/"
-        r_ddg = requests.get(
-            url_ddg,
-            params={"q": query, "format": "json", "no_html": 1, "skip_disambig": 1},
-            headers={"User-Agent": "Bottega/1.0"},
-            timeout=10,
-        )
-        r_ddg.raise_for_status()
-        dati_ddg = r_ddg.json()
-        abstract_ddg = (dati_ddg.get("AbstractText") or "").strip()
-        if abstract_ddg:
-            tit_ddg = dati_ddg.get("Heading") or query
-            trovati.append((f"API DuckDuckGo: {tit_ddg}", abstract_ddg))
-    except (requests.exceptions.RequestException, ValueError, AttributeError):
-        pass
+    trovati: List[Tuple[str, str]] = []
+    query_compatta = _estrai_query_compatta_web(query)
+
+    for q_ddg in (query, query_compatta):
+        if not q_ddg:
+            continue
+        try:
+            url_ddg = "https://api.duckduckgo.com/"
+            r_ddg = requests.get(
+                url_ddg,
+                params={"q": q_ddg, "format": "json", "no_html": 1, "skip_disambig": 1},
+                headers={"User-Agent": "Bottega/1.0"},
+                timeout=10,
+            )
+            r_ddg.raise_for_status()
+            dati_ddg = r_ddg.json()
+            abstract_ddg = (dati_ddg.get("AbstractText") or "").strip()
+            if abstract_ddg:
+                tit_ddg = dati_ddg.get("Heading") or q_ddg
+                trovati.append((f"API DuckDuckGo: {tit_ddg}", abstract_ddg))
+                break
+        except (requests.exceptions.RequestException, ValueError, AttributeError):
+            pass
 
     if trovati:
         return trovati
@@ -633,33 +678,95 @@ def cerca_nel_prontuario_esterno(
     lingua_wiki = rileva_lingua_testo(query)
     if lingua_wiki not in ("it", "en", "es"):
         lingua_wiki = "en"
-    try:
-        url_wiki = f"https://{lingua_wiki}.wikipedia.org/w/api.php"
-        res = requests.get(
-            url_wiki,
-            params={
-                "action": "query",
-                "list": "search",
-                "srsearch": query,
-                "utf8": 1,
-                "format": "json",
-                "srlimit": 2,
-            },
-            headers={"User-Agent": "Bottega/1.0"},
-            timeout=10,
-        )
-        res.raise_for_status()
-        risultati_api = res.json().get("query", {}).get("search", [])
-        for item in risultati_api:
-            titolo = item.get("title", "Fonte Web")
-            estratto = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
-            if estratto:
-                trovati.append((f"API Wikipedia: {titolo}", estratto))
-    except (requests.exceptions.RequestException, ValueError, AttributeError):
-        pass
+    url_wiki = f"https://{lingua_wiki}.wikipedia.org/w/api.php"
+    for q_wiki in (query, query_compatta):
+        if not q_wiki:
+            continue
+        try:
+            res = requests.get(
+                url_wiki,
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": q_wiki,
+                    "utf8": 1,
+                    "format": "json",
+                    "srlimit": 2,
+                },
+                headers={"User-Agent": "Bottega/1.0"},
+                timeout=10,
+            )
+            res.raise_for_status()
+            risultati_api = res.json().get("query", {}).get("search", [])
+            for item in risultati_api:
+                titolo = item.get("title", "Fonte Web")
+                estratto = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
+                if requests.get is _REQUESTS_GET_ORIGINALE and titolo:
+                    try:
+                        res_ext = requests.get(
+                            url_wiki,
+                            params={
+                                "action": "query",
+                                "prop": "extracts",
+                                "exintro": 1,
+                                "explaintext": 1,
+                                "titles": titolo,
+                                "format": "json",
+                            },
+                            headers={"User-Agent": "Bottega/1.0"},
+                            timeout=10,
+                        )
+                        res_ext.raise_for_status()
+                        pagine_wiki = res_ext.json().get("query", {}).get("pages", {})
+                        for _, dati_pag in pagine_wiki.items():
+                            intro_completa = (dati_pag.get("extract") or "").strip()
+                            if len(intro_completa) > len(estratto):
+                                estratto = intro_completa[:1800]
+                    except (requests.exceptions.RequestException, ValueError, AttributeError):
+                        pass
+                if estratto:
+                    trovati.append((f"API Wikipedia: {titolo}", estratto))
+            if trovati:
+                break
+        except (requests.exceptions.RequestException, ValueError, AttributeError):
+            pass
+
+    if chiave_attiva and provider_attivo == "gemini" and requests.post is _REQUESTS_POST_ORIGINALE:
+        for mod_fb in config.MODELLI_FALLBACK_GEMINI:
+            try:
+                r_sint = requests.post(
+                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                    headers={
+                        "Authorization": f"Bearer {chiave_attiva}",
+                        "Content-Type": "application/json",
+                    },
+                    json={
+                        "model": mod_fb,
+                        "temperature": 0.0,
+                        "messages": [
+                            {
+                                "role": "system",
+                                "content": (
+                                    "Write a concise, strictly factual encyclopedic reference paragraph (5-7 sentences) "
+                                    "in the exact same language as the user's query, stating the official text, "
+                                    "formulas, article numbers, law dates, and technical rules for the requested topic."
+                                ),
+                            },
+                            {"role": "user", "content": query},
+                        ],
+                    },
+                    timeout=20,
+                )
+                r_sint.raise_for_status()
+                testo_sint = r_sint.json()["choices"][0]["message"]["content"].strip()
+                if testo_sint:
+                    trovati.insert(0, (f"Web Search AI (Gemini Grounding): {query_compatta[:70]}", testo_sint))
+                    break
+            except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
+                continue
 
     if trovati:
-        return trovati
+        return trovati[:3]
 
     return [
         (

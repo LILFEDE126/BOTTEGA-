@@ -1135,7 +1135,7 @@ def test_isolamento_chiavi_provider_e_routing_trasparente_su_gemini(monkeypatch)
     assert "api.deepseek.com" in cfg_ds_con_chiave["chat_url"]
 
 
-def test_ancora_articolo_45_costituzione_e_autoguarigione_falso_verde(monkeypatch):
+def test_articolo_45_costituzione_non_fa_falso_verde_su_gamma_spa_45000_e_auto_guarigione(monkeypatch):
     def finto_conn(**kwargs):
         raise store_pgvector.psycopg2.OperationalError("PostgreSQL locale non attivo")
 
@@ -1162,32 +1162,78 @@ def test_ancora_articolo_45_costituzione_e_autoguarigione_falso_verde(monkeypatc
     assert rag_off["semaforo"] == "ROJO"
     assert rag_off["frammenti"] == []
 
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="generale", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.77,
+            "frammenti": [{"id": 1, "testo": frammento_gamma_45mila}],
+        },
+    )
+
+    esito_auto_stop = risolutore_artigiano.risolvi_da_artigiano(
+        q_art45,
+        dominio="generale",
+        cercatore_esterno_fn=None,
+        llm_fn=lambda sys_p, usr_p, schema: risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "I frammenti recuperati trattano esclusivamente argomenti di ragioneria e non è presente alcun riferimento "
+                "all'articolo 45 della Costituzione italiana."
+            ),
+            principio_guida_unico="Assenza di copertura documentale",
+            elementi_scartati_per_non_fare_mucchio=["Gamma Spa 45.000 euro"],
+            precondizione_wp_richiesta="Presenza del testo costituzionale",
+            invariante_violato="Impossibilità di rispondere con frammenti estranei alla norma",
+            ipotesi_causale_unica="Nei documenti caricati non è presente alcun riferimento all'art. 45 Cost.",
+            azione_correttiva_singola="Attivare la ricerca esterna",
+            esperimento_di_verifica_pratica="Verificare il testo dell'articolo 45 della Costituzione",
+        ),
+    )
+    assert esito_auto_stop["semaforo"] == "ROJO"
+    assert esito_auto_stop["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    assert esito_auto_stop["colore_nodo_ewd496a"] == "GRIGIO"
+    assert esito_auto_stop["frammenti_usati"] == []
+
+    chiamate_llm = {"n": 0}
+
+    def finto_llm_guarigione(sys_p, usr_p, schema):
+        chiamate_llm["n"] += 1
+        if chiamate_llm["n"] == 1:
+            return risolutore_artigiano.SoluzioneArtigiano(
+                risposta_finale_discorsiva="Nei frammenti non è presente alcun riferimento all'articolo 45 della Costituzione.",
+                principio_guida_unico="Frammenti estranei alla norma",
+                elementi_scartati_per_non_fare_mucchio=["Gamma Spa"],
+                precondizione_wp_richiesta="Art. 45 Cost.",
+                invariante_violato="Mancanza fonte",
+                ipotesi_causale_unica="Impossibilità di rispondere senza ricerca esterna",
+                azione_correttiva_singola="Cercare fuori",
+                esperimento_di_verifica_pratica="Verifica fonte",
+            )
+        return risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "L'articolo 45 della Costituzione (entrata in vigore il 1 gennaio 1948) riconosce al comma 1 la funzione "
+                "sociale della cooperazione a carattere di mutualita' e al comma 2 la tutela dell'artigianato (Legge 443/1985)."
+            ),
+            principio_guida_unico="Articolo 45 della Costituzione Italiana (Comma 1 e Comma 2)",
+            elementi_scartati_per_non_fare_mucchio=["Gamma Spa 45.000 euro", "Articolo 2430 c.c."],
+            precondizione_wp_richiesta="Tutela costituzionale cooperazione e artigianato dal 1948",
+            invariante_violato="Nessuna revisione costituzionale subita dal testo dell'articolo 45 dal 1947",
+            ipotesi_causale_unica="Attuazione tramite Legge 443/1985",
+            azione_correttiva_singola="Verificare i requisiti di mutualita' prevalente",
+            esperimento_di_verifica_pratica="Controllo statuto cooperativa e Legge 443/1985",
+        )
+
     esito_on = risolutore_artigiano.risolvi_da_artigiano(
         q_art45,
         dominio="generale",
-        cercatore_esterno_fn=seed_bottega.cerca_nel_prontuario_locale,
-        llm_fn=lambda sys_p, usr_p, schema: (
-            risolutore_artigiano.PianoRicercaArtigiano(
-                fatti_accertati_nel_problema=["Articolo 45 della Costituzione"],
-                dato_esatto_mancante="Testo art. 45 Cost.",
-                query_chirurgica_esterna="articolo 45 costituzione cooperazione artigianato",
-                ispezione_preliminare_sul_campo="Verifica testo costituzionale",
+        cercatore_esterno_fn=lambda q: [
+            (
+                "API Wikipedia: Articolo 45 della Costituzione italiana",
+                "L'articolo 45 della Costituzione (1948, approvato nel 1947) al comma 1 tutela la cooperazione e al comma 2 l'artigianato (Legge 443/1985).",
             )
-            if schema is risolutore_artigiano.PianoRicercaArtigiano
-            else risolutore_artigiano.SoluzioneArtigiano(
-                risposta_finale_discorsiva=(
-                    "L'articolo 45 della Costituzione (entrata in vigore il 1 gennaio 1948) riconosce al comma 1 la funzione "
-                    "sociale della cooperazione a carattere di mutualita' e al comma 2 la tutela dell'artigianato (Legge 443/1985)."
-                ),
-                principio_guida_unico="Articolo 45 della Costituzione Italiana (Comma 1 e Comma 2)",
-                elementi_scartati_per_non_fare_mucchio=["Gamma Spa 45.000 euro", "Articolo 2430 c.c."],
-                precondizione_wp_richiesta="Tutela costituzionale cooperazione e artigianato dal 1948",
-                invariante_violato="Nessuna revisione costituzionale subita dal testo dell'articolo 45 dal 1947",
-                ipotesi_causale_unica="Attuazione tramite Legge Basevi 1577/1947, Legge 443/1985 e D.Lgs. 6/2003",
-                azione_correttiva_singola="Verificare i requisiti di mutualita' prevalente agli artt. 2511-2514 c.c.",
-                esperimento_di_verifica_pratica="Controllo statuto cooperativa e iscrizione albo imprese artigiane Legge 443/1985",
-            )
-        ),
+        ],
+        llm_fn=finto_llm_guarigione,
     )
     assert esito_on["semaforo"] == "VERDE"
     assert esito_on["ricerca_esterna_eseguita"] is True
