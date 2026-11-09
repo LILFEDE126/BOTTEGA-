@@ -402,8 +402,114 @@ with tab_codice:
                         st.error(f"Error during cascade execution ({provider_ui}): {err}")
 
 with tab_artigiano:
+    PRESET_ESEMPI_TAB2 = {
+        "Custom / Manual Input": {
+            "problema": "",
+            "escluse": "",
+            "cerca": True,
+            "info": "Type or paste your own question freely.",
+        },
+        "1. [PDF IT] Interessi attivi bancari e ritenuta 27% (1.000 euro, 270 euro, 730 euro)": {
+            "problema": (
+                "Se la banca accredita in conto corrente interessi attivi per un importo di 1.000 euro "
+                "applicando una ritenuta fiscale del 27%, qual e' l'importo della ritenuta per l'Erario "
+                "e qual e' l'importo netto accreditato in Banca c/c?"
+            ),
+            "escluse": "",
+            "cerca": False,
+            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 28, 14dcea31...pdf Pag. 117). Expected: VERDE, Node: NERO.",
+        },
+        "2. [PDF ES] Reembolso prestamo Gamma Spa y 4 fases del prestito obbligazionario (20.000 euro, 2.300 euro, 22.300 euro)": {
+            "problema": (
+                "Con referencia a un prestamo hipotecario (mutuo passivo) ya existente, si la sociedad Gamma Spa "
+                "reembolsa una cuota de capital de 20.000 euros y una cuota de intereses de 2.300 euros, "
+                "cual es el importe total pagado por banco y cuales son las 4 fases en las que se articula un prestito obbligazionario?"
+            ),
+            "escluse": "",
+            "cerca": False,
+            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 31). Answer 100% in Spanish. Expected: VERDE, Node: NERO.",
+        },
+        "3. [PDF EN] Advance to supplier & advance invoice (3.000 euro + VAT, 2.000 euro + VAT, 3.660 euro, 440 euro, 2.440 euro)": {
+            "problema": (
+                "When a company pays an advance to a supplier of 3.000 euros plus 22% VAT before receiving the invoice, "
+                "what is the total bank payment of 3.660 euros recorded, and when the advance invoice of 2.000 euros plus 22% VAT arrives, "
+                "what are the amounts of VAT credit of 440 euros and total debt of 2.440 euros?"
+            ),
+            "escluse": "",
+            "cerca": False,
+            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 18). Answer 100% in English. Expected: VERDE, Node: NERO.",
+        },
+        "4. [PDF IT - Binary Search] 3 casi diminuzione capitale per uscita soci (con ipotesi escluse)": {
+            "problema": (
+                "Quali sono i 3 casi specifici in cui si verifica una diminuzione del capitale sociale "
+                "per uscita dei soci secondo i documenti in archivio?"
+            ),
+            "escluse": (
+                "Diminuzione del capitale sociale per esuberanza\n"
+                "Copertura virtuale di una perdita di esercizio di 40.000 euro"
+            ),
+            "cerca": False,
+            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 35). Binary search isolates the 3 partner withdrawal cases in Point 1-5 and puts excluded hypotheses into Point 6.",
+        },
+        "5. [Web IT] Emendamenti OIC 16 e OIC 31 (2024) Fondi smantellamento e ripristino": {
+            "problema": (
+                "Cosa prevede l'emendamento al principio contabile OIC 31 entrato in vigore dal 2024 "
+                "in merito alla contabilizzazione degli obblighi di smantellamento, rimozione del cespite e ripristino del sito?"
+            ),
+            "escluse": "",
+            "cerca": True,
+            "info": "External standard not in baseline PDFs. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
+        },
+        "6. [Web ES] Ley 18/2022 Crea y Crece facturacion B2B (8M euro, 60 dias)": {
+            "problema": (
+                "Que establece la Ley 18/2022 (Ley Crea y Crece) en Espana sobre la facturacion electronica "
+                "obligatoria B2B entre empresas y autonomos y el plazo maximo de pago de 60 dias contra la morosidad?"
+            ),
+            "escluse": "",
+            "cerca": True,
+            "info": "External Spanish law. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
+        },
+        "7. [Web EN] OECD Pillar Two / EU Directive 2022/2523 (15% rate, 750M euro threshold)": {
+            "problema": (
+                "Under the new global minimum tax rules (OECD Pillar Two / EU Directive 2022/2523), "
+                "what is the minimum effective corporate tax rate of 15% and what is the consolidated revenue threshold "
+                "of 750 million euros for multinational groups?"
+            ),
+            "escluse": "",
+            "cerca": True,
+            "info": "External international tax rule. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
+        },
+    }
+
+    if "diag_problema_area" not in st.session_state:
+        st.session_state["diag_problema_area"] = ""
+    if "diag_escluse_area" not in st.session_state:
+        st.session_state["diag_escluse_area"] = ""
+    if "diag_cerca_box" not in st.session_state:
+        st.session_state["diag_cerca_box"] = True
+
+    def _aggiorna_preset_tab2():
+        scelto = st.session_state.get("menu_preset_scelto", "Custom / Manual Input")
+        dati_preset = PRESET_ESEMPI_TAB2.get(scelto, PRESET_ESEMPI_TAB2["Custom / Manual Input"])
+        st.session_state["diag_problema_area"] = dati_preset["problema"]
+        st.session_state["diag_escluse_area"] = dati_preset["escluse"]
+        st.session_state["diag_cerca_box"] = dati_preset["cerca"]
+
+    st.selectbox(
+        "Quick Test Presets (Italiano · Español · English — Verified on Baseline PDFs & Live Web):",
+        options=list(PRESET_ESEMPI_TAB2.keys()),
+        key="menu_preset_scelto",
+        on_change=_aggiorna_preset_tab2,
+        help="Select any certified example to automatically populate the question, falsified hypotheses, and external search toggle.",
+    )
+    scelto_ora = st.session_state.get("menu_preset_scelto", "Custom / Manual Input")
+    preset_corrente = PRESET_ESEMPI_TAB2.get(scelto_ora, PRESET_ESEMPI_TAB2["Custom / Manual Input"])
+    if preset_corrente.get("info"):
+        st.caption(f"ℹ️ {preset_corrente['info']}")
+
     problema_testo = st.text_area(
         "Describe an unexpected problem in English, Español, Italiano or any language:",
+        key="diag_problema_area",
         height=120,
         placeholder=(
             "Write in English, Español or Italiano: e.g. According to OIC 19, when must payables be discounted? "
@@ -415,15 +521,17 @@ with tab_artigiano:
         dominio_scelto = st.selectbox(
             "Guiding Domain:",
             DOMINI_DISPONIBILI,
+            index=0,
             help="Prioritizes fragments saved in this domain (generale = Strato L, tecnico = Strato A, normativo = Strato D) while still searching all loaded documents.",
         )
         cerca_fuori = st.checkbox(
             "Enable cascading external search (Handbook -> AI Web Search -> DuckDuckGo/Wikipedia) on ROJO Semaphore",
-            value=True,
+            key="diag_cerca_box",
         )
     with col_escl:
         ipotesi_escluse_testo = st.text_area(
             "Hypotheses already falsified in the field (one per line, optional - Binary Search):",
+            key="diag_escluse_area",
             height=90,
             placeholder="e.g. Expansion vessel empty (isolated flow/return valves, boiler holds 1.5 bar)\nor: Short-term payable under 12 months already ruled out",
             help="Any hypothesis entered here is strictly forbidden as the root cause and will be isolated in Point 6 as [Falsified in the field].",
