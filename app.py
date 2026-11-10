@@ -24,7 +24,13 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.09.v8"
+_VERSIONE_MODULI_THE = "2026.11.10.v9"
+INTERVALLO_STREAMING_UI_SECONDI = 0.01
+ALTEZZA_TEXTAREA_UI = 120
+ALTEZZA_CODICE_UI = 200
+ALTEZZA_ESCLUSIONI_UI = 90
+ALTEZZA_AUDIT_WEB_UI = 140
+DIVISORE_MB = 1024 * 1024
 
 
 def _allinea_moduli_in_memoria() -> None:
@@ -54,7 +60,9 @@ def _allinea_moduli_in_memoria() -> None:
             risolutore_artigiano,
         )
         for modulo in moduli_ordinati:
-            importlib.reload(modulo)
+            nome_mod = getattr(modulo, "__name__", "")
+            if nome_mod in importlib.sys.modules:
+                importlib.reload(modulo)
 
         if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
             for voce in archivio_precedente:
@@ -67,7 +75,7 @@ def _allinea_moduli_in_memoria() -> None:
     archivio_sess_corrente = st.session_state.get("documenti_archivio_sessione", {})
     if archivio_sess_corrente:
         titoli_in_ram = {
-            v.get("titolo") for v in getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", [])
+            voce_ram.get("titolo") for voce_ram in getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", [])
         }
         for nome_doc_s, meta_doc_s in archivio_sess_corrente.items():
             blocchi_s = meta_doc_s.get("blocchi") or []
@@ -115,10 +123,6 @@ blockquote {
 }
 </style>
 """
-
-
-INTERVALLO_STREAMING_UI_SECONDI: float = 0.01
-ALTEZZA_TEXTAREA_UI: int = 120
 
 
 def _stream_testo_parole(testo: str):
@@ -211,7 +215,7 @@ with st.sidebar:
     )
     max_docs = getattr(config, "MAX_DOCUMENTI_PER_RICHIESTA", 30)
     max_mb = getattr(config, "MAX_MB_PER_RICHIESTA", 200)
-    max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * 1024 * 1024)
+    max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * DIVISORE_MB)
 
     if "documenti_archivio_sessione" not in st.session_state:
         st.session_state["documenti_archivio_sessione"] = {}
@@ -236,7 +240,7 @@ with st.sidebar:
         bytes_totali_correnti = sum(
             info["size_bytes"]
             for nome_f, info in archivio_sess.items()
-            if nome_f not in {f.name for f in files_da_elaborare}
+            if nome_f not in {file_up.name for file_up in files_da_elaborare}
         )
 
         ram_globale = _conta_frammenti_ram_sicuro()
@@ -307,9 +311,9 @@ with st.sidebar:
         tot_docs = len(archivio_attivo)
         tot_frammenti_ram = _conta_frammenti_ram_sicuro()
         tot_frammenti = tot_frammenti_ram if tot_frammenti_ram > 0 else sum(
-            v["n_frammenti"] for v in archivio_attivo.values()
+            voce_att["n_frammenti"] for voce_att in archivio_attivo.values()
         )
-        tot_mb = sum(v["size_bytes"] for v in archivio_attivo.values()) / (1024 * 1024)
+        tot_mb = sum(voce_att["size_bytes"] for voce_att in archivio_attivo.values()) / DIVISORE_MB
         st.success(
             f"Active Archive: {tot_docs}/{max_docs} documents indexed "
             f"({tot_frammenti} unique fragments in memory, {tot_mb:.2f} MB / {max_mb} MB)."
@@ -320,7 +324,7 @@ with st.sidebar:
                 nota_dup = " [duplicate deduplicated]" if (n_new == 0 and meta_d["n_frammenti"] > 0) else ""
                 st.caption(
                     f"{idx_d}. {nome_d} — {n_new} new / {meta_d['n_frammenti']} fragments{nota_dup} "
-                    f"({meta_d['dominio']}, {meta_d['size_bytes'] / (1024 * 1024):.2f} MB)"
+                    f"({meta_d['dominio']}, {meta_d['size_bytes'] / DIVISORE_MB:.2f} MB)"
                 )
             if st.button("Clear All Uploaded Documents"):
                 st.session_state["documenti_archivio_sessione"] = {}
@@ -358,7 +362,7 @@ tab_codice, tab_artigiano, tab_ponte_web = st.tabs([
 with tab_codice:
     codice_incollato = st.text_area(
         "Paste Python code to inspect:",
-        height=200,
+        height=ALTEZZA_CODICE_UI,
         placeholder="def calculate_margin(price, cost):\n    return price - cost",
     )
     col1, col2 = st.columns(2)
@@ -410,118 +414,11 @@ with tab_codice:
                         st.error(f"Error during cascade execution ({provider_ui}): {err}")
 
 with tab_artigiano:
-    PRESET_ESEMPI_TAB2 = {
-        "Custom / Manual Input": {
-            "problema": "",
-            "escluse": "",
-            "cerca": True,
-            "info": "Type or paste your own question freely.",
-        },
-        "1. [PDF IT] Interessi attivi bancari e ritenuta 27% (1.000 euro, 270 euro, 730 euro)": {
-            "problema": (
-                "Se la banca accredita in conto corrente interessi attivi per un importo di 1.000 euro "
-                "applicando una ritenuta fiscale del 27%, qual e' l'importo della ritenuta per l'Erario "
-                "e qual e' l'importo netto accreditato in Banca c/c?"
-            ),
-            "escluse": "",
-            "cerca": False,
-            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 28, 14dcea31...pdf Pag. 117). Expected: VERDE, Node: NERO.",
-        },
-        "2. [PDF ES] Reembolso prestamo Gamma Spa y 4 fases del prestito obbligazionario (20.000 euro, 2.300 euro, 22.300 euro)": {
-            "problema": (
-                "Con referencia a un prestamo hipotecario (mutuo passivo) ya existente, si la sociedad Gamma Spa "
-                "reembolsa una cuota de capital de 20.000 euros y una cuota de intereses de 2.300 euros, "
-                "cual es el importe total pagado por banco y cuales son las 4 fases en las que se articula un prestito obbligazionario?"
-            ),
-            "escluse": "",
-            "cerca": False,
-            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 31). Answer 100% in Spanish. Expected: VERDE, Node: NERO.",
-        },
-        "3. [PDF EN] Advance to supplier & advance invoice (3.000 euro + VAT, 2.000 euro + VAT, 3.660 euro, 440 euro, 2.440 euro)": {
-            "problema": (
-                "When a company pays an advance to a supplier of 3.000 euros plus 22% VAT before receiving the invoice, "
-                "what is the total bank payment of 3.660 euros recorded, and when the advance invoice of 2.000 euros plus 22% VAT arrives, "
-                "what are the amounts of VAT credit of 440 euros and total debt of 2.440 euros?"
-            ),
-            "escluse": "",
-            "cerca": False,
-            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 18). Answer 100% in English. Expected: VERDE, Node: NERO.",
-        },
-        "4. [PDF IT - Binary Search] 3 casi diminuzione capitale per uscita soci (con ipotesi escluse)": {
-            "problema": (
-                "Quali sono i 3 casi specifici in cui si verifica una diminuzione del capitale sociale "
-                "per uscita dei soci secondo i documenti in archivio?"
-            ),
-            "escluse": (
-                "Diminuzione del capitale sociale per esuberanza\n"
-                "Copertura virtuale di una perdita di esercizio di 40.000 euro"
-            ),
-            "cerca": False,
-            "info": "Present in loaded accounting PDFs (docsity...2025.pdf Pag. 35). Binary search isolates the 3 partner withdrawal cases in Point 1-5 and puts excluded hypotheses into Point 6.",
-        },
-        "5. [Web IT] Emendamenti OIC 16 e OIC 31 (2024) Fondi smantellamento e ripristino": {
-            "problema": (
-                "Cosa prevede l'emendamento al principio contabile OIC 31 entrato in vigore dal 2024 "
-                "in merito alla contabilizzazione degli obblighi di smantellamento, rimozione del cespite e ripristino del sito?"
-            ),
-            "escluse": "",
-            "cerca": True,
-            "info": "External standard not in baseline PDFs. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
-        },
-        "6. [Web ES] Ley 18/2022 Crea y Crece facturacion B2B (8M euro, 60 dias)": {
-            "problema": (
-                "Que establece la Ley 18/2022 (Ley Crea y Crece) en Espana sobre la facturacion electronica "
-                "obligatoria B2B entre empresas y autonomos y el plazo maximo de pago de 60 dias contra la morosidad?"
-            ),
-            "escluse": "",
-            "cerca": True,
-            "info": "External Spanish law. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
-        },
-        "7. [Web EN] OECD Pillar Two / EU Directive 2022/2523 (15% rate, 750M euro threshold)": {
-            "problema": (
-                "Under the new global minimum tax rules (OECD Pillar Two / EU Directive 2022/2523), "
-                "what is the minimum effective corporate tax rate of 15% and what is the consolidated revenue threshold "
-                "of 750 million euros for multinational groups?"
-            ),
-            "escluse": "",
-            "cerca": True,
-            "info": "External international tax rule. Uncheck external search to see ROJO Honest Stop; keep checked to trigger VERDE (s_max=0.95) + Node NERO.",
-        },
-    }
-
-    if "diag_problema_area" not in st.session_state:
-        st.session_state["diag_problema_area"] = ""
-    if "diag_escluse_area" not in st.session_state:
-        st.session_state["diag_escluse_area"] = ""
-    if "diag_cerca_box" not in st.session_state:
-        st.session_state["diag_cerca_box"] = True
-
-    def _aggiorna_preset_tab2():
-        scelto = st.session_state.get("menu_preset_scelto", "Custom / Manual Input")
-        dati_preset = PRESET_ESEMPI_TAB2.get(scelto, PRESET_ESEMPI_TAB2["Custom / Manual Input"])
-        st.session_state["diag_problema_area"] = dati_preset["problema"]
-        st.session_state["diag_escluse_area"] = dati_preset["escluse"]
-        st.session_state["diag_cerca_box"] = dati_preset["cerca"]
-
-    st.selectbox(
-        "Quick Test Presets (Italiano · Español · English — Verified on Baseline PDFs & Live Web):",
-        options=list(PRESET_ESEMPI_TAB2.keys()),
-        key="menu_preset_scelto",
-        on_change=_aggiorna_preset_tab2,
-        help="Select any certified example to automatically populate the question, falsified hypotheses, and external search toggle.",
-    )
-    scelto_ora = st.session_state.get("menu_preset_scelto", "Custom / Manual Input")
-    preset_corrente = PRESET_ESEMPI_TAB2.get(scelto_ora, PRESET_ESEMPI_TAB2["Custom / Manual Input"])
-    if preset_corrente.get("info"):
-        st.caption(f"ℹ️ {preset_corrente['info']}")
-
     problema_testo = st.text_area(
         "Describe an unexpected problem in English, Español, Italiano or any language:",
-        key="diag_problema_area",
         height=ALTEZZA_TEXTAREA_UI,
         placeholder=(
-            "Write in English, Español or Italiano: e.g. According to OIC 19, when must payables be discounted? "
-            "/ ¿Cuándo deben actualizarse las deudas según OIC 19? / Quando si attualizzano i debiti secondo OIC 19?"
+            "Write your question or problem here in English, Español, Italiano or any language..."
         ),
     )
     col_dom, col_escl = st.columns([1, 2])
@@ -529,24 +426,34 @@ with tab_artigiano:
         dominio_scelto = st.selectbox(
             "Guiding Domain:",
             DOMINI_DISPONIBILI,
-            index=0,
             help="Prioritizes fragments saved in this domain (generale = Strato L, tecnico = Strato A, normativo = Strato D) while still searching all loaded documents.",
         )
         cerca_fuori = st.checkbox(
             "Enable cascading external search (Handbook -> AI Web Search -> DuckDuckGo/Wikipedia) on ROJO Semaphore",
-            key="diag_cerca_box",
+            value=True,
         )
     with col_escl:
         ipotesi_escluse_testo = st.text_area(
             "Hypotheses already falsified in the field (one per line, optional - Binary Search):",
-            key="diag_escluse_area",
-            height=90,
-            placeholder="e.g. Expansion vessel empty (isolated flow/return valves, boiler holds 1.5 bar)\nor: Short-term payable under 12 months already ruled out",
+            height=ALTEZZA_ESCLUSIONI_UI,
+            placeholder="Optional: enter hypotheses or causes already ruled out (one per line)...",
             help="Any hypothesis entered here is strictly forbidden as the root cause and will be isolated in Point 6 as [Falsified in the field].",
         )
 
-    if st.button("Solve with Craftsman Method (Semaphore + wp(S, R) + Zero Clutter)", type="primary"):
-        if not problema_testo.strip():
+    clic_risolvi = st.button(
+        "Solve with Craftsman Method (Semaphore + wp(S, R) + Zero Clutter)",
+        type="primary",
+    )
+    fn_ha_continua = getattr(risolutore_artigiano, "ha_pagine_continua_in_sospeso", None)
+    ha_continua_attivo = callable(fn_ha_continua) and fn_ha_continua(dominio_scelto)
+    clic_continua = False
+    if ha_continua_attivo:
+        st.info("Long response paginated: click below or type 'continua' to read the next part.")
+        clic_continua = st.button("Continua lettura (Turno successivo)")
+
+    if clic_risolvi or clic_continua:
+        testo_input_effettivo = "continua" if clic_continua else problema_testo
+        if not testo_input_effettivo.strip():
             st.warning("Please enter a problem description first.")
         else:
             lista_escluse = [
@@ -556,7 +463,7 @@ with tab_artigiano:
             try:
                 with st.spinner("Evaluating Guarded Semaphore, RRF Retrieval and Write Barrier (Strato L · A · D)..."):
                     esito = risolutore_artigiano.risolvi_da_artigiano(
-                        problema_testo,
+                        testo_input_effettivo,
                         dominio=dominio_scelto,
                         cercatore_esterno_fn=cercatore_fn,
                         ipotesi_gia_escluse=lista_escluse,
@@ -574,12 +481,6 @@ with tab_artigiano:
                 )
                 st.subheader("Diagnostic Response & Operational Plan")
                 st.write_stream(_stream_testo_parole(testo_leggibile))
-
-                if testo_leggibile.strip().endswith("continua"):
-                    st.info("ℹ️ Il testo prosegue. Inserisci 'continua' nel box o premi il pulsante sotto.")
-                    if st.button("➡️ Continua lettura (Turno successivo)", type="secondary", key="btn_continua_tab2"):
-                        st.session_state["diag_problema_area"] = "continua"
-                        st.rerun()
 
                 if esito.get("frammenti_usati"):
                     with st.expander("View Grounded Fragments Extracted from Document / Archive"):
@@ -608,48 +509,47 @@ with tab_ponte_web:
     problema_web = st.text_area(
         "Problem to solve via Free Web Bridge (in English, Español, Italiano, etc.):",
         key="prob_web",
-        height=100,
-        value=(
-            "For the incorporation of Gamma Spa, a partner contributes 35.000 euro for a business with "
-            "receivables of 20.000 euro, machinery of 60.000 euro, and payables of 50.000 euro: "
-            "what is the net equity and what is the goodwill (avviamento)?"
-        ),
+        height=ALTEZZA_TEXTAREA_UI,
+        placeholder="Write the question or problem you want to solve with grounded fragments...",
     )
     escluse_web = st.text_input(
         "Hypotheses already falsified in the field (comma-separated, optional):",
-        placeholder="e.g. Liabilities underestimated, Cash contribution without goodwill",
+        placeholder="Optional: comma-separated hypotheses already ruled out...",
     )
 
     if st.button("Step 1 — Generate Grounded Prompt (Strato L + Strato A + Strato D)"):
-        lista_escl_w = [x.strip() for x in escluse_web.split(",") if x.strip()]
-        query_tradotta_w = client_ollama.traduci_query_per_ricerca(problema_web)
-        blocchi_trovati = []
-        try:
-            rag_w = store_pgvector.recupera_con_semaforo(query_tradotta_w, dominio="generale", top_k=4)
-            for idx_rw, fr_w in enumerate(rag_w.get("frammenti", []), start=1):
-                blocchi_trovati.append((f"Archive Fragment {idx_rw}", fr_w["testo"]))
-        except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
-            logging_bottega.log.warning("Ponte web: errore recupero frammenti RAG: %s", err, extra={"code": "APP_WEB_001"})
-        for sez_est, txt_est in seed_bottega.cerca_nel_prontuario_locale(problema_web):
-            if not any(txt_est in b[1] for b in blocchi_trovati):
-                blocchi_trovati.append((sez_est, txt_est))
+        if not problema_web.strip():
+            st.warning("Please enter a problem first.")
+        else:
+            lista_escl_w = [voce_w.strip() for voce_w in escluse_web.split(",") if voce_w.strip()]
+            query_tradotta_w = client_ollama.traduci_query_per_ricerca(problema_web)
+            blocchi_trovati = []
+            try:
+                rag_w = store_pgvector.recupera_con_semaforo(query_tradotta_w, dominio="generale", top_k=4)
+                for idx_rw, fr_w in enumerate(rag_w.get("frammenti", []), start=1):
+                    blocchi_trovati.append((f"Archive Fragment {idx_rw}", fr_w["testo"]))
+            except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err_web:
+                logging_bottega.log_exception("Errore recupero RAG in Free Web Bridge", "APP_WEB_001", err_web)
+            for sez_est, txt_est in seed_bottega.cerca_nel_prontuario_locale(problema_web):
+                if not any(txt_est in blocco_es[1] for blocco_es in blocchi_trovati):
+                    blocchi_trovati.append((sez_est, txt_est))
 
-        prompt_pronto = risolutore_artigiano.genera_prompt_ponte_web_gratuito(
-            problema_web,
-            blocchi_trovati,
-            ipotesi_gia_escluse=lista_escl_w,
-        )
-        st.session_state["ultimo_contesto_web"] = "\n".join(
-            [problema_web] + [f"{t}: {c}" for t, c in blocchi_trovati]
-        )
-        st.session_state["ultimo_problema_web"] = problema_web
-        st.info("Copy the prompt below and paste it into ChatGPT, DeepSeek, Claude or Gemini:")
-        st.code(prompt_pronto, language="markdown")
+            prompt_pronto = risolutore_artigiano.genera_prompt_ponte_web_gratuito(
+                problema_web,
+                blocchi_trovati,
+                ipotesi_gia_escluse=lista_escl_w,
+            )
+            st.session_state["ultimo_contesto_web"] = "\n".join(
+                [problema_web] + [f"{tit_b}: {cont_b}" for tit_b, cont_b in blocchi_trovati]
+            )
+            st.session_state["ultimo_problema_web"] = problema_web
+            st.info("Copy the prompt below and paste it into ChatGPT, DeepSeek, Claude or Gemini:")
+            st.code(prompt_pronto, language="markdown")
 
     st.divider()
     risposta_incollata = st.text_area(
         "Step 2 — Paste the web AI response here to subject it to Strato D Critical Audit (Tri-Color Write Barrier):",
-        height=140,
+        height=ALTEZZA_AUDIT_WEB_UI,
         placeholder="Paste the response obtained from the external web AI here...",
     )
     if st.button("Step 2 — Audit Response with Tri-Color Write Barrier (Strato D)"):
@@ -679,9 +579,12 @@ with tab_ponte_web:
                 "grounded in the source context (Decimal ROUND_HALF_UP)."
             )
             if st.button("Optional: Save Certified BLACK Node Response to Volatile Session Memory"):
+                titolo_audit = grounding_numerico.tronca_senza_spezzare_parola(
+                    audit_corrente["problema"], 50
+                )
                 n_salvati_web = store_pgvector.incasella_e_salva(
                     "generale",
-                    f"Verified Web Bridge Audit: {audit_corrente['problema'][:50]}",
+                    f"Verified Web Bridge Audit: {titolo_audit}",
                     [("Certified BLACK Node", audit_corrente["testo"])],
                 )
                 st.toast(f"Saved {n_salvati_web} certified fragment(s) to volatile session memory!")
