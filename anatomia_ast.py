@@ -9,7 +9,9 @@ def _ha_uscita_propria_nel_while(nodo_while: ast.While) -> bool:
     """Checks whether a 'while True' loop has its own break/return/raise without being fooled
     by break statements inside nested for/while loops."""
     coda = list(nodo_while.body)
-    while coda:
+    passi_residui = 10000
+    while coda and passi_residui > 0:
+        passi_residui -= 1
         corrente = coda.pop(0)
         if isinstance(corrente, (ast.Return, ast.Raise, ast.Break)):
             return True

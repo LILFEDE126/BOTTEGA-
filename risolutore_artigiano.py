@@ -3,6 +3,7 @@
 Supports any input language (EN, ES, IT, etc.) with automatic search translation,
 natural-language final response synthesis and deterministic RAG fallback."""
 
+from types import MappingProxyType
 from typing import Callable, List, Literal, Optional, Tuple
 import psycopg2
 import requests
@@ -13,8 +14,12 @@ from grounding_numerico import (
     arrotonda_esatto_el_x8,
     classifica_nodo_tricolore,
     estrai_percentuali_decimal,
+    ripara_parola_troncata,
+    suddividi_in_pagine_con_continua,
+    tronca_senza_spezzare_parola,
     verifica_conservazione_percentuali_decimal,
 )
+from presidio_concorrenza import SEGRETARIO_THE
 from store_pgvector import _ARCHIVIO_MEMORIA_RAM, incasella_e_salva, recupera_con_semaforo
 from client_ollama import chiama_ollama_json, rileva_lingua_testo, traduci_query_per_ricerca
 
@@ -64,17 +69,17 @@ class SoluzioneArtigiano(BaseModel):
     )
 
 
-_ETICHETTE_FALSIFICATA = {
+_ETICHETTE_FALSIFICATA = MappingProxyType({
     "en": "[Falsified in the field]",
     "es": "[Falsificada en el campo]",
     "it": "[Falsificata sul campo]",
-}
+})
 
-_ETICHETTE_SCARTATO = {
+_ETICHETTE_SCARTATO = MappingProxyType({
     "en": "[Discarded for Zero Clutter]",
     "es": "[Descartado por Cero Montón]",
     "it": "[Scartato per Zero Mucchio]",
-}
+})
 
 
 def _istruzione_lingua_tassativa(lingua: str) -> str:
@@ -226,7 +231,61 @@ def _sintetizza_etichetta_frammento(testo_frammento: str, max_len: int = 180) ->
     compatto = " ".join(testo_frammento.strip().split())
     if len(compatto) <= max_len:
         return compatto
-    return f"{compatto[:max_len].rstrip()}..."
+    return tronca_senza_spezzare_parola(compatto, max_len, suffisso="...")
+
+
+_REGISTRO_CONTINUAZIONI_MEMORIA: dict[str, List[str]] = {}
+
+
+def e_richiesta_continua(testo: str) -> bool:
+    """Checks whether the input query is an explicit continuation command."""
+    t = testo.strip().lower().rstrip(".!?:;,")
+    return t in (
+        "continua",
+        "continue",
+        "continúa",
+        "continua per favore",
+        "prosegui",
+        "adelante",
+        "next",
+        "avanti",
+    )
+
+
+def imposta_pagine_continua(dominio: str, pagine: List[str]) -> None:
+    """Saves subsequent continuation pages in memory for sequential retrieval."""
+    with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
+        _REGISTRO_CONTINUAZIONI_MEMORIA[dominio] = list(pagine)
+        _REGISTRO_CONTINUAZIONI_MEMORIA["__ultimo__"] = list(pagine)
+
+
+def estrai_prossima_pagina_continua(dominio: str = "generale") -> Optional[str]:
+    """Pops and returns the next continuation page, or None if no pages are pending."""
+    with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
+        coda = _REGISTRO_CONTINUAZIONI_MEMORIA.get(dominio)
+        if not coda:
+            coda = _REGISTRO_CONTINUAZIONI_MEMORIA.get("__ultimo__")
+        if not coda:
+            return None
+        pagina = coda.pop(0)
+        _REGISTRO_CONTINUAZIONI_MEMORIA["__ultimo__"] = coda
+        return pagina
+
+
+def ha_pagine_continua_in_sospeso(dominio: str = "generale") -> bool:
+    """Returns True if there are remaining continuation pages waiting for the user."""
+    with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
+        coda = _REGISTRO_CONTINUAZIONI_MEMORIA.get(dominio) or _REGISTRO_CONTINUAZIONI_MEMORIA.get("__ultimo__")
+        return bool(coda)
+
+
+def svuota_pagine_continua(dominio: Optional[str] = None) -> None:
+    """Clears pending continuation pages from memory."""
+    with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
+        if dominio is None:
+            _REGISTRO_CONTINUAZIONI_MEMORIA.clear()
+        else:
+            _REGISTRO_CONTINUAZIONI_MEMORIA.pop(dominio, None)
 
 
 def _costruisci_soluzione_deterministica(
@@ -381,12 +440,57 @@ def risolvi_da_artigiano(
     cercatore_esterno_fn: Optional[Callable[[str], List[Tuple[str, str]]]] = None,
     ipotesi_gia_escluse: Optional[List[str]] = None,
     llm_fn: Callable = chiama_ollama_json,
+    max_caratteri_turno: Optional[int] = None,
 ) -> dict:
     """Universal closed-loop diagnostic cycle with cross-lingual query translation."""
     if not problema or not problema.strip():
         raise ValueError("Violazione EWD401 (Miracolo Escluso): il problema non puo' essere vuoto.")
 
     lingua_rilevata = rileva_lingua_testo(problema)
+
+    if e_richiesta_continua(problema):
+        prossima_pagina = estrai_prossima_pagina_continua(dominio)
+        if prossima_pagina is not None:
+            ancora_in_sospeso = ha_pagine_continua_in_sospeso(dominio)
+            testo_erogato = ripara_parola_troncata(prossima_pagina)
+            return {
+                "semaforo": "VERDE",
+                "s_max": 1.0,
+                "modalita": "CONTINUAZIONE_TESTO",
+                "lingua": lingua_rilevata,
+                "ricerca_esterna_eseguita": False,
+                "ipotesi_escluse_applicate": [],
+                "colore_nodo_ewd496a": "NERO",
+                "percentuali_conservate": True,
+                "risultato": {
+                    "stato": "CONTINUAZIONE",
+                    "testo": testo_erogato,
+                    "in_sospeso": ancora_in_sospeso,
+                },
+                "risposta_discorsiva": testo_erogato,
+                "frammenti_usati": [],
+                "cifre_non_ancorate": [],
+            }
+        msg_vuoto = {
+            "it": "Nessuna continuazione in sospeso. Tutte le informazioni sono state erogate oppure inserisci una nuova domanda.",
+            "es": "No hay continuación pendiente. Toda la información ha sido entregada o introduce una nueva pregunta.",
+            "en": "No pending continuation. All information has been delivered or enter a new question.",
+        }.get(lingua_rilevata, "Nessuna continuazione in sospeso.")
+        return {
+            "semaforo": "VERDE",
+            "s_max": 1.0,
+            "modalita": "CONTINUAZIONE_TESTO",
+            "lingua": lingua_rilevata,
+            "ricerca_esterna_eseguita": False,
+            "ipotesi_escluse_applicate": [],
+            "colore_nodo_ewd496a": "NERO",
+            "percentuali_conservate": True,
+            "risultato": {"stato": "NESSUNA_CONTINUAZIONE"},
+            "risposta_discorsiva": msg_vuoto,
+            "frammenti_usati": [],
+            "cifre_non_ancorate": [],
+        }
+
     blocco_lingua = _istruzione_lingua_tassativa(lingua_rilevata)
     query_multilingua = traduci_query_per_ricerca(problema)
     if cercatore_esterno_fn is None and _ARCHIVIO_MEMORIA_RAM:
@@ -668,6 +772,21 @@ def risolvi_da_artigiano(
         )
 
     sol_dict = soluzione.model_dump()
+    risposta_discorsiva_piena = formatta_risposta_artigiano_leggibile(
+        sol_dict, "AZIONE_SINGOLA_VERIFICABILE", lingua=lingua_rilevata
+    )
+    limite_turno = max_caratteri_turno if max_caratteri_turno is not None else 3200
+    if len(risposta_discorsiva_piena) > limite_turno:
+        pagine = suddividi_in_pagine_con_continua(
+            risposta_discorsiva_piena,
+            max_caratteri_pagina=limite_turno,
+        )
+        if len(pagine) > 1:
+            imposta_pagine_continua(dominio, pagine[1:])
+            risposta_discorsiva_piena = pagine[0]
+    else:
+        svuota_pagine_continua(dominio)
+
     return {
         "semaforo": semaforo,
         "s_max": float(arrotonda_esatto_el_x8(rag["s_max"], 4)),
@@ -678,9 +797,7 @@ def risolvi_da_artigiano(
         "colore_nodo_ewd496a": colore_nodo,
         "percentuali_conservate": pct_ok,
         "risultato": sol_dict,
-        "risposta_discorsiva": formatta_risposta_artigiano_leggibile(
-            sol_dict, "AZIONE_SINGOLA_VERIFICABILE", lingua=lingua_rilevata
-        ),
+        "risposta_discorsiva": risposta_discorsiva_piena,
         "frammenti_usati": [f.get("testo", "") for f in rag.get("frammenti", [])],
         "cifre_non_ancorate": cifre_errate,
     }

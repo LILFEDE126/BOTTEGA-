@@ -38,7 +38,9 @@ def verifica_stato_sicuro_banchiere(
     finish_doubtful = [True] * n
 
     progresso = True
-    while progresso:
+    passi_residui = n + 1
+    while progresso and passi_residui > 0:
+        passi_residui -= 1
         progresso = False
         for i in range(n):
             if finish_doubtful[i] and claims[i] <= free_money:

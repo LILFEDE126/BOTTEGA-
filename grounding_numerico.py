@@ -152,3 +152,74 @@ def classifica_nodo_tricolore(risposta: str, contesto: str) -> Tuple[str, List[s
     if cifre_orfane:
         return ("GRIGIO", cifre_orfane)
     return ("NERO", [])
+
+
+def tronca_senza_spezzare_parola(testo: str, max_caratteri: int, suffisso: str = "") -> str:
+    """Pure mathematical function: slices text up to max_caratteri ensuring no word is sliced in half.
+    Snaps to the preceding whitespace or punctuation boundary."""
+    if not testo or len(testo) <= max_caratteri:
+        return testo
+    limite = max(0, max_caratteri - len(suffisso))
+    if limite <= 0:
+        return suffisso[:max_caratteri]
+    if limite >= len(testo) or testo[limite].isspace():
+        return testo[:limite].rstrip() + suffisso
+    ultimo_spazio = -1
+    for sep in (" ", "\n", "\t", ".", ";", ",", ":", "!", "?"):
+        idx = testo.rfind(sep, 0, limite)
+        if idx > ultimo_spazio:
+            ultimo_spazio = idx
+    if ultimo_spazio > 0:
+        return testo[:ultimo_spazio].rstrip() + suffisso
+    return testo[:limite].rstrip() + suffisso
+
+
+def ripara_parola_troncata(testo: str) -> str:
+    """Pure function: detects and trims any trailing fragment of a word cut in half when reaching token limits."""
+    if not testo or not testo.strip():
+        return testo
+    testo_strip = testo.rstrip()
+    if testo_strip[-1] in (".", "!", "?", ":", ";", '"', "'", "`", ")", "]", "}", ">", "\n"):
+        return testo_strip
+    if testo_strip.endswith(("continua", "continue", "continúa")):
+        return testo_strip
+    ultimo_separatore = -1
+    for sep in (" ", "\n", "\t", ".", ";", ",", ":", "!", "?", ")", "]", "}", ">"):
+        idx = testo_strip.rfind(sep)
+        if idx > ultimo_separatore:
+            ultimo_separatore = idx
+    if ultimo_separatore > 0:
+        return testo_strip[:ultimo_separatore].rstrip()
+    return testo_strip
+
+
+def suddividi_in_pagine_con_continua(
+    testo: str,
+    max_caratteri_pagina: int = 2400,
+    marcatore_continua: str = "\n\ncontinua",
+) -> List[str]:
+    """Divides long text into sequential pages without cutting words in half.
+    Appends marcatore_continua to every page except the final one."""
+    if not testo or not testo.strip():
+        return [""]
+    testo_pulito = testo.strip()
+    if len(testo_pulito) <= max_caratteri_pagina:
+        return [testo_pulito]
+
+    pagine: List[str] = []
+    residuo = testo_pulito
+    passi_residui = 10000
+    while residuo and passi_residui > 0:
+        passi_residui -= 1
+        if len(residuo) <= max_caratteri_pagina:
+            pagine.append(residuo)
+            break
+        limite_taglio = max(100, max_caratteri_pagina - len(marcatore_continua))
+        pagina_corrente = tronca_senza_spezzare_parola(residuo, limite_taglio)
+        lunghezza_consumata = len(pagina_corrente)
+        if lunghezza_consumata == 0 or lunghezza_consumata >= len(residuo):
+            pagine.append(residuo)
+            break
+        pagine.append(pagina_corrente + marcatore_continua)
+        residuo = residuo[lunghezza_consumata:].lstrip()
+    return pagine

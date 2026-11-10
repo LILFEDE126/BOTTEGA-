@@ -36,7 +36,7 @@ def resolver_log_format(valore: Any = None) -> str:
         normalizzato = str(grezzo).strip().lower()
         if normalizzato in _FORMATI_VALIDI:
             return normalizzato
-    except Exception:
+    except (TypeError, ValueError, AttributeError, OSError):
         return "text"
     return "text"
 
@@ -70,7 +70,7 @@ def _ferma_listener_sicuro(listener: logging.handlers.QueueListener | None) -> N
     if listener is not None and getattr(listener, "_thread", None) is not None:
         try:
             listener.stop()
-        except Exception:
+        except (OSError, RuntimeError, ValueError):
             pass
 
 

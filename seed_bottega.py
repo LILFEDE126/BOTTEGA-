@@ -10,6 +10,7 @@ import config
 from logging_bottega import log
 from store_pgvector import ha_termine_tematico, incasella_e_salva, inizializza_schema
 from client_ollama import rileva_lingua_testo, traduci_query_per_ricerca
+from grounding_numerico import tronca_senza_spezzare_parola
 
 _BLOCCHI_OCR_RAGIONERIA: List[Tuple[str, str]] = [
     (
@@ -500,7 +501,7 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
 _REQUESTS_POST_ORIGINALE = requests.post
 _REQUESTS_GET_ORIGINALE = requests.get
 
-STOPWORDS_PRONTUARIO = {
+STOPWORDS_PRONTUARIO = frozenset({
     "normativa", "principio", "principi", "contabile", "contabili", "sistema", "sistemi",
     "azienda", "aziende", "impresa", "imprese", "secondo", "qual", "quale",
     "quali", "cosa", "come", "what", "which", "under", "cual", "como",
@@ -514,9 +515,9 @@ STOPWORDS_PRONTUARIO = {
     "máximo", "entre", "opera", "phase", "phases", "during", "evolve", "detected",
     "della", "delle", "degli", "dello", "nella", "nelle", "dalla", "dalle",
     "para", "como", "desde", "hasta", "según", "segun", "during", "between",
-}
+})
 
-_STOPWORDS_RICERCA_WEB = {
+_STOPWORDS_RICERCA_WEB = frozenset({
     "qual", "quale", "quali", "cosa", "come", "dove", "quando", "perche", "perché",
     "contenuto", "modifiche", "storiche", "subito", "prevede", "secondo", "nella",
     "nelle", "degli", "delle", "dello", "della", "dagli", "dalle", "questo", "questa",
@@ -525,7 +526,7 @@ _STOPWORDS_RICERCA_WEB = {
     "what", "which", "where", "when", "does", "govern", "under", "according", "between",
     "with", "from", "into", "that", "this", "their", "about", "official", "documentary",
     "source", "fuente", "documental", "fonte", "documentale", "ufficiale",
-}
+})
 
 
 def _estrai_query_compatta_web(query: str) -> str:
@@ -542,7 +543,7 @@ def _estrai_query_compatta_web(query: str) -> str:
         filtrati.append(tok)
         if len(filtrati) >= 6:
             break
-    return " ".join(filtrati) if filtrati else testo_base[:80]
+    return " ".join(filtrati) if filtrati else tronca_senza_spezzare_parola(testo_base, 80)
 
 
 def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
@@ -621,7 +622,7 @@ def cerca_nel_prontuario_esterno(
                         parti = r_ai.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
                         testo_web = " ".join(p.get("text", "") for p in parti).strip()
                         if testo_web:
-                            return [(f"Web Search AI (Gemini Grounding): {query[:80]}", testo_web)]
+                            return [(f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query, 80)}", testo_web)]
                     except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
                         continue
             elif provider_attivo == "openrouter":
@@ -723,7 +724,7 @@ def cerca_nel_prontuario_esterno(
                         for _, dati_pag in pagine_wiki.items():
                             intro_completa = (dati_pag.get("extract") or "").strip()
                             if len(intro_completa) > len(estratto):
-                                estratto = intro_completa[:1800]
+                                estratto = tronca_senza_spezzare_parola(intro_completa, 1800)
                     except (requests.exceptions.RequestException, ValueError, AttributeError):
                         pass
                 if estratto:
@@ -762,7 +763,7 @@ def cerca_nel_prontuario_esterno(
                 r_sint.raise_for_status()
                 testo_sint = r_sint.json()["choices"][0]["message"]["content"].strip()
                 if testo_sint:
-                    trovati.insert(0, (f"Web Search AI (Gemini Grounding): {query_compatta[:70]}", testo_sint))
+                    trovati.insert(0, (f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query_compatta, 70)}", testo_sint))
                     break
             except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
                 continue
@@ -772,7 +773,7 @@ def cerca_nel_prontuario_esterno(
 
     return [
         (
-            f"Riferimento documentale per: {query[:80]}",
+            f"Riferimento documentale per: {tronca_senza_spezzare_parola(query, 80)}",
             f"Verificare i parametri e gli importi direttamente sui frammenti del documento caricato per: {query}",
         )
     ]

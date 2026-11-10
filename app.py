@@ -90,8 +90,8 @@ PROMPT_TASCHINO_UNIVERSALE = (
     "4. LANGUAGE: Always reply in the exact same language used by the user (EN, ES, IT, etc.)."
 )
 
-DOMINI_DISPONIBILI = ["generale", "tecnico", "normativo"]
-PROVIDERS_DISPONIBILI = ["gemini", "groq", "openrouter", "ollama", "deepseek", "openai"]
+DOMINI_DISPONIBILI = ("generale", "tecnico", "normativo")
+PROVIDERS_DISPONIBILI = ("gemini", "groq", "openrouter", "ollama", "deepseek", "openai")
 
 _STILE_EDITORIALE_SOBRIO = """
 <style>
@@ -285,7 +285,7 @@ with st.sidebar:
                         "n_nuovi": n_ins,
                     }
                     nuovi_elaborati_ora += 1
-                except Exception as err:
+                except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                     logging_bottega.log_exception(
                         "Errore indicizzazione documento caricato", "APP_DOC_001", err
                     )
@@ -397,7 +397,7 @@ with tab_codice:
                             file_name="referto_bottega.md",
                             mime="text/markdown",
                         )
-                    except Exception as err:
+                    except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                         logging_bottega.log_exception("Errore in esegui_cascata UI", "APP_CAS_001", err)
                         st.error(f"Error during cascade execution ({provider_ui}): {err}")
 
@@ -567,6 +567,12 @@ with tab_artigiano:
                 st.subheader("Diagnostic Response & Operational Plan")
                 st.write_stream(_stream_testo_parole(testo_leggibile))
 
+                if testo_leggibile.strip().endswith("continua"):
+                    st.info("ℹ️ Il testo prosegue. Inserisci 'continua' nel box o premi il pulsante sotto.")
+                    if st.button("➡️ Continua lettura (Turno successivo)", type="secondary", key="btn_continua_tab2"):
+                        st.session_state["diag_problema_area"] = "continua"
+                        st.rerun()
+
                 if esito.get("frammenti_usati"):
                     with st.expander("View Grounded Fragments Extracted from Document / Archive"):
                         for idx_f, testo_f in enumerate(esito["frammenti_usati"], start=1):
@@ -576,7 +582,7 @@ with tab_artigiano:
                     st.json(esito["risultato"])
                     if esito["cifre_non_ancorate"]:
                         st.warning(f"Ungrounded figures flagged by Write Barrier: {esito['cifre_non_ancorate']}")
-            except Exception as err:
+            except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                 logging_bottega.log_exception("Errore in risolvi_da_artigiano UI", "APP_ART_001", err)
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
 
@@ -614,8 +620,8 @@ with tab_ponte_web:
             rag_w = store_pgvector.recupera_con_semaforo(query_tradotta_w, dominio="generale", top_k=4)
             for idx_rw, fr_w in enumerate(rag_w.get("frammenti", []), start=1):
                 blocchi_trovati.append((f"Archive Fragment {idx_rw}", fr_w["testo"]))
-        except Exception:
-            pass
+        except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
+            logging_bottega.log.warning("Ponte web: errore recupero frammenti RAG: %s", err, extra={"code": "APP_WEB_001"})
         for sez_est, txt_est in seed_bottega.cerca_nel_prontuario_locale(problema_web):
             if not any(txt_est in b[1] for b in blocchi_trovati):
                 blocchi_trovati.append((sez_est, txt_est))

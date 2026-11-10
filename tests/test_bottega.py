@@ -2,11 +2,13 @@
 """Layer 5 (THE): Complete suite of 35 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
+import ast
 from decimal import Decimal
 import io
 import math
 from pathlib import Path
 import tokenize
+from types import MappingProxyType
 from pydantic import BaseModel
 import pytest
 import requests
@@ -25,6 +27,9 @@ from geometria_semaforo import (
 from grounding_numerico import (
     arrotonda_esatto_el_x8,
     classifica_nodo_tricolore,
+    ripara_parola_troncata,
+    suddividi_in_pagine_con_continua,
+    tronca_senza_spezzare_parola,
     verifica_conservazione_percentuali_decimal,
     verifica_grounding_numerico,
 )
@@ -1261,6 +1266,7 @@ def test_domanda_meteo_reggio_emilia_non_aggancia_bando_voucher_camera_commercio
         query_meteo,
         dominio="generale",
         cercatore_esterno_fn=None,
+        llm_fn=lambda sys_p, usr_p, schema: risolutore_artigiano._costruisci_piano_deterministico(query_meteo),
     )
     assert esito_stop["semaforo"] == "ROJO"
     assert esito_stop["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
@@ -1276,3 +1282,143 @@ def test_domanda_meteo_reggio_emilia_non_aggancia_bando_voucher_camera_commercio
     assert len(rag_bando["frammenti"]) >= 1
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+
+def test_tronca_senza_spezzare_parola_e_ripara_parola_troncata():
+    testo = "Se la banca accredita in conto corrente interessi attivi"
+    troncato_20 = tronca_senza_spezzare_parola(testo, 20)
+    assert troncato_20 == "Se la banca"
+    assert not troncato_20.endswith("accredit")
+    assert len(troncato_20) <= 20
+
+    troncato_suff = tronca_senza_spezzare_parola(testo, 20, suffisso="...")
+    assert troncato_suff == "Se la banca..."
+    assert len(troncato_suff) <= 20
+
+    testo_incompleto = "La registrazione contabile prevede l'accredito in banca c/c di 730 euro e la ritenuta all'era"
+    riparato = ripara_parola_troncata(testo_incompleto)
+    assert riparato == "La registrazione contabile prevede l'accredito in banca c/c di 730 euro e la ritenuta"
+    assert not riparato.endswith("all'era")
+
+    testo_finito = "Il totale netto accreditato e' 730 euro."
+    assert ripara_parola_troncata(testo_finito) == testo_finito
+
+
+def test_suddividi_in_pagine_con_continua_e_protocollo_continua_artigiano(monkeypatch):
+    testo_lungo = (
+        "Prima sezione: interessi attivi bancari lordi per 1.000 euro con ritenuta fiscale al 27% pari a 270 euro. "
+        "Seconda sezione: accredito netto in conto corrente per 730 euro presso l'istituto di credito. "
+        "Terza sezione: scrittura in partita doppia con Erario c/ritenute e Banca c/c per chiusura esercizio."
+    )
+    pagine = suddividi_in_pagine_con_continua(testo_lungo, max_caratteri_pagina=130)
+    assert len(pagine) >= 2
+    for p in pagine[:-1]:
+        assert p.endswith("\n\ncontinua")
+        assert not p.endswith("...\n\ncontinua")
+    assert not pagine[-1].endswith("\n\ncontinua")
+
+    assert risolutore_artigiano.e_richiesta_continua("continua")
+    assert risolutore_artigiano.e_richiesta_continua("Continue")
+    assert risolutore_artigiano.e_richiesta_continua("continúa")
+    assert risolutore_artigiano.e_richiesta_continua("prosegui")
+    assert not risolutore_artigiano.e_richiesta_continua("Quali sono gli interessi?")
+
+    risolutore_artigiano.svuota_pagine_continua()
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="generale", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.88,
+            "frammenti": [
+                {
+                    "id": 1,
+                    "testo": "interessi attivi 1.000 euro ritenuta fiscale 27% 270 euro netto 730 euro",
+                }
+            ],
+        },
+    )
+
+    def finto_llm_lungo(sys_p, usr_p, schema):
+        return risolutore_artigiano.SoluzioneArtigiano(
+            risposta_finale_discorsiva=(
+                "Interessi attivi bancari lordi 1.000 euro con ritenuta fiscale al 27% pari a 270 euro "
+                "ed accredito netto pari a 730 euro in banca conto corrente con chiusura esercizio verificata."
+            ),
+            principio_guida_unico="Principio contabile bancario e ritenuta 27%",
+            elementi_scartati_per_non_fare_mucchio=["Gamma Spa"],
+            precondizione_wp_richiesta="Accredito interessi attivi lordi 1.000 euro",
+            invariante_violato="Nessuno: ritenuta 270 euro e netto 730 euro",
+            ipotesi_causale_unica="Ritenuta d'acconto 27% su 1.000 euro",
+            azione_correttiva_singola="Registrare accredito 730 euro",
+            esperimento_di_verifica_pratica="Controllo estratto conto bancario",
+        )
+
+    esito_p1 = risolutore_artigiano.risolvi_da_artigiano(
+        "Se la banca accredita interessi attivi per 1.000 euro con ritenuta 27%, qual e' il netto?",
+        dominio="generale",
+        llm_fn=finto_llm_lungo,
+        max_caratteri_turno=280,
+    )
+    assert esito_p1["semaforo"] == "VERDE"
+    assert esito_p1["colore_nodo_ewd496a"] == "NERO"
+    assert esito_p1["risposta_discorsiva"].endswith("\n\ncontinua")
+    assert risolutore_artigiano.ha_pagine_continua_in_sospeso("generale")
+
+    pagine_ricevute = [esito_p1["risposta_discorsiva"]]
+    while risolutore_artigiano.ha_pagine_continua_in_sospeso("generale"):
+        esito_succ = risolutore_artigiano.risolvi_da_artigiano(
+            "continua",
+            dominio="generale",
+        )
+        assert esito_succ["semaforo"] == "VERDE"
+        assert esito_succ["colore_nodo_ewd496a"] == "NERO"
+        assert esito_succ["modalita"] == "CONTINUAZIONE_TESTO"
+        pagine_ricevute.append(esito_succ["risposta_discorsiva"])
+
+    assert len(pagine_ricevute) >= 2
+    for p in pagine_ricevute[:-1]:
+        assert p.endswith("\n\ncontinua")
+    assert not pagine_ricevute[-1].endswith("\n\ncontinua")
+    assert not risolutore_artigiano.ha_pagine_continua_in_sospeso("generale")
+
+    esito_vuoto = risolutore_artigiano.risolvi_da_artigiano(
+        "continua",
+        dominio="generale",
+    )
+    assert esito_vuoto["modalita"] == "CONTINUAZIONE_TESTO"
+    assert "Nessuna continuazione in sospeso" in esito_vuoto["risposta_discorsiva"]
+
+
+def test_senior_engineering_20_principi_integrita_architetturale():
+    radice = _trova_radice_progetto()
+    for nome_modulo in GERARCHIA_LIVELLI_THE:
+        percorso = radice / f"{nome_modulo}.py"
+        codice = percorso.read_text(encoding="utf-8")
+        albero = ast.parse(codice)
+
+        for nodo in ast.walk(albero):
+            assert not isinstance(nodo, ast.Assert), (
+                f"Principio 16 violato: trovato 'assert' in produzione nel file {nome_modulo}.py riga {nodo.lineno}"
+            )
+            if isinstance(nodo, ast.ExceptHandler):
+                assert nodo.type is not None, (
+                    f"Principio 3 violato: trovato except nudo in {nome_modulo}.py riga {nodo.lineno}"
+                )
+
+    req_file = radice / "requirements.txt"
+    if req_file.is_file():
+        righe = [r.strip() for r in req_file.read_text(encoding="utf-8").splitlines() if r.strip() and not r.startswith("#")]
+        for riga in righe:
+            assert "==" in riga, f"Principio 19 violato: dipendenza non fissata con '==' in requirements.txt: {riga}"
+
+    assert isinstance(store_pgvector.TERMINI_ECONOMICI_AFFINI, frozenset)
+    assert isinstance(store_pgvector.STOPWORDS_RICERCA_COMUNI, frozenset)
+    assert isinstance(seed_bottega.STOPWORDS_PRONTUARIO, frozenset)
+    assert isinstance(seed_bottega._STOPWORDS_RICERCA_WEB, frozenset)
+    assert isinstance(client_ollama.GLOSSARIO_MULTILINGUA_IT, MappingProxyType)
+    assert isinstance(client_ollama.PAROLE_SPIA_LINGUA, MappingProxyType)
+    assert isinstance(risolutore_artigiano._ETICHETTE_FALSIFICATA, MappingProxyType)
+    assert isinstance(risolutore_artigiano._ETICHETTE_SCARTATO, MappingProxyType)
+    assert isinstance(config.GERARCHIA_LIVELLI_THE, MappingProxyType)

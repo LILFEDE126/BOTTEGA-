@@ -5,6 +5,7 @@ deterministic query translation, EWD426 self-stabilization, HTTP 429/404/503 mod
 import json
 import re
 import time
+from types import MappingProxyType
 from typing import Callable, Optional, Type, TypeVar
 import requests
 from pydantic import BaseModel, ValidationError
@@ -17,12 +18,13 @@ from config import (
     risolvi_chiave_api,
 )
 from logging_bottega import log, log_exception
+from grounding_numerico import ripara_parola_troncata
 
 T = TypeVar("T", bound=BaseModel)
 
 _REQUESTS_POST_ORIGINALE = requests.post
 
-GLOSSARIO_MULTILINGUA_IT = {
+GLOSSARIO_MULTILINGUA_IT = MappingProxyType({
     "boiler": "caldaia",
     "caldera": "caldaia",
     "pressure": "pressione",
@@ -154,16 +156,16 @@ GLOSSARIO_MULTILINGUA_IT = {
     "reembolsa": "rimborsa",
     "cuota": "quota",
     "obligaciones": "obbligazionario",
-}
+})
 
-PAROLE_SPIA_LINGUA = {
-    "en": {
+PAROLE_SPIA_LINGUA = MappingProxyType({
+    "en": frozenset({
         "the", "how", "what", "why", "when", "where", "which", "is", "are", "with",
         "from", "according", "retail", "price", "margin", "months", "delivery", "lead",
         "boiler", "duty", "pressure", "loss", "please", "respond", "reply", "english",
         "for", "and", "in", "of", "to",
-    },
-    "es": {
+    }),
+    "es": frozenset({
         "que", "qué", "como", "cómo", "cuando", "cuándo", "donde", "dónde", "cual",
         "cuál", "cuales", "cuáles", "cuanto", "cuánto", "para", "del", "las",
         "los", "por", "según", "segun", "sitio", "folletos", "presupuesto", "porcentaje",
@@ -171,16 +173,16 @@ PAROLE_SPIA_LINGUA = {
         "espagnol", "hablame", "háblame", "favor", "responde", "circuito", "calefaccion",
         "calefacción", "pierde", "cada", "hora", "cae", "frio", "frío", "empresa", "banco",
         "vencimiento", "días", "dias", "interés", "interes", "coste", "operación", "operacion",
-    },
-    "it": {
+    }),
+    "it": frozenset({
         "che", "come", "quando", "dove", "quale", "quali", "quanto", "cosa", "della", "nella",
         "delle", "degli", "dallo", "sulla", "alla", "nelle", "negli", "sui", "nei", "dal",
         "sono", "calcola", "dichiarato", "documento", "prevede", "nuovo", "nuovi", "entrato",
         "maglia", "pantaloncino", "caldaia", "pressione", "dazio", "impianto", "perdita",
         "italiano", "rispondi", "per", "il", "gli", "un", "una", "quota", "annua", "fondo",
         "imposta", "sostitutiva", "retribuzioni", "lorde", "divisore", "rivalutazione",
-    },
-}
+    }),
+})
 
 
 def rileva_lingua_testo(testo: str) -> str:

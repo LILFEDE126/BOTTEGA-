@@ -34,7 +34,7 @@ from geometria_semaforo import (
     similitudine_coseno,
     valuta_semaforo,
 )
-from grounding_numerico import arrotonda_esatto_el_x8
+from grounding_numerico import arrotonda_esatto_el_x8, tronca_senza_spezzare_parola
 from presidio_concorrenza import SEGRETARIO_THE
 
 logging.getLogger("pypdf").setLevel(logging.ERROR)
@@ -49,7 +49,7 @@ _POSTGRES_OFFLINE = False
 _ARCHIVIO_MEMORIA_RAM: List[Dict[str, Any]] = []
 _CACHE_BLOCCHI_DOCUMENTO: Dict[str, List[Tuple[str, str]]] = {}
 
-TERMINI_ECONOMICI_AFFINI = {
+TERMINI_ECONOMICI_AFFINI = frozenset({
     "costi",
     "costo",
     "prezzo",
@@ -74,9 +74,9 @@ TERMINI_ECONOMICI_AFFINI = {
     "packaging",
     "marketing",
     "business",
-}
+})
 
-STOPWORDS_RICERCA_COMUNI = {
+STOPWORDS_RICERCA_COMUNI = frozenset({
     "che", "con", "del", "della", "delle", "degli", "dei", "dal", "dalla", "nel", "nella",
     "nelle", "negli", "nei", "sul", "sulla", "sulle", "per", "tra", "fra", "una", "uno",
     "gli", "le", "la", "il", "lo", "non", "sono", "alla", "alle", "agli", "allo", "cui",
@@ -85,7 +85,7 @@ STOPWORDS_RICERCA_COMUNI = {
     "que", "qué", "con", "para", "por", "los", "las", "una", "uno", "cual", "cuál", "como",
     "cómo", "según", "segun", "according", "document", "documentos", "appunti", "corso",
     "azienda", "societa", "società", "impresa", "euro", "euros", "eur",
-}
+})
 
 PATRON_CODICE_NORMATIVO = re.compile(
     r"\b(?:oic|ias|ifrs|niif|uni|iso|esrs|csrd|verifactu|pillar\s+two)\s*\d*\b"
@@ -328,11 +328,22 @@ def _suddividi_testo_in_blocchi(testo: str, prefisso: str, max_caratteri: int = 
             if len(p) <= max_caratteri:
                 buffer_corrente = p
             else:
-                for pos in range(0, len(p), max_caratteri):
-                    fetta = p[pos:pos + max_caratteri].strip()
-                    if fetta:
-                        blocchi.append((f"{prefisso}.{indice_parte}", fetta))
-                        indice_parte += 1
+                residuo_p = p
+                limite_iter = 10000
+                while residuo_p and limite_iter > 0:
+                    limite_iter -= 1
+                    if len(residuo_p) <= max_caratteri:
+                        fetta = residuo_p.strip()
+                        if fetta:
+                            blocchi.append((f"{prefisso}.{indice_parte}", fetta))
+                            indice_parte += 1
+                        break
+                    fetta = tronca_senza_spezzare_parola(residuo_p, max_caratteri)
+                    if not fetta:
+                        fetta = residuo_p[:max_caratteri].strip()
+                    blocchi.append((f"{prefisso}.{indice_parte}", fetta))
+                    indice_parte += 1
+                    residuo_p = residuo_p[len(fetta):].lstrip()
                 buffer_corrente = ""
 
     if buffer_corrente:
@@ -361,6 +372,7 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
         estratto_con_pdfium = False
 
         if usa_estrattore_reale and pdfium is not None:
+            doc_pdfium = None
             try:
                 doc_pdfium = pdfium.PdfDocument(contenuto_bytes)
                 for idx, pagina in enumerate(doc_pdfium, start=1):
@@ -368,9 +380,12 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
                     if testo_pag:
                         blocchi_pdf.extend(_suddividi_testo_in_blocchi(testo_pag, f"Page {idx}"))
                 estratto_con_pdfium = True
-            except Exception:
+            except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
                 blocchi_pdf = []
                 estratto_con_pdfium = False
+            finally:
+                if doc_pdfium is not None and hasattr(doc_pdfium, "close"):
+                    doc_pdfium.close()
 
         if not estratto_con_pdfium:
             lettore = PdfReader(io.BytesIO(contenuto_bytes))
@@ -410,7 +425,7 @@ def connessione_db(registra_vettore: bool = False):
             register_vector(conn)
         with conn:
             yield conn
-    except BaseException:
+    except (Exception, KeyboardInterrupt, SystemExit):
         log_exception("Errore transazionale PostgreSQL (rollback eseguito)", "DB_CONN_001")
         raise
     finally:
