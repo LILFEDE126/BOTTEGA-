@@ -52,6 +52,10 @@ class OutputAntirez(BaseModel):
     )
 
 
+VOTO_MINIMO_INGEGNERISTICO: int = 1
+VOTO_MASSIMO_INGEGNERISTICO: int = 10
+
+
 class OutputDijkstra(BaseModel):
     dominio_e_codominio: str = Field(
         description="Formal specification of input types, output types and error states"
@@ -66,7 +70,9 @@ class OutputDijkstra(BaseModel):
         description="The rewritten Python code: complete, typed, safe and testable"
     )
     voto_finale: int = Field(
-        ge=1, le=10, description="Strict engineering score from 1 to 10 for the original code"
+        ge=VOTO_MINIMO_INGEGNERISTICO,
+        le=VOTO_MASSIMO_INGEGNERISTICO,
+        description="Strict engineering score from 1 to 10 for the original code",
     )
 
 
@@ -74,7 +80,7 @@ def _formatta_frammenti_rag(risultato_rag: dict) -> str:
     frammenti = risultato_rag.get("frammenti", [])
     if not frammenti:
         return "Nessun frammento recuperato dal database."
-    return "\n\n".join(f"- {f['testo']}" for f in frammenti)
+    return "\n\n".join(f"- {frammento['testo']}" for frammento in frammenti)
 
 
 def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str:
@@ -90,7 +96,7 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
     anatomia_json = json.dumps(anatomia, indent=2, ensure_ascii=False)
 
     log.info("[Passo 1/4] Recupero RAG Ibrido (HNSW + FTS + RRF + Semaforo Guardato)", extra={"code": "CAS_RAG_001"})
-    nomi_fn = " ".join(f["nome"] for f in anatomia["funzioni"])
+    nomi_fn = " ".join(fn_info["nome"] for fn_info in anatomia["funzioni"])
     query_str = f"analisi architettura guardrail invarianti python {nomi_fn}".strip()
     try:
         rag_leo = recupera_con_semaforo(query_str, "generale", top_k=2)

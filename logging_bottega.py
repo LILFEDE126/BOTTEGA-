@@ -66,12 +66,13 @@ class FormatterJSON(logging.Formatter):
 
 
 def _ferma_listener_sicuro(listener: logging.handlers.QueueListener | None) -> None:
-    """Arresta il QueueListener in modo idempotente solo se il thread e' ancora attivo."""
+    """Arresta il QueueListener in modo idempotente solo se il thread e' ancora attivo.
+    Cattura e traccia eventuali errori di terminazione thread senza bloccare lo shutdown."""
     if listener is not None and getattr(listener, "_thread", None) is not None:
         try:
             listener.stop()
-        except (OSError, RuntimeError, ValueError):
-            pass
+        except (OSError, RuntimeError, ValueError) as err_stop:
+            sys.stderr.write(f"LOG_LISTENER_STOP_WARN: {err_stop}\n")
 
 
 def configura_logger(nome: str = "bottega") -> logging.Logger:

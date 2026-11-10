@@ -22,11 +22,11 @@ def verifica_stato_sicuro_banchiere(
     if capitale_totale < 0:
         raise ValueError("Il capitale totale non puo' essere negativo.")
 
-    n = len(prestiti_attuali)
-    for i in range(n):
-        if prestiti_attuali[i] < 0 or fabbisogni_massimi[i] < 0:
+    numero_processi = len(prestiti_attuali)
+    for indice in range(numero_processi):
+        if prestiti_attuali[indice] < 0 or fabbisogni_massimi[indice] < 0:
             return False
-        if prestiti_attuali[i] > fabbisogni_massimi[i]:
+        if prestiti_attuali[indice] > fabbisogni_massimi[indice]:
             return False
 
     somma_prestiti = sum(prestiti_attuali)
@@ -34,18 +34,18 @@ def verifica_stato_sicuro_banchiere(
         return False
 
     free_money = capitale_totale - somma_prestiti
-    claims = [fabbisogni_massimi[i] - prestiti_attuali[i] for i in range(n)]
-    finish_doubtful = [True] * n
+    claims = [fabbisogni_massimi[idx] - prestiti_attuali[idx] for idx in range(numero_processi)]
+    finish_doubtful = [True] * numero_processi
 
     progresso = True
-    passi_residui = n + 1
+    passi_residui = numero_processi + 1
     while progresso and passi_residui > 0:
         passi_residui -= 1
         progresso = False
-        for i in range(n):
-            if finish_doubtful[i] and claims[i] <= free_money:
-                finish_doubtful[i] = False
-                free_money += prestiti_attuali[i]
+        for idx in range(numero_processi):
+            if finish_doubtful[idx] and claims[idx] <= free_money:
+                finish_doubtful[idx] = False
+                free_money += prestiti_attuali[idx]
                 progresso = True
 
     return not any(finish_doubtful) and free_money == capitale_totale
@@ -78,30 +78,30 @@ class PresidioConcorrenzaTHE:
         if fabbisogno_massimo < 1:
             raise ValueError("Il fabbisogno_massimo deve essere >= 1.")
 
-        tid = threading.get_ident()
+        identificativo_thread = threading.get_ident()
         self._semaforo_pv.acquire()
         allocato = False
         try:
             with self._mutex_segretario:
-                prestito_corrente = self._prestiti_thread.get(tid, 0) + 1
+                prestito_corrente = self._prestiti_thread.get(identificativo_thread, 0) + 1
                 need_corrente = max(
-                    self._fabbisogni_thread.get(tid, 0),
+                    self._fabbisogni_thread.get(identificativo_thread, 0),
                     prestito_corrente,
                     fabbisogno_massimo,
                 )
-                self._prestiti_thread[tid] = prestito_corrente
-                self._fabbisogni_thread[tid] = need_corrente
+                self._prestiti_thread[identificativo_thread] = prestito_corrente
+                self._fabbisogni_thread[identificativo_thread] = need_corrente
 
-                tids = list(self._prestiti_thread.keys())
-                lista_prestiti = [self._prestiti_thread[k] for k in tids]
-                lista_needs = [self._fabbisogni_thread[k] for k in tids]
+                identificativi_attivi = list(self._prestiti_thread.keys())
+                lista_prestiti = [self._prestiti_thread[ident] for ident in identificativi_attivi]
+                lista_needs = [self._fabbisogni_thread[ident] for ident in identificativi_attivi]
 
                 if not verifica_stato_sicuro_banchiere(self._capitale, lista_prestiti, lista_needs):
                     if prestito_corrente <= 1:
-                        self._prestiti_thread.pop(tid, None)
-                        self._fabbisogni_thread.pop(tid, None)
+                        self._prestiti_thread.pop(identificativo_thread, None)
+                        self._fabbisogni_thread.pop(identificativo_thread, None)
                     else:
-                        self._prestiti_thread[tid] = prestito_corrente - 1
+                        self._prestiti_thread[identificativo_thread] = prestito_corrente - 1
                     raise RuntimeError(
                         f"Violazione EWD116: Stato Insicuro rilevato per dominio '{dominio}'."
                     )
@@ -116,12 +116,12 @@ class PresidioConcorrenzaTHE:
                     nuovo_val = self._holyness_counter.get(dominio, 1) - 1
                     self._holyness_counter[dominio] = max(0, nuovo_val)
                     profanato = self._holyness_counter[dominio] == 0
-                    residuo = self._prestiti_thread.get(tid, 1) - 1
+                    residuo = self._prestiti_thread.get(identificativo_thread, 1) - 1
                     if residuo <= 0:
-                        self._prestiti_thread.pop(tid, None)
-                        self._fabbisogni_thread.pop(tid, None)
+                        self._prestiti_thread.pop(identificativo_thread, None)
+                        self._fabbisogni_thread.pop(identificativo_thread, None)
                     else:
-                        self._prestiti_thread[tid] = residuo
+                        self._prestiti_thread[identificativo_thread] = residuo
                 if profanato:
                     log.debug("Segmento '%s' profanato (Holyness=0)", dominio, extra={"code": "THE_HOLY_000"})
             self._semaforo_pv.release()

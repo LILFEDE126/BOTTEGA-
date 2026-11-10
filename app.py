@@ -117,11 +117,15 @@ blockquote {
 """
 
 
+INTERVALLO_STREAMING_UI_SECONDI: float = 0.01
+ALTEZZA_TEXTAREA_UI: int = 120
+
+
 def _stream_testo_parole(testo: str):
     """Yields words preserving markdown newlines for real-time streaming in Streamlit."""
     for token in re.findall(r"\S+\s*", testo):
         yield token
-        time.sleep(0.01)
+        time.sleep(INTERVALLO_STREAMING_UI_SECONDI)
 
 
 def _conta_frammenti_ram_sicuro(titolo=None) -> int:
@@ -272,8 +276,12 @@ with st.sidebar:
                     else:
                         try:
                             store_pgvector.inizializza_schema()
-                        except psycopg2.Error:
-                            pass
+                        except psycopg2.Error as err_init:
+                            logging_bottega.log.info(
+                                "Inizializzazione PostgreSQL non riuscita (%s): memorizzazione nell'archivio RAM",
+                                err_init,
+                                extra={"code": "APP_INIT_001"},
+                            )
                         n_ins = store_pgvector.incasella_e_salva(dominio_doc, singolo_file.name, blocchi_doc)
                         ram_globale = _conta_frammenti_ram_sicuro()
                     archivio_sess[singolo_file.name] = {
@@ -510,7 +518,7 @@ with tab_artigiano:
     problema_testo = st.text_area(
         "Describe an unexpected problem in English, Español, Italiano or any language:",
         key="diag_problema_area",
-        height=120,
+        height=ALTEZZA_TEXTAREA_UI,
         placeholder=(
             "Write in English, Español or Italiano: e.g. According to OIC 19, when must payables be discounted? "
             "/ ¿Cuándo deben actualizarse las deudas según OIC 19? / Quando si attualizzano i debiti secondo OIC 19?"

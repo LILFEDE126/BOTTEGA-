@@ -7,10 +7,19 @@ from typing import List, Optional, Tuple
 import requests
 
 import config
+from config import (
+    MAX_CARATTERI_ESTRATTO_WIKI,
+    MAX_CARATTERI_SNIPPET_WEB,
+    MAX_CARATTERI_TITOLO_RICERCA,
+    TIMEOUT_HTTP_BREVE,
+    TIMEOUT_HTTP_MEDIO,
+)
 from logging_bottega import log
 from store_pgvector import ha_termine_tematico, incasella_e_salva, inizializza_schema
 from client_ollama import rileva_lingua_testo, traduci_query_per_ricerca
 from grounding_numerico import tronca_senza_spezzare_parola
+
+USER_AGENT_BOTTEGA: str = "Bottega/1.0"
 
 _BLOCCHI_OCR_RAGIONERIA: List[Tuple[str, str]] = [
     (
@@ -535,15 +544,15 @@ def _estrai_query_compatta_web(query: str) -> str:
     token_lista = re.findall(r"\b\d+(?:/\d+)?\b|[A-Za-zÀ-ÿ]{3,}", testo_base)
     filtrati: List[str] = []
     visti = set()
-    for tok in token_lista:
-        low = tok.lower()
-        if low in _STOPWORDS_RICERCA_WEB or low in visti:
+    for token_elem in token_lista:
+        token_minuscolo = token_elem.lower()
+        if token_minuscolo in _STOPWORDS_RICERCA_WEB or token_minuscolo in visti:
             continue
-        visti.add(low)
-        filtrati.append(tok)
+        visti.add(token_minuscolo)
+        filtrati.append(token_elem)
         if len(filtrati) >= 6:
             break
-    return " ".join(filtrati) if filtrati else tronca_senza_spezzare_parola(testo_base, 80)
+    return " ".join(filtrati) if filtrati else tronca_senza_spezzare_parola(testo_base, MAX_CARATTERI_TITOLO_RICERCA)
 
 
 def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
@@ -551,156 +560,154 @@ def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
     query_tradotta = traduci_query_per_ricerca(query)
     token_grezzi = re.findall(r"\d+(?:[.,/-]\d+)+|\w+", query_tradotta.lower())
     parole = {
-        p for p in token_grezzi
-        if (len(p) >= 4 or (len(p) >= 2 and p[0].isdigit())) and p not in STOPWORDS_PRONTUARIO
+        parola for parola in token_grezzi
+        if (len(parola) >= 4 or (len(parola) >= 2 and parola[0].isdigit())) and parola not in STOPWORDS_PRONTUARIO
     }
-    parole_alfabetiche = {p for p in parole if not any(c.isdigit() for c in p)}
+    parole_alfabetiche = {parola for parola in parole if not any(c.isdigit() for c in parola)}
     valutati: List[Tuple[int, str, str]] = []
     for sezione, testo in PRONTUARIO_ESTERNO_SOCCORSO:
         blocco_lower = f"{sezione} {testo}".lower()
         token_titolo = set(re.findall(r"\d+(?:[.,/-]\d+)+|\w+", sezione.lower()))
         token_blocco = set(re.findall(r"\d+(?:[.,/-]\d+)+|\w+", blocco_lower))
-        match_alfa = sum(1 for p in parole_alfabetiche if p in token_blocco or (len(p) >= 6 and p in blocco_lower))
+        match_alfa = sum(1 for parola in parole_alfabetiche if parola in token_blocco or (len(parola) >= 6 and parola in blocco_lower))
         ha_match_titolo = any(
-            (p in token_titolo and len(p) >= 4) or (len(p) >= 6 and p in sezione.lower())
-            for p in parole
+            (parola in token_titolo and len(parola) >= 4) or (len(parola) >= 6 and parola in sezione.lower())
+            for parola in parole
         )
         if not ha_match_titolo:
             continue
         if not ha_termine_tematico(query, query_tradotta, f"{sezione} {testo}"):
             continue
-        if match_alfa < 2 and not any(p in token_blocco for p in parole if any(c.isdigit() for c in p)):
+        if match_alfa < 2 and not any(parola in token_blocco for parola in parole if any(c.isdigit() for c in parola)):
             continue
         if match_alfa == 0:
             continue
         match_n = sum(
-            2 if any(c.isdigit() for c in p) else 1
-            for p in parole
-            if p in token_blocco or (not any(c.isdigit() for c in p) and len(p) >= 6 and p in blocco_lower)
+            2 if any(c.isdigit() for c in parola) else 1
+            for parola in parole
+            if parola in token_blocco or (not any(c.isdigit() for c in parola) and len(parola) >= 6 and parola in blocco_lower)
         )
         if match_n >= 2:
             valutati.append((match_n, sezione, testo))
     valutati.sort(key=lambda item: item[0], reverse=True)
-    return [(sez, txt) for _, sez, txt in valutati[:1]]
+    return [(sezione, testo) for _, sezione, testo in valutati[:1]]
 
 
-def cerca_nel_prontuario_esterno(
-    query: str,
-    provider: Optional[str] = None,
-    api_key: Optional[str] = None,
-) -> List[Tuple[str, str]]:
-    trovati_locali = cerca_nel_prontuario_locale(query)
-    if trovati_locali and requests.post is _REQUESTS_POST_ORIGINALE:
-        return trovati_locali
-
-    provider_attivo = (provider or config.LLM_PROVIDER or "ollama").strip().lower()
-    chiave_attiva = config.risolvi_chiave_api(api_key=api_key, provider=provider_attivo)
-
-    if chiave_attiva and provider_attivo in ("gemini", "openrouter"):
+def _cerca_tramite_gemini_grounding(query: str, chiave_attiva: str) -> Optional[Tuple[str, str]]:
+    """Esegue ricerca live sul web tramite Gemini con Google Search Grounding."""
+    for mod_g in ("gemini-2.5-flash", *config.MODELLI_FALLBACK_GEMINI):
         try:
-            if provider_attivo == "gemini":
-                for mod_g in ("gemini-2.5-flash", *config.MODELLI_FALLBACK_GEMINI):
-                    try:
-                        url_gemini = (
-                            "https://generativelanguage.googleapis.com/v1beta/models/"
-                            f"{mod_g}:generateContent?key={chiave_attiva}"
-                        )
-                        payload_g = {
-                            "contents": [
-                                {
-                                    "parts": [
-                                        {
-                                            "text": f"Search official technical facts and exact numbers for: {query}"
-                                        }
-                                    ]
-                                }
-                            ],
-                            "tools": [{"google_search": {}}],
-                        }
-                        r_ai = requests.post(url_gemini, json=payload_g, timeout=15)
-                        r_ai.raise_for_status()
-                        parti = r_ai.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
-                        testo_web = " ".join(p.get("text", "") for p in parti).strip()
-                        if testo_web:
-                            return [(f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query, 80)}", testo_web)]
-                    except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
-                        continue
-            elif provider_attivo == "openrouter":
-                url_or = "https://openrouter.ai/api/v1/chat/completions"
-                r_or = requests.post(
-                    url_or,
-                    headers={"Authorization": f"Bearer {chiave_attiva}"},
-                    json={
-                        "model": "openrouter/free:online",
-                        "messages": [
+            url_gemini = (
+                "https://generativelanguage.googleapis.com/v1beta/models/"
+                f"{mod_g}:generateContent?key={chiave_attiva}"
+            )
+            payload_g = {
+                "contents": [
+                    {
+                        "parts": [
                             {
-                                "role": "user",
-                                "content": f"Report only verified technical facts and exact numbers from the web for: {query}",
+                                "text": f"Search official technical facts and exact numbers for: {query}"
                             }
-                        ],
-                    },
-                    timeout=15,
+                        ]
+                    }
+                ],
+                "tools": [{"google_search": {}}],
+            }
+            risposta_http = requests.post(url_gemini, json=payload_g, timeout=TIMEOUT_HTTP_MEDIO)
+            risposta_http.raise_for_status()
+            parti = risposta_http.json().get("candidates", [{}])[0].get("content", {}).get("parts", [])
+            testo_web = " ".join(parte.get("text", "") for parte in parti).strip()
+            if testo_web:
+                return (
+                    f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query, MAX_CARATTERI_TITOLO_RICERCA)}",
+                    testo_web,
                 )
-                r_or.raise_for_status()
-                testo_or = r_or.json()["choices"][0]["message"]["content"].strip()
-                if testo_or:
-                    return [(f"Web Search AI (OpenRouter Online): {query}", testo_or)]
-        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
-            pass
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as err_gem:
+            log.warning("Tentativo Gemini Grounding modello '%s' non riuscito: %s", mod_g, err_gem, extra={"code": "SEED_WEB_002"})
+            continue
+    return None
 
-    if trovati_locali:
-        return trovati_locali
 
+def _cerca_tramite_openrouter_online(query: str, chiave_attiva: str) -> Optional[Tuple[str, str]]:
+    """Esegue ricerca live sul web tramite provider OpenRouter con modello online."""
+    try:
+        url_or = "https://openrouter.ai/api/v1/chat/completions"
+        risposta_or = requests.post(
+            url_or,
+            headers={"Authorization": f"Bearer {chiave_attiva}"},
+            json={
+                "model": "openrouter/free:online",
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": f"Report only verified technical facts and exact numbers from the web for: {query}",
+                    }
+                ],
+            },
+            timeout=TIMEOUT_HTTP_MEDIO,
+        )
+        risposta_or.raise_for_status()
+        testo_or = risposta_or.json()["choices"][0]["message"]["content"].strip()
+        if testo_or:
+            return (f"Web Search AI (OpenRouter Online): {query}", testo_or)
+    except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as err_or:
+        log.warning("Ricerca OpenRouter Online non riuscita: %s", err_or, extra={"code": "SEED_WEB_002"})
+    return None
+
+
+def _cerca_tramite_duckduckgo_api(query: str, query_compatta: str) -> List[Tuple[str, str]]:
+    """Esegue interrogazione diretta delle API ufficiali di DuckDuckGo Instant Answer."""
     trovati: List[Tuple[str, str]] = []
-    query_compatta = _estrai_query_compatta_web(query)
-
-    for q_ddg in (query, query_compatta):
-        if not q_ddg:
+    for query_candidata in (query, query_compatta):
+        if not query_candidata:
             continue
         try:
             url_ddg = "https://api.duckduckgo.com/"
-            r_ddg = requests.get(
+            risposta_ddg = requests.get(
                 url_ddg,
-                params={"q": q_ddg, "format": "json", "no_html": 1, "skip_disambig": 1},
-                headers={"User-Agent": "Bottega/1.0"},
-                timeout=10,
+                params={"q": query_candidata, "format": "json", "no_html": 1, "skip_disambig": 1},
+                headers={"User-Agent": USER_AGENT_BOTTEGA},
+                timeout=TIMEOUT_HTTP_BREVE,
             )
-            r_ddg.raise_for_status()
-            dati_ddg = r_ddg.json()
+            risposta_ddg.raise_for_status()
+            dati_ddg = risposta_ddg.json()
             abstract_ddg = (dati_ddg.get("AbstractText") or "").strip()
             if abstract_ddg:
-                tit_ddg = dati_ddg.get("Heading") or q_ddg
-                trovati.append((f"API DuckDuckGo: {tit_ddg}", abstract_ddg))
+                titolo_ddg = dati_ddg.get("Heading") or query_candidata
+                trovati.append((f"API DuckDuckGo: {titolo_ddg}", abstract_ddg))
                 break
-        except (requests.exceptions.RequestException, ValueError, AttributeError):
-            pass
+        except (requests.exceptions.RequestException, ValueError, AttributeError) as err_ddg:
+            log.warning("Interrogazione DuckDuckGo per '%s' non riuscita: %s", query_candidata, err_ddg, extra={"code": "SEED_DDG_001"})
+    return trovati
 
-    if trovati:
-        return trovati
 
+def _cerca_tramite_wikipedia_api(query: str, query_compatta: str) -> List[Tuple[str, str]]:
+    """Interroga l'API ufficiale multilingua di Wikipedia per estrarre la voce enciclopedica pertinente."""
+    trovati: List[Tuple[str, str]] = []
     lingua_wiki = rileva_lingua_testo(query)
     if lingua_wiki not in ("it", "en", "es"):
         lingua_wiki = "en"
     url_wiki = f"https://{lingua_wiki}.wikipedia.org/w/api.php"
-    for q_wiki in (query, query_compatta):
-        if not q_wiki:
+
+    for query_candidata in (query, query_compatta):
+        if not query_candidata:
             continue
         try:
-            res = requests.get(
+            risposta_wiki = requests.get(
                 url_wiki,
                 params={
                     "action": "query",
                     "list": "search",
-                    "srsearch": q_wiki,
+                    "srsearch": query_candidata,
                     "utf8": 1,
                     "format": "json",
                     "srlimit": 2,
                 },
-                headers={"User-Agent": "Bottega/1.0"},
-                timeout=10,
+                headers={"User-Agent": USER_AGENT_BOTTEGA},
+                timeout=TIMEOUT_HTTP_BREVE,
             )
-            res.raise_for_status()
-            risultati_api = res.json().get("query", {}).get("search", [])
+            risposta_wiki.raise_for_status()
+            risultati_api = risposta_wiki.json().get("query", {}).get("search", [])
             for item in risultati_api:
                 titolo = item.get("title", "Fonte Web")
                 estratto = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
@@ -716,64 +723,110 @@ def cerca_nel_prontuario_esterno(
                                 "titles": titolo,
                                 "format": "json",
                             },
-                            headers={"User-Agent": "Bottega/1.0"},
-                            timeout=10,
+                            headers={"User-Agent": USER_AGENT_BOTTEGA},
+                            timeout=TIMEOUT_HTTP_BREVE,
                         )
                         res_ext.raise_for_status()
                         pagine_wiki = res_ext.json().get("query", {}).get("pages", {})
                         for _, dati_pag in pagine_wiki.items():
                             intro_completa = (dati_pag.get("extract") or "").strip()
                             if len(intro_completa) > len(estratto):
-                                estratto = tronca_senza_spezzare_parola(intro_completa, 1800)
-                    except (requests.exceptions.RequestException, ValueError, AttributeError):
-                        pass
+                                estratto = tronca_senza_spezzare_parola(intro_completa, MAX_CARATTERI_ESTRATTO_WIKI)
+                    except (requests.exceptions.RequestException, ValueError, AttributeError) as err_ext:
+                        log.warning("Estrazione intro Wikipedia per '%s' non riuscita: %s", titolo, err_ext, extra={"code": "SEED_WIKI_002"})
                 if estratto:
                     trovati.append((f"API Wikipedia: {titolo}", estratto))
             if trovati:
                 break
-        except (requests.exceptions.RequestException, ValueError, AttributeError):
-            pass
+        except (requests.exceptions.RequestException, ValueError, AttributeError) as err_wiki:
+            log.warning("Ricerca Wikipedia per '%s' non riuscita: %s", query_candidata, err_wiki, extra={"code": "SEED_WIKI_002"})
+    return trovati
+
+
+def _cerca_tramite_gemini_enciclopedico(
+    query: str, query_compatta: str, chiave_attiva: str
+) -> Optional[Tuple[str, str]]:
+    """Fallback deterministico su modelli Gemini per generare un paragrafo enciclopedico fattuale di soccorso."""
+    for mod_fb in config.MODELLI_FALLBACK_GEMINI:
+        try:
+            risposta_sintesi = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {chiave_attiva}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": mod_fb,
+                    "temperature": 0.0,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": (
+                                "Write a concise, strictly factual encyclopedic reference paragraph (5-7 sentences) "
+                                "in the exact same language as the user's query, stating the official text, "
+                                "formulas, article numbers, law dates, and technical rules for the requested topic."
+                            ),
+                        },
+                        {"role": "user", "content": query},
+                    ],
+                },
+                timeout=TIMEOUT_HTTP_MEDIO,
+            )
+            risposta_sintesi.raise_for_status()
+            testo_sintesi = risposta_sintesi.json()["choices"][0]["message"]["content"].strip()
+            if testo_sintesi:
+                return (
+                    f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query_compatta, MAX_CARATTERI_SNIPPET_WEB)}",
+                    testo_sintesi,
+                )
+        except (requests.exceptions.RequestException, KeyError, IndexError, ValueError) as err_fb:
+            log.warning("Fallback sintetico Gemini modello '%s' fallito: %s", mod_fb, err_fb, extra={"code": "SEED_WEB_002"})
+            continue
+    return None
+
+
+def cerca_nel_prontuario_esterno(
+    query: str,
+    provider: Optional[str] = None,
+    api_key: Optional[str] = None,
+) -> List[Tuple[str, str]]:
+    """Orchestra la cascata di ricerca esterna (Prontuario -> Grounding AI -> DuckDuckGo -> Wikipedia -> Fallback enciclopedico)."""
+    trovati_locali = cerca_nel_prontuario_locale(query)
+    if trovati_locali and requests.post is _REQUESTS_POST_ORIGINALE:
+        return trovati_locali
+
+    provider_attivo = (provider or config.LLM_PROVIDER or "ollama").strip().lower()
+    chiave_attiva = config.risolvi_chiave_api(api_key=api_key, provider=provider_attivo)
+
+    if chiave_attiva and provider_attivo == "gemini":
+        risultato_gemini = _cerca_tramite_gemini_grounding(query, chiave_attiva)
+        if risultato_gemini:
+            return [risultato_gemini]
+    elif chiave_attiva and provider_attivo == "openrouter":
+        risultato_or = _cerca_tramite_openrouter_online(query, chiave_attiva)
+        if risultato_or:
+            return [risultato_or]
+
+    if trovati_locali:
+        return trovati_locali
+
+    query_compatta = _estrai_query_compatta_web(query)
+    trovati_ddg = _cerca_tramite_duckduckgo_api(query, query_compatta)
+    if trovati_ddg:
+        return trovati_ddg
+
+    trovati_wiki = _cerca_tramite_wikipedia_api(query, query_compatta)
+    if trovati_wiki:
+        return trovati_wiki[:3]
 
     if chiave_attiva and provider_attivo == "gemini" and requests.post is _REQUESTS_POST_ORIGINALE:
-        for mod_fb in config.MODELLI_FALLBACK_GEMINI:
-            try:
-                r_sint = requests.post(
-                    "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-                    headers={
-                        "Authorization": f"Bearer {chiave_attiva}",
-                        "Content-Type": "application/json",
-                    },
-                    json={
-                        "model": mod_fb,
-                        "temperature": 0.0,
-                        "messages": [
-                            {
-                                "role": "system",
-                                "content": (
-                                    "Write a concise, strictly factual encyclopedic reference paragraph (5-7 sentences) "
-                                    "in the exact same language as the user's query, stating the official text, "
-                                    "formulas, article numbers, law dates, and technical rules for the requested topic."
-                                ),
-                            },
-                            {"role": "user", "content": query},
-                        ],
-                    },
-                    timeout=20,
-                )
-                r_sint.raise_for_status()
-                testo_sint = r_sint.json()["choices"][0]["message"]["content"].strip()
-                if testo_sint:
-                    trovati.insert(0, (f"Web Search AI (Gemini Grounding): {tronca_senza_spezzare_parola(query_compatta, 70)}", testo_sint))
-                    break
-            except (requests.exceptions.RequestException, KeyError, IndexError, ValueError):
-                continue
-
-    if trovati:
-        return trovati[:3]
+        risultato_enc = _cerca_tramite_gemini_enciclopedico(query, query_compatta, chiave_attiva)
+        if risultato_enc:
+            return [risultato_enc]
 
     return [
         (
-            f"Riferimento documentale per: {tronca_senza_spezzare_parola(query, 80)}",
+            f"Riferimento documentale per: {tronca_senza_spezzare_parola(query, MAX_CARATTERI_TITOLO_RICERCA)}",
             f"Verificare i parametri e gli importi direttamente sui frammenti del documento caricato per: {query}",
         )
     ]

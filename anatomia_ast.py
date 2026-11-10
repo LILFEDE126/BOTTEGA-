@@ -4,12 +4,14 @@
 import ast
 from typing import Any, Dict, List
 
+LIMITE_PASSI_RICERCA_AST: int = 10000
+
 
 def _ha_uscita_propria_nel_while(nodo_while: ast.While) -> bool:
     """Checks whether a 'while True' loop has its own break/return/raise without being fooled
     by break statements inside nested for/while loops."""
     coda = list(nodo_while.body)
-    passi_residui = 10000
+    passi_residui = LIMITE_PASSI_RICERCA_AST
     while coda and passi_residui > 0:
         passi_residui -= 1
         corrente = coda.pop(0)
@@ -36,18 +38,18 @@ def _analizza_nodo_funzione(
     except_nudi_fn = 0
     except_generici_fn = 0
 
-    for sub in ast.walk(nodo):
-        if isinstance(sub, ast.ExceptHandler):
-            if sub.type is None:
+    for sottonodo in ast.walk(nodo):
+        if isinstance(sottonodo, ast.ExceptHandler):
+            if sottonodo.type is None:
                 except_nudi_fn += 1
-            elif isinstance(sub.type, ast.Name) and sub.type.id in ("Exception", "BaseException"):
+            elif isinstance(sottonodo.type, ast.Name) and sottonodo.type.id in ("Exception", "BaseException"):
                 except_generici_fn += 1
-        elif isinstance(sub, ast.Call):
+        elif isinstance(sottonodo, ast.Call):
             target = None
-            if isinstance(sub.func, ast.Name):
-                target = sub.func.id
-            elif isinstance(sub.func, ast.Attribute):
-                target = sub.func.attr
+            if isinstance(sottonodo.func, ast.Name):
+                target = sottonodo.func.id
+            elif isinstance(sottonodo.func, ast.Attribute):
+                target = sottonodo.func.attr
             if target:
                 chiamate_locali.append(target)
                 archi.append(f'    "{nome_qualificato}" -> "{target}";')
@@ -57,7 +59,7 @@ def _analizza_nodo_funzione(
         "nome_breve": nodo.name,
         "linea_inizio": nodo.lineno,
         "righe": righe,
-        "argomenti": [a.arg for a in nodo.args.args],
+        "argomenti": [argomento.arg for argomento in nodo.args.args],
         "chiamate": sorted(set(chiamate_locali)),
         "except_nudi": except_nudi_fn,
         "except_generici": except_generici_fn,

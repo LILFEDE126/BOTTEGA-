@@ -22,8 +22,12 @@ except ImportError:
 
 from config import (
     EMBED_DIM,
+    LIMITE_ITERAZIONI_DIJKSTRA,
+    MAX_CARATTERI_PARAGRAFO_PDF,
     OLLAMA_EMBED_MODEL,
     OLLAMA_EMBED_URL,
+    SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
+    TIMEOUT_HTTP_BREVE,
     get_db_config,
 )
 from logging_bottega import log, log_exception
@@ -170,33 +174,33 @@ def _ha_match_parola_o_radice(parola_q: str, parole_frammento: set[str]) -> bool
     return False
 
 
+def _normalizza_accenti_minuscolo(testo: str) -> str:
+    """Lowercases text and folds Italian/Spanish accented vowels to their plain form."""
+    testo_n = re.sub(r"[àáâ]", "a", testo.lower())
+    testo_n = re.sub(r"[èéê]", "e", testo_n)
+    testo_n = re.sub(r"[ìíî]", "i", testo_n)
+    testo_n = re.sub(r"[òóô]", "o", testo_n)
+    return re.sub(r"[ùúüû]", "u", testo_n)
+
+
 def _copertura_termini_specifici(
     query_originale: str,
     query_tradotta: str,
     testo_frammento: str,
 ) -> Tuple[int, float]:
     """Calculates how many non-generic domain-specific whole words (>= 5 chars) from the query appear in the fragment."""
-    testo_q_norm = re.sub(r"[àá]", "a", f"{query_originale} {query_tradotta}".lower())
-    testo_q_norm = re.sub(r"[èé]", "e", testo_q_norm)
-    testo_q_norm = re.sub(r"[ìí]", "i", testo_q_norm)
-    testo_q_norm = re.sub(r"[òó]", "o", testo_q_norm)
-    testo_q_norm = re.sub(r"[ùúü]", "u", testo_q_norm)
-
+    testo_q_norm = _normalizza_accenti_minuscolo(f"{query_originale} {query_tradotta}")
     token_q = {
-        t for t in re.findall(r"[a-zñ]{5,}", testo_q_norm)
-        if t not in PAROLE_POLISEMICHE_TRASVERSALI and t not in STOPWORDS_RICERCA_COMUNI
+        token_str for token_str in re.findall(r"[a-zñ]{5,}", testo_q_norm)
+        if token_str not in PAROLE_POLISEMICHE_TRASVERSALI and token_str not in STOPWORDS_RICERCA_COMUNI
     }
     if not token_q:
         return (1, 1.0)
 
-    testo_f_norm = re.sub(r"[àá]", "a", testo_frammento.lower())
-    testo_f_norm = re.sub(r"[èé]", "e", testo_f_norm)
-    testo_f_norm = re.sub(r"[ìí]", "i", testo_f_norm)
-    testo_f_norm = re.sub(r"[òó]", "o", testo_f_norm)
-    testo_f_norm = re.sub(r"[ùúü]", "u", testo_f_norm)
+    testo_f_norm = _normalizza_accenti_minuscolo(testo_frammento)
     parole_f = set(re.findall(r"[a-zñ]{5,}", testo_f_norm))
 
-    trovati = sum(1 for t in token_q if _ha_match_parola_o_radice(t, parole_f))
+    trovati = sum(1 for token_str in token_q if _ha_match_parola_o_radice(token_str, parole_f))
     if trovati <= 1 and len(token_q) >= 5:
         return (0, 0.0)
     rapporto = trovati / len(token_q)
@@ -217,15 +221,6 @@ PAROLE_CALENDARIO_E_TEMPO = frozenset({
     "prossima", "prossimi", "settimana", "weekend", "today", "tomorrow", "yesterday",
     "tonight", "next", "week", "hoy", "manana", "ayer", "pasado", "semana", "proximo", "proxima",
 })
-
-
-def _normalizza_accenti_minuscolo(testo: str) -> str:
-    """Lowercases text and folds Italian/Spanish accented vowels to their plain form."""
-    testo_n = re.sub(r"[àáâ]", "a", testo.lower())
-    testo_n = re.sub(r"[èéê]", "e", testo_n)
-    testo_n = re.sub(r"[ìíî]", "i", testo_n)
-    testo_n = re.sub(r"[òóô]", "o", testo_n)
-    return re.sub(r"[ùúüû]", "u", testo_n)
 
 
 def estrai_nomi_propri_query(query_originale: str) -> set[str]:
@@ -294,56 +289,60 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     """Repairs missing spaces between glued words, numbers, currencies, and punctuation in justified PDFs."""
     if not testo:
         return ""
-    t = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo)
-    t = re.sub(r"([a-zA-Zàèéìòùáéíóúñ]{2,})(\d)", r"\1 \2", t)
-    t = re.sub(r"(\d)(€)", r"\1 \2", t)
-    t = re.sub(r"(€)(\d)", r"\1 \2", t)
-    t = re.sub(r"(\d|%|€)([a-zA-Zàèéìòùáéíóúñ]{2,})", r"\1 \2", t)
-    t = re.sub(r"\b(euro)([a-zA-Zàèéìòùáéíóúñ]+)", r"\1 \2", t, flags=re.IGNORECASE)
-    t = re.sub(r"([,:;])([a-zA-Zàèéìòùáéíóúñ€])", r"\1 \2", t)
-    t = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", t)
-    t = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", t)
-    return t
+    testo_lavorato = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo)
+    testo_lavorato = re.sub(r"([a-zA-Zàèéìòùáéíóúñ]{2,})(\d)", r"\1 \2", testo_lavorato)
+    testo_lavorato = re.sub(r"(\d)(€)", r"\1 \2", testo_lavorato)
+    testo_lavorato = re.sub(r"(€)(\d)", r"\1 \2", testo_lavorato)
+    testo_lavorato = re.sub(r"(\d|%|€)([a-zA-Zàèéìòùáéíóúñ]{2,})", r"\1 \2", testo_lavorato)
+    testo_lavorato = re.sub(r"\b(euro)([a-zA-Zàèéìòùáéíóúñ]+)", r"\1 \2", testo_lavorato, flags=re.IGNORECASE)
+    testo_lavorato = re.sub(r"([,:;])([a-zA-Zàèéìòùáéíóúñ€])", r"\1 \2", testo_lavorato)
+    testo_lavorato = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", testo_lavorato)
+    testo_lavorato = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", testo_lavorato)
+    return testo_lavorato
 
 
-def _suddividi_testo_in_blocchi(testo: str, prefisso: str, max_caratteri: int = 3500) -> List[Tuple[str, str]]:
+def _suddividi_testo_in_blocchi(
+    testo: str,
+    prefisso: str,
+    max_caratteri: int = MAX_CARATTERI_PARAGRAFO_PDF,
+) -> List[Tuple[str, str]]:
     """Splits a page or document text into clean semantic paragraphs bounded by max_caratteri."""
-    testo = normalizza_spazi_testo_pdf(testo)
-    paragrafi_grezzi = [p.strip() for p in re.split(r"\n\s*\n", testo) if p.strip()]
-    if not paragrafi_grezzi and testo.strip():
-        paragrafi_grezzi = [testo.strip()]
+    testo_normalizzato = normalizza_spazi_testo_pdf(testo)
+    paragrafi_grezzi = [paragrafo.strip() for paragrafo in re.split(r"\n\s*\n", testo_normalizzato) if paragrafo.strip()]
+    if not paragrafi_grezzi and testo_normalizzato.strip():
+        paragrafi_grezzi = [testo_normalizzato.strip()]
 
     blocchi: List[Tuple[str, str]] = []
     buffer_corrente = ""
     indice_parte = 1
 
-    for p in paragrafi_grezzi:
-        if len(buffer_corrente) + len(p) + 2 <= max_caratteri:
-            buffer_corrente = f"{buffer_corrente}\n{p}".strip() if buffer_corrente else p
+    for paragrafo in paragrafi_grezzi:
+        if len(buffer_corrente) + len(paragrafo) + 2 <= max_caratteri:
+            buffer_corrente = f"{buffer_corrente}\n{paragrafo}".strip() if buffer_corrente else paragrafo
         else:
             if buffer_corrente:
                 etichetta = f"{prefisso}" if indice_parte == 1 and len(paragrafi_grezzi) == 1 else f"{prefisso}.{indice_parte}"
                 blocchi.append((etichetta, buffer_corrente))
                 indice_parte += 1
-            if len(p) <= max_caratteri:
-                buffer_corrente = p
+            if len(paragrafo) <= max_caratteri:
+                buffer_corrente = paragrafo
             else:
-                residuo_p = p
-                limite_iter = 10000
-                while residuo_p and limite_iter > 0:
-                    limite_iter -= 1
-                    if len(residuo_p) <= max_caratteri:
-                        fetta = residuo_p.strip()
+                residuo_paragrafo = paragrafo
+                passi_residui = LIMITE_ITERAZIONI_DIJKSTRA
+                while residuo_paragrafo and passi_residui > 0:
+                    passi_residui -= 1
+                    if len(residuo_paragrafo) <= max_caratteri:
+                        fetta = residuo_paragrafo.strip()
                         if fetta:
                             blocchi.append((f"{prefisso}.{indice_parte}", fetta))
                             indice_parte += 1
                         break
-                    fetta = tronca_senza_spezzare_parola(residuo_p, max_caratteri)
+                    fetta = tronca_senza_spezzare_parola(residuo_paragrafo, max_caratteri)
                     if not fetta:
-                        fetta = residuo_p[:max_caratteri].strip()
+                        fetta = residuo_paragrafo[:max_caratteri].strip()
                     blocchi.append((f"{prefisso}.{indice_parte}", fetta))
                     indice_parte += 1
-                    residuo_p = residuo_p[len(fetta):].lstrip()
+                    residuo_paragrafo = residuo_paragrafo[len(fetta):].lstrip()
                 buffer_corrente = ""
 
     if buffer_corrente:
@@ -636,6 +635,77 @@ def incasella_e_salva(dominio: str, titolo: str, blocchi: List[Tuple[str, str]])
     return inseriti
 
 
+MAX_CANDIDATI_RRF_ARCHIVIO: int = 20
+MAX_DOCUMENTI_SESSIONE_CONCORRENTI: int = 60
+
+
+def _filtra_candidati_archivio_ram(dominio: str, parole_chiave: List[str]) -> List[Dict[str, Any]]:
+    """Seleziona i frammenti candidati filtrando per dominio e match lessicale preliminare."""
+    candidati_dominio = [item for item in _ARCHIVIO_MEMORIA_RAM if item["dominio"] == dominio]
+    ha_match_in_dominio = any(
+        any(parola in item["testo"].lower() for parola in parole_chiave)
+        for item in candidati_dominio
+    )
+    if candidati_dominio and (ha_match_in_dominio or not parole_chiave):
+        return candidati_dominio
+    return list(_ARCHIVIO_MEMORIA_RAM)
+
+
+def _calcola_centroide_candidati(candidati: List[Dict[str, Any]]) -> List[float]:
+    """Calcola il centroide vettoriale L2 normalizzato dei frammenti candidati."""
+    somma_vettoriale = [0.0] * EMBED_DIM
+    for item in candidati:
+        for indice, valore in enumerate(item["embedding"]):
+            somma_vettoriale[indice] += valore
+    return normalizza_l2(somma_vettoriale)
+
+
+def _valuta_singolo_frammento_ram(
+    item: Dict[str, Any],
+    query: str,
+    query_bassa: str,
+    q_vec: List[float],
+    parole_chiave: List[str],
+    cerca_costi: bool,
+    denominatore_copertura: int,
+    numero_candidati: int,
+) -> Dict[str, Any]:
+    """Valuta similitudine vettoriale e copertura lessicale del singolo frammento con barriere semantiche."""
+    sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
+    testo_valutato = item["testo"]
+    if str(item.get("titolo", "")).startswith("Ricerca:") and item.get("corpo"):
+        testo_valutato = item["corpo"]
+    testo_low = testo_valutato.lower()
+    token_set_low = set(re.findall(r"\d+(?:[.,]\d+)+|\w+", testo_low))
+    match_count = 0
+    for parola in parole_chiave:
+        if parola in token_set_low:
+            match_count += 3 if any(c.isdigit() for c in parola) else 2
+    if cerca_costi and numero_candidati <= MAX_DOCUMENTI_SESSIONE_CONCORRENTI:
+        bonus_economico = min(2, sum(1 for termine in TERMINI_ECONOMICI_AFFINI if termine in testo_low))
+        match_count += bonus_economico
+    copertura = (match_count / (denominatore_copertura * 2)) if parole_chiave else 0.0
+    sim_effettiva = max(sim_raw, min(0.95, 0.52 + 0.43 * min(1.0, copertura))) if match_count > 0 else sim_raw
+
+    n_spec, ratio_spec = _copertura_termini_specifici(query, query_bassa, testo_low)
+    min_richiesti = 1 if len(query.split()) <= 5 else 2
+    ha_ancoraggio_reale = (n_spec >= min_richiesti) and (ratio_spec >= 0.28)
+    if ha_ancoraggio_reale and not ha_termine_tematico(query, query_bassa, testo_valutato):
+        ha_ancoraggio_reale = False
+    if not ha_ancoraggio_reale:
+        sim_effettiva = min(sim_effettiva, SOGLIA_S_MAX_FALLIMENTO_NORMATIVO)
+        match_count = 0
+
+    return {
+        "id": item["id"],
+        "titolo": item["titolo"],
+        "sezione": item["sezione"],
+        "testo": item["testo"],
+        "similitudine": float(sim_effettiva),
+        "match_count": match_count,
+    }
+
+
 def _recupera_da_archivio_ram(
     query: str,
     q_vec: List[float],
@@ -646,94 +716,58 @@ def _recupera_da_archivio_ram(
     if not _ARCHIVIO_MEMORIA_RAM:
         return {"semaforo": "ROJO", "s_max": 0.0, "s_dominio": 0.0, "frammenti": []}
 
-    q_bassa = query.lower()
-    ancore_richieste = [m.strip() for m in PATRON_CODICE_NORMATIVO.findall(q_bassa) if m.strip()]
+    query_bassa = query.lower()
+    ancore_richieste = [ancora.strip() for ancora in PATRON_CODICE_NORMATIVO.findall(query_bassa) if ancora.strip()]
     if ancore_richieste:
         presente_in_ram = all(
-            any(_ancora_normativa_presente(anc, item["testo"]) for item in _ARCHIVIO_MEMORIA_RAM)
-            for anc in ancore_richieste
+            any(_ancora_normativa_presente(ancora, item["testo"]) for item in _ARCHIVIO_MEMORIA_RAM)
+            for ancora in ancore_richieste
         )
         if not presente_in_ram:
-            return {"semaforo": "ROJO", "s_max": 0.18, "s_dominio": 0.18, "frammenti": []}
+            return {
+                "semaforo": "ROJO",
+                "s_max": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
+                "s_dominio": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
+                "frammenti": [],
+            }
 
-    token_estratti = re.findall(r"\d+(?:[.,]\d+)+|\w+", q_bassa)
-    parole_q = list(
+    token_estratti = re.findall(r"\d+(?:[.,]\d+)+|\w+", query_bassa)
+    parole_chiave = list(
         dict.fromkeys(
-            p for p in token_estratti
-            if (len(p) >= 3 or (len(p) >= 2 and p[0].isdigit())) and p not in STOPWORDS_RICERCA_COMUNI
+            token for token in token_estratti
+            if (len(token) >= 3 or (len(token) >= 2 and token[0].isdigit())) and token not in STOPWORDS_RICERCA_COMUNI
         )
     )
-    if not parole_q:
-        parole_q = list(dict.fromkeys(p for p in token_estratti if len(p) >= 2))
+    if not parole_chiave:
+        parole_chiave = list(dict.fromkeys(token for token in token_estratti if len(token) >= 2))
 
-    candidati_dom = [x for x in _ARCHIVIO_MEMORIA_RAM if x["dominio"] == dominio]
-    ha_match_in_dominio = any(
-        any(p in x["testo"].lower() for p in parole_q)
-        for x in candidati_dom
-    )
-    candidati = candidati_dom if (candidati_dom and (ha_match_in_dominio or not parole_q)) else list(_ARCHIVIO_MEMORIA_RAM)
-
-    somma_vec = [0.0] * EMBED_DIM
-    for item in candidati:
-        for idx, val in enumerate(item["embedding"]):
-            somma_vec[idx] += val
-    centroide = normalizza_l2(somma_vec)
+    candidati = _filtra_candidati_archivio_ram(dominio, parole_chiave)
+    centroide = _calcola_centroide_candidati(candidati)
     s_dom = max(0.0, similitudine_coseno(q_vec, centroide))
 
-    valutati: List[Dict[str, Any]] = []
-    cerca_costi = bool(set(parole_q) & TERMINI_ECONOMICI_AFFINI)
-    denominatore_copertura = max(1, min(len(parole_q), 6))
+    cerca_costi = bool(set(parole_chiave) & TERMINI_ECONOMICI_AFFINI)
+    denominatore_copertura = max(1, min(len(parole_chiave), 6))
+    numero_candidati = len(candidati)
 
-    for item in candidati:
-        sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
-        testo_valutato = item["testo"]
-        if str(item.get("titolo", "")).startswith("Ricerca:") and item.get("corpo"):
-            testo_valutato = item["corpo"]
-        testo_low = testo_valutato.lower()
-        token_set_low = set(re.findall(r"\d+(?:[.,]\d+)+|\w+", testo_low))
-        match_count = 0
-        for p in parole_q:
-            if p in token_set_low:
-                if any(c.isdigit() for c in p):
-                    match_count += 3
-                else:
-                    match_count += 2
-        if cerca_costi and len(candidati) <= 60:
-            bonus_economico = min(2, sum(1 for t_ec in TERMINI_ECONOMICI_AFFINI if t_ec in testo_low))
-            match_count += bonus_economico
-        copertura = (match_count / (denominatore_copertura * 2)) if parole_q else 0.0
-        sim_effettiva = max(sim_raw, min(0.95, 0.52 + 0.43 * min(1.0, copertura))) if match_count > 0 else sim_raw
+    valutati = [
+        _valuta_singolo_frammento_ram(
+            item, query, query_bassa, q_vec, parole_chiave, cerca_costi, denominatore_copertura, numero_candidati
+        )
+        for item in candidati
+    ]
 
-        n_spec, ratio_spec = _copertura_termini_specifici(query, q_bassa, testo_low)
-        min_richiesti = 1 if len(query.split()) <= 5 else 2
-        ha_ancoraggio_reale = (n_spec >= min_richiesti) and (ratio_spec >= 0.28)
-        if ha_ancoraggio_reale and not ha_termine_tematico(query, q_bassa, testo_valutato):
-            ha_ancoraggio_reale = False
-        if not ha_ancoraggio_reale:
-            sim_effettiva = min(sim_effettiva, 0.18)
-            match_count = 0
-
-        valutati.append({
-            "id": item["id"],
-            "titolo": item["titolo"],
-            "sezione": item["sezione"],
-            "testo": item["testo"],
-            "similitudine": float(sim_effettiva),
-            "match_count": match_count,
-        })
-
-    con_match = [x for x in valutati if x["match_count"] > 0]
+    con_match = [frammento for frammento in valutati if frammento["match_count"] > 0]
     if not con_match:
         return {
             "semaforo": "ROJO",
-            "s_max": 0.18,
-            "s_dominio": 0.18,
+            "s_max": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
+            "s_dominio": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
             "frammenti": [],
         }
 
     limite_k = max(top_k, 5)
-    lista_vett = sorted(con_match, key=lambda x: (x["similitudine"], x["match_count"]), reverse=True)[:20]
-    lista_it = sorted(con_match, key=lambda x: (x["match_count"], x["similitudine"]), reverse=True)[:20]
+    lista_vett = sorted(con_match, key=lambda f: (f["similitudine"], f["match_count"]), reverse=True)[:MAX_CANDIDATI_RRF_ARCHIVIO]
+    lista_it = sorted(con_match, key=lambda f: (f["match_count"], f["similitudine"]), reverse=True)[:MAX_CANDIDATI_RRF_ARCHIVIO]
     lista_simple = list(lista_it)
 
     ordinati = fondi_rrf(lista_vett, lista_it, lista_simple, top_k=limite_k)
@@ -762,58 +796,58 @@ def recupera_con_semaforo(query: str, dominio: str, top_k: int = 3) -> Dict[str,
 
         try:
             with connessione_db(registra_vettore=True) as conn:
-                with conn.cursor() as cur:
-                    cur.execute("SELECT embedding::text FROM dominio_centroidi WHERE dominio = %s", (dominio,))
-                    c_row = cur.fetchone()
-                    if c_row and c_row[0]:
-                        c_vec = [float(x) for x in c_row[0].strip("[]").split(",")]
-                        s_dom = similitudine_coseno(q_vec, c_vec)
+                with conn.cursor() as cursore:
+                    cursore.execute("SELECT embedding::text FROM dominio_centroidi WHERE dominio = %s", (dominio,))
+                    riga_centroide = cursore.fetchone()
+                    if riga_centroide and riga_centroide[0]:
+                        vettore_centroide = [float(valore_coord) for valore_coord in riga_centroide[0].strip("[]").split(",")]
+                        s_dom = similitudine_coseno(q_vec, vettore_centroide)
                     else:
                         s_dom = 0.0
 
-                    cur.execute(
+                    cursore.execute(
                         """
                         SELECT id, titolo, sezione, testo_ancorato, 1 - (embedding <=> %s::vector) AS sim
                         FROM memoria_bottega
                         WHERE dominio = %s
                         ORDER BY embedding <=> %s::vector ASC
-                        LIMIT 20
+                        LIMIT %s
                         """,
-                        (q_vec_str, dominio, q_vec_str),
+                        (q_vec_str, dominio, q_vec_str, MAX_CANDIDATI_RRF_ARCHIVIO),
                     )
                     lista_vett = [
-                        {"id": r[0], "titolo": r[1], "sezione": r[2], "testo": r[3], "similitudine": float(r[4])}
-                        for r in cur.fetchall()
+                        {"id": riga[0], "titolo": riga[1], "sezione": riga[2], "testo": riga[3], "similitudine": float(riga[4])}
+                        for riga in cursore.fetchall()
                     ]
 
-                    cur.execute(
+                    cursore.execute(
                         """
                         SELECT id, titolo, sezione, testo_ancorato, 1 - (embedding <=> %s::vector) AS sim
                         FROM memoria_bottega
                         WHERE dominio = %s AND tsv_it @@ plainto_tsquery('italian', %s)
                         ORDER BY ts_rank(tsv_it, plainto_tsquery('italian', %s)) DESC
-                        LIMIT 20
+                        LIMIT %s
                         """,
-                        (q_vec_str, dominio, query, query),
+                        (q_vec_str, dominio, query, query, MAX_CANDIDATI_RRF_ARCHIVIO),
                     )
                     lista_it = [
-                        {"id": r[0], "titolo": r[1], "sezione": r[2], "testo": r[3], "similitudine": float(r[4])}
-                        for r in cur.fetchall()
+                        {"id": riga[0], "titolo": riga[1], "sezione": riga[2], "testo": riga[3], "similitudine": float(riga[4])}
+                        for riga in cursore.fetchall()
                     ]
 
-                    cur.execute(
+                    cursore.execute(
                         """
                         SELECT id, titolo, sezione, testo_ancorato, 1 - (embedding <=> %s::vector) AS sim
                         FROM memoria_bottega
                         WHERE dominio = %s AND tsv_simple @@ plainto_tsquery('simple', %s)
                         ORDER BY ts_rank(tsv_simple, plainto_tsquery('simple', %s)) DESC
-                        LIMIT 20
+                        LIMIT %s
                         """,
-                        (q_vec_str, dominio, query, query),
+                        (q_vec_str, dominio, query, query, MAX_CANDIDATI_RRF_ARCHIVIO),
                     )
                     lista_simple = [
-                        {"id": r[0], "titolo": r[1], "sezione": r[2], "testo": r[3], "similitudine": float(r[4])}
-                        for r in cur.fetchall()
+                        {"id": riga[0], "titolo": riga[1], "sezione": riga[2], "testo": riga[3], "similitudine": float(riga[4])}
+                        for riga in cursore.fetchall()
                     ]
         except psycopg2.Error:
             if psycopg2.connect is _PSYCOPG2_CONNECT_ORIGINALE:

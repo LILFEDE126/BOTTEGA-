@@ -60,10 +60,10 @@ def ispezione_completa(file_path: str) -> Dict[str, Any]:
             mappa_cc[chiave] = blocco.complexity
             mappa_cc[blocco.name] = blocco.complexity
 
-    for fn in risultato["funzioni"]:
-        fn["complessita_ciclomatica"] = mappa_cc.get(
-            fn["nome"],
-            mappa_cc.get(fn.get("nome_breve", fn["nome"]), 1),
+    for funzione_info in risultato["funzioni"]:
+        funzione_info["complessita_ciclomatica"] = mappa_cc.get(
+            funzione_info["nome"],
+            mappa_cc.get(funzione_info.get("nome_breve", funzione_info["nome"]), 1),
         )
 
     return risultato

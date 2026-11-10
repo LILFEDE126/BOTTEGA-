@@ -20,6 +20,10 @@ PATRON_MIGLIAIA_EN_DEC = re.compile(r"^\d{1,3}(?:,\d{3})+\.\d+$")
 PATRON_MIGLIAIA_EN_INT = re.compile(r"^\d{1,3}(?:,\d{3})+$")
 PATRON_INTERI_PURI = re.compile(r"(?<![\d.,])\d+(?![\d%]|[.,]\d)")
 
+MAX_CARATTERI_PAGINA_DEFAULT: int = 2400
+LIMITE_PASSI_PAGINAZIONE: int = 10000
+LUNGHEZZA_MINIMA_TAGLIO_PAGINA: int = 100
+
 
 def _normalizza_separatore_decimale(cifra: str) -> str:
     """Strips whitespace (including U+00A0) and normalizes decimal commas into dots."""
@@ -27,7 +31,8 @@ def _normalizza_separatore_decimale(cifra: str) -> str:
 
 
 def _converti_in_decimal_esatti(token_pulito: str) -> Set[Decimal]:
-    """Converts a numeric token (EU thousands, EN thousands, or standard decimal) to exact Decimal values."""
+    """Converts a numeric token (EU thousands, EN thousands, or standard decimal) to exact Decimal values.
+    Cattura InvalidOperation per scartare in modo deterministico candidati numerici malformati."""
     valori: Set[Decimal] = set()
     if not token_pulito or token_pulito.endswith("%"):
         return valori
@@ -105,15 +110,15 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
     dec_ctx: Set[Decimal] = set()
     pct_ctx = estrai_percentuali_decimal(contesto)
 
-    for m_int in PATRON_INTERI_PURI.findall(contesto):
+    for intero_trovato in PATRON_INTERI_PURI.findall(contesto):
         try:
-            dec_ctx.add(Decimal(m_int))
+            dec_ctx.add(Decimal(intero_trovato))
         except InvalidOperation:
             pass
 
-    for m in raw_ctx:
-        pulito = re.sub(r"[\s\xa0]", "", m)
-        norm = _normalizza_separatore_decimale(m)
+    for token_match in raw_ctx:
+        pulito = re.sub(r"[\s\xa0]", "", token_match)
+        norm = _normalizza_separatore_decimale(token_match)
         dec_ctx.update(_converti_in_decimal_esatti(pulito))
         if PATRON_MIGLIAIA.match(pulito):
             migliaia_ctx.add(norm)
@@ -121,18 +126,18 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
             altri_ctx.add(norm)
 
     orfane: List[str] = []
-    for m in raw_risp:
-        pulito = re.sub(r"[\s\xa0]", "", m)
-        c = _normalizza_separatore_decimale(m)
+    for token_match in raw_risp:
+        pulito = re.sub(r"[\s\xa0]", "", token_match)
+        cifra_normalizzata = _normalizza_separatore_decimale(token_match)
         e_migliaia = bool(PATRON_MIGLIAIA.match(pulito))
 
-        if e_migliaia and c in migliaia_ctx:
+        if e_migliaia and cifra_normalizzata in migliaia_ctx:
             continue
-        if not e_migliaia and c in altri_ctx:
+        if not e_migliaia and cifra_normalizzata in altri_ctx:
             continue
-        if c.endswith("%"):
+        if cifra_normalizzata.endswith("%"):
             try:
-                if Decimal(c[:-1]) in pct_ctx:
+                if Decimal(cifra_normalizzata[:-1]) in pct_ctx:
                     continue
             except InvalidOperation:
                 pass
@@ -140,7 +145,7 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
             candidati_dec = _converti_in_decimal_esatti(pulito)
             if candidati_dec and (candidati_dec & dec_ctx):
                 continue
-        orfane.append(c)
+        orfane.append(cifra_normalizzata)
     return sorted(set(orfane))
 
 
@@ -195,7 +200,7 @@ def ripara_parola_troncata(testo: str) -> str:
 
 def suddividi_in_pagine_con_continua(
     testo: str,
-    max_caratteri_pagina: int = 2400,
+    max_caratteri_pagina: int = MAX_CARATTERI_PAGINA_DEFAULT,
     marcatore_continua: str = "\n\ncontinua",
 ) -> List[str]:
     """Divides long text into sequential pages without cutting words in half.
@@ -208,13 +213,13 @@ def suddividi_in_pagine_con_continua(
 
     pagine: List[str] = []
     residuo = testo_pulito
-    passi_residui = 10000
+    passi_residui = LIMITE_PASSI_PAGINAZIONE
     while residuo and passi_residui > 0:
         passi_residui -= 1
         if len(residuo) <= max_caratteri_pagina:
             pagine.append(residuo)
             break
-        limite_taglio = max(100, max_caratteri_pagina - len(marcatore_continua))
+        limite_taglio = max(LUNGHEZZA_MINIMA_TAGLIO_PAGINA, max_caratteri_pagina - len(marcatore_continua))
         pagina_corrente = tronca_senza_spezzare_parola(residuo, limite_taglio)
         lunghezza_consumata = len(pagina_corrente)
         if lunghezza_consumata == 0 or lunghezza_consumata >= len(residuo):

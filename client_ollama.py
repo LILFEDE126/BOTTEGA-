@@ -13,6 +13,8 @@ from pydantic import BaseModel, ValidationError
 from config import (
     MAX_PASSI_VARIANTE_T,
     MODELLI_FALLBACK_GEMINI,
+    TIMEOUT_OLLAMA_FALLBACK_SECONDS,
+    TIMEOUT_OLLAMA_SECONDS,
     get_llm_endpoint_config,
     opzioni_ollama_deterministiche,
     risolvi_chiave_api,
@@ -222,8 +224,8 @@ def traduci_query_per_ricerca(query: str) -> str:
     RAG engine can match the internal knowledge base regardless of the user's input language."""
     parole_originali = re.findall(r"\d+(?:[.,/]\d+)+|\w+", query.lower())
     tradotte = []
-    for p in parole_originali:
-        tradotte.append(GLOSSARIO_MULTILINGUA_IT.get(p, p))
+    for parola in parole_originali:
+        tradotte.append(GLOSSARIO_MULTILINGUA_IT.get(parola, parola))
     unione = " ".join(dict.fromkeys(parole_originali + tradotte))
     return unione.strip() or query
 
@@ -235,6 +237,65 @@ def _pulisci_json_markdown(testo: str) -> str:
         pulito = re.sub(r"^```(?:json)?\s*", "", pulito, flags=re.IGNORECASE)
         pulito = re.sub(r"\s*```$", "", pulito)
     return pulito.strip()
+
+
+def _invia_richiesta_ollama_locale(
+    chat_url: str,
+    modello: str,
+    system_prompt: str,
+    prompt_corrente: str,
+    schema_dict: dict,
+    timeout_secondi: int,
+) -> str:
+    """Invia richiesta HTTP POST verso il demone Ollama locale richiedendo output vincolato su schema JSON."""
+    payload = {
+        "model": modello,
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": prompt_corrente},
+        ],
+        "format": schema_dict,
+        "stream": False,
+        "options": opzioni_ollama_deterministiche(),
+    }
+    response = requests.post(chat_url, json=payload, timeout=timeout_secondi)
+    response.raise_for_status()
+    return str(response.json()["message"]["content"])
+
+
+def _invia_richiesta_cloud_json(
+    chat_url: str,
+    api_key: str,
+    modello: str,
+    system_prompt: str,
+    prompt_corrente: str,
+    schema_dict: dict,
+    timeout_secondi: int = TIMEOUT_OLLAMA_FALLBACK_SECONDS,
+) -> str:
+    """Invia richiesta HTTP POST verso provider Cloud (Gemini, Groq, OpenRouter) con istruzione schema JSON."""
+    istruzione_schema = (
+        f"{system_prompt}\n\n"
+        "OUTPUT CONSTRAINT: Reply EXCLUSIVELY with a valid JSON object "
+        f"conforming to this JSON Schema:\n{json.dumps(schema_dict, ensure_ascii=False)}"
+    )
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
+    payload_cloud = {
+        "model": modello,
+        "messages": [
+            {"role": "system", "content": istruzione_schema},
+            {"role": "user", "content": prompt_corrente},
+        ],
+        "temperature": 0.0,
+        "response_format": {"type": "json_object"},
+    }
+    response = requests.post(chat_url, headers=headers, json=payload_cloud, timeout=timeout_secondi)
+    response.raise_for_status()
+    return _pulisci_json_markdown(
+        response.json()["choices"][0]["message"]["content"]
+    )
 
 
 def chiama_ollama_json(
@@ -274,43 +335,24 @@ def chiama_ollama_json(
 
         try:
             if cfg["provider"] == "ollama":
-                timeout_ollama = 3 if usa_post_reale else 180
-                payload = {
-                    "model": modello_corrente,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": prompt_corrente},
-                    ],
-                    "format": schema_dict,
-                    "stream": False,
-                    "options": opzioni_ollama_deterministiche(),
-                }
-                response = requests.post(cfg["chat_url"], json=payload, timeout=timeout_ollama)
-                response.raise_for_status()
-                contenuto_json = response.json()["message"]["content"]
-            else:
-                istruzione_schema = (
-                    f"{system_prompt}\n\n"
-                    "OUTPUT CONSTRAINT: Reply EXCLUSIVELY with a valid JSON object "
-                    f"conforming to this JSON Schema:\n{json.dumps(schema_dict, ensure_ascii=False)}"
+                timeout_ollama = 3 if usa_post_reale else TIMEOUT_OLLAMA_SECONDS
+                contenuto_json = _invia_richiesta_ollama_locale(
+                    cfg["chat_url"],
+                    modello_corrente,
+                    system_prompt,
+                    prompt_corrente,
+                    schema_dict,
+                    timeout_ollama,
                 )
-                headers = {
-                    "Authorization": f"Bearer {cfg['api_key']}",
-                    "Content-Type": "application/json",
-                }
-                payload_cloud = {
-                    "model": modello_corrente,
-                    "messages": [
-                        {"role": "system", "content": istruzione_schema},
-                        {"role": "user", "content": prompt_corrente},
-                    ],
-                    "temperature": 0.0,
-                    "response_format": {"type": "json_object"},
-                }
-                response = requests.post(cfg["chat_url"], headers=headers, json=payload_cloud, timeout=120)
-                response.raise_for_status()
-                contenuto_json = _pulisci_json_markdown(
-                    response.json()["choices"][0]["message"]["content"]
+            else:
+                contenuto_json = _invia_richiesta_cloud_json(
+                    cfg["chat_url"],
+                    cfg["api_key"],
+                    modello_corrente,
+                    system_prompt,
+                    prompt_corrente,
+                    schema_dict,
+                    TIMEOUT_OLLAMA_FALLBACK_SECONDS,
                 )
 
             return schema_pydantic.model_validate_json(contenuto_json)

@@ -17,17 +17,17 @@ from config import (
 
 def normalizza_l2(vettore: List[float]) -> List[float]:
     """Normalizes a vector to unit Euclidean norm so cosine similarity equals dot product."""
-    norma = math.sqrt(sum(x * x for x in vettore))
+    norma = math.sqrt(sum(coordinata * coordinata for coordinata in vettore))
     if norma == 0.0:
         raise ValueError("Impossibile normalizzare un vettore nullo (Legge del Miracolo Escluso).")
-    return [x / norma for x in vettore]
+    return [coordinata / norma for coordinata in vettore]
 
 
 def similitudine_coseno(v1: List[float], v2: List[float]) -> float:
     """Computes dot product on L2-normalized vectors with strict dimension checking."""
     if len(v1) != len(v2):
         raise ValueError(f"Dimensioni vettoriali incompatibili: {len(v1)} != {len(v2)}")
-    return float(sum(a * b for a, b in zip(v1, v2)))
+    return float(sum(valore1 * valore2 for valore1, valore2 in zip(v1, v2)))
 
 
 def costruisci_testo_ancorato(dominio: str, titolo: str, sezione: str, contenuto: str) -> str:
@@ -57,7 +57,7 @@ def fondi_rrf(
             accumulo[item["id"]] = {**item, "rrf": 0.0}
         accumulo[item["id"]]["rrf"] += PESO_FTS_SIMPLE / (RRF_K + rank)
 
-    return sorted(accumulo.values(), key=lambda x: x["rrf"], reverse=True)[:top_k]
+    return sorted(accumulo.values(), key=lambda elemento: elemento["rrf"], reverse=True)[:top_k]
 
 
 def valuta_semaforo(
@@ -69,9 +69,9 @@ def valuta_semaforo(
     if not frammenti:
         return ("ROJO", 0.0)
 
-    sims = [float(f.get("similitudine", 0.0)) for f in frammenti]
+    sims = [float(frammento.get("similitudine", 0.0)) for frammento in frammenti]
     s_max = max(sims) if sims else 0.0
-    supporto = sum(1 for s in sims if s >= TAU_BASSO)
+    supporto = sum(1 for sim in sims if sim >= TAU_BASSO)
 
     b_rojo = (s_dominio < TAU_DOMINIO and not ha_match_lessicale) or (
         s_max < TAU_BASSO and not ha_match_lessicale
