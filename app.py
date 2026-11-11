@@ -125,6 +125,128 @@ blockquote {
 </style>
 """
 
+_HTML_JS_ZERO_AXIOS = """
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    margin: 0; padding: 4px; background: transparent;
+  }
+  .btn-mob {
+    display: block; width: 100%; box-sizing: border-box; padding: 9px 12px;
+    background-color: rgb(13, 110, 253); color: white; border: none; border-radius: 6px;
+    font-size: 13px; font-weight: 600; cursor: pointer; text-align: center;
+  }
+  .btn-mob:active { background-color: rgb(11, 94, 215); }
+  .btn-copy {
+    display: none; width: 100%; box-sizing: border-box; margin-top: 6px; padding: 6px 10px;
+    background-color: rgb(248, 249, 250); color: rgb(33, 37, 41); border: 1px solid rgb(206, 212, 218);
+    border-radius: 6px; font-size: 12px; cursor: pointer; text-align: center;
+  }
+  .status-box { margin-top: 6px; font-size: 12px; line-height: 1.3; }
+</style>
+</head>
+<body>
+  <input type="file" id="mob_file_input" accept=".pdf,.txt,.md,.csv,.py" multiple style="display:none;" />
+  <button type="button" class="btn-mob" onclick="document.getElementById('mob_file_input').click();">
+    📱 Scegli PDF / File da Telefono (Zero-Axios)
+  </button>
+  <button type="button" id="btn_copia_appunti" class="btn-copy">
+    📋 Copia testo estratto negli appunti
+  </button>
+  <div id="mob_status" class="status-box"></div>
+
+<script>
+  if (typeof pdfjsLib !== 'undefined') {
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  }
+
+  let testoGlobaleEstratto = '';
+
+  document.getElementById('mob_file_input').addEventListener('change', async function(e) {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    const stBox = document.getElementById('mob_status');
+    const cpBtn = document.getElementById('btn_copia_appunti');
+    stBox.innerHTML = '<span style="color:rgb(13, 110, 253);">⏳ Lettura file in RAM locale dello smartphone...</span>';
+
+    try {
+      let testiAccumulati = [];
+      let primoNome = files[0].name;
+
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const nomeLower = file.name.toLowerCase();
+
+        if (nomeLower.endsWith('.pdf')) {
+          const ab = await file.arrayBuffer();
+          const loadingTask = pdfjsLib.getDocument({ data: new Uint8Array(ab) });
+          const pdfDoc = await loadingTask.promise;
+          let testoPdf = '';
+          for (let p = 1; p <= pdfDoc.numPages; p++) {
+            const page = await pdfDoc.getPage(p);
+            const content = await page.getTextContent();
+            const stringhePagina = content.items.map(function(item) { return item.str; }).join(' ');
+            testoPdf += stringhePagina + '\\n\\n';
+          }
+          testiAccumulati.push(testoPdf);
+        } else {
+          const testoTxt = await file.text();
+          testiAccumulati.push(testoTxt);
+        }
+      }
+
+      testoGlobaleEstratto = testiAccumulati.join('\\n--- [Nuovo Documento] ---\\n');
+
+      try {
+        const parentDoc = window.parent.document;
+        const ta = parentDoc.querySelector('textarea[aria-label="Testo del documento da salvare in Archivio:"]') ||
+                   parentDoc.querySelector('textarea[placeholder*="testo estratto"]') ||
+                   parentDoc.querySelector('textarea[placeholder*="Paste your document content"]') ||
+                   parentDoc.querySelector('textarea[placeholder*="Incolla"]');
+        if (ta) {
+          const setterTa = Object.getOwnPropertyDescriptor(window.parent.HTMLTextAreaElement.prototype, 'value').set;
+          setterTa.call(ta, testoGlobaleEstratto);
+          ta.dispatchEvent(new Event('input', { bubbles: true }));
+          ta.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+
+        const inpTitle = parentDoc.querySelector('input[aria-label="Nome documento (Mobile):"]') ||
+                         parentDoc.querySelector('input[aria-label="Document Title:"]');
+        if (inpTitle) {
+          const setterInp = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
+          setterInp.call(inpTitle, primoNome);
+          inpTitle.dispatchEvent(new Event('input', { bubbles: true }));
+          inpTitle.dispatchEvent(new Event('change', { bubbles: true }));
+        }
+      } catch (errParent) {
+        testoGlobaleEstratto = testiAccumulati.join('\\n');
+      }
+
+      stBox.innerHTML = '<span style="color:rgb(15, 81, 50);font-weight:600;">✅ Letto dal telefono (' + primoNome + ')! Ora premi \\"Salva Documento Mobile in Archivio\\" qui sotto.</span>';
+      cpBtn.style.display = 'block';
+    } catch (errLettura) {
+      stBox.innerHTML = '<span style="color:rgb(176, 42, 55);">❌ Errore lettura file: ' + errLettura.message + '</span>';
+    }
+  });
+
+  document.getElementById('btn_copia_appunti').addEventListener('click', function() {
+    if (!testoGlobaleEstratto) return;
+    navigator.clipboard.writeText(testoGlobaleEstratto).then(function() {
+      document.getElementById('btn_copia_appunti').innerText = '✅ Testo Copiato negli Appunti!';
+    }).catch(function() {
+      document.getElementById('btn_copia_appunti').innerText = '❌ Errore copia appunti';
+    });
+  });
+</script>
+</body>
+</html>
+"""
+
 
 def _stream_testo_parole(testo: str):
     """Yields words preserving markdown newlines for real-time streaming in Streamlit."""
@@ -411,22 +533,25 @@ with st.sidebar:
     )
     clic_salva = st.button("Save to Archive")
 
-    with st.expander("📋 Or Paste Document Text Directly (Mobile Zero-Upload Fallback)"):
-        titolo_sb_incollato = st.text_input(
-            "Document Title:",
-            key="titolo_sb_paste",
-            placeholder="e.g. OIC_19_estratto.txt or Linee_Guida.txt",
+    with st.expander("📱 Caricatore PDF Diretto da Telefono (Anti-AxiosError) & Incolla Testo"):
+        st.caption("Legge i PDF direttamente nella memoria del telefono senza passare da Axios o connessioni di rete.")
+        st.components.v1.html(_HTML_JS_ZERO_AXIOS, height=135)
+        titolo_mobile = st.text_input(
+            "Nome documento (Mobile):",
+            value="Documento_Mobile.pdf",
+            key="titolo_mobile_doc",
+            help="Nome assegnato al documento letto dal telefono o incollato.",
         )
-        testo_sb_incollato = st.text_area(
-            "Document Text (raw text, markdown or code):",
-            key="testo_sb_paste",
-            height=140,
-            placeholder="Paste your document content here...",
+        testo_mobile = st.text_area(
+            "Testo del documento da salvare in Archivio:",
+            key="testo_mobile_area",
+            height=100,
+            placeholder="Il testo estratto dal PDF apparirà qui automaticamente, oppure puoi incollarlo qui a mano...",
         )
-        if st.button("Save Pasted Text to Archive", key="btn_sb_paste"):
+        if st.button("💾 Salva Documento Mobile in Archivio", type="primary", key="btn_salva_mobile"):
             if _salva_testo_incollato_in_archivio(
-                titolo_sb_incollato,
-                testo_sb_incollato,
+                titolo_mobile,
+                testo_mobile,
                 dominio_doc,
                 max_docs,
                 max_mb,
