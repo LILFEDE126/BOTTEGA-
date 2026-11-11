@@ -1435,10 +1435,20 @@ def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_sto
             ("API Wikipedia: Metamorfosi (Ovidio)", "Le metamorfosi sono un poema epico-mitologico di Ovidio."),
         ]
 
+    def mock_piano(sistema, utente, schema):
+        return risolutore_artigiano.PianoRicercaArtigiano(
+            stato_memoria="INSUFFICIENTE_CERCA_FUORI",
+            fatti_accertati_nel_problema=["Richiesta previsione S&P 500"],
+            dato_esatto_mancante="Dati storici e quotazioni indice",
+            query_chirurgica_esterna="S&P 500",
+            ispezione_preliminare_sul_campo="Verificare fonti finanziarie ufficiali",
+        )
+
     esito_a1 = risolutore_artigiano.risolvi_da_artigiano(
         domanda_sfida,
         dominio="generale",
         cercatore_esterno_fn=cercatore_spuri,
+        llm_fn=mock_piano,
     )
     assert esito_a1["semaforo"] == "ROJO", f"Atteso ROJO su frammenti spuri Fallaci/Ovidio, ottenuto {esito_a1['semaforo']}"
     assert esito_a1["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
