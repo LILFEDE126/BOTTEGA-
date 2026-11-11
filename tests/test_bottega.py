@@ -1425,6 +1425,30 @@ def test_senior_engineering_20_principi_integrita_architetturale():
     assert isinstance(risolutore_artigiano._ETICHETTE_SCARTATO, MappingProxyType)
     assert isinstance(config.GERARCHIA_LIVELLI_THE, MappingProxyType)
 
+    file_app = radice / "app.py"
+    if file_app.is_file():
+        albero_app = ast.parse(file_app.read_text(encoding="utf-8"))
+
+        def _e_chiamata_expander(nodo_with):
+            for item in nodo_with.items:
+                ctx_expr = item.context_expr
+                if isinstance(ctx_expr, ast.Call):
+                    fn = ctx_expr.func
+                    if isinstance(fn, ast.Attribute) and fn.attr == "expander":
+                        return True
+                    if isinstance(fn, ast.Name) and fn.id == "expander":
+                        return True
+            return False
+
+        for nodo in ast.walk(albero_app):
+            if isinstance(nodo, ast.With) and _e_chiamata_expander(nodo):
+                for figlio in ast.walk(nodo):
+                    if figlio is not nodo and isinstance(figlio, ast.With) and _e_chiamata_expander(figlio):
+                        assert False, (
+                            f"Violazione Streamlit: expander annidato dentro altro expander "
+                            f"alla riga {figlio.lineno} di app.py"
+                        )
+
 
 def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_stop_onesto_rojo(monkeypatch):
     domanda_sfida = "Si preciso che ti hanno sfidato : mi sai dire l'andamento dei prossimi due anni dell'S&P 500?"

@@ -483,60 +483,7 @@ if archivio_centrale:
         "Ready for automated diagnostic solving."
     )
 
-with st.expander("📄 Upload Documents / PDFs (Mobile & Quick Access — up to 30 files / 200 MB)"):
-    col_mob_1, col_mob_2 = st.columns([1, 2])
-    with col_mob_1:
-        dominio_mob = st.selectbox(
-            "Target Domain (Mobile):",
-            DOMINI_DISPONIBILI,
-            key="dom_upload_mobile",
-            help="Assigns a domain label (generale = Strato L, tecnico = Strato A, normativo = Strato D).",
-        )
-    with col_mob_2:
-        st.write("")
-        st.caption("Supports .pdf, .txt, .md, .csv, .py. On Android/iOS, choose files from Download or Storage.")
 
-    files_mobile = st.file_uploader(
-        f"Select documents to upload (max {max_docs} files / {max_mb} MB total):",
-        key="uploader_mobile",
-        accept_multiple_files=True,
-        help="Supports .pdf, .txt, .md, .csv, .py. On mobile, browse files directly from Download or Storage.",
-    )
-    if files_mobile:
-        nuovi_mob = _elabora_file_caricati(files_mobile, dominio_mob, max_docs, max_mb, max_bytes)
-        if nuovi_mob > 0:
-            st.toast(f"{nuovi_mob} document(s) successfully indexed into memory!")
-            st.rerun()
-
-    with st.expander("📋 Or Paste Document Text Directly (Mobile Zero-Upload Fallback)"):
-        titolo_mob_incollato = st.text_input(
-            "Document Title (Mobile):",
-            key="titolo_mob_paste",
-            placeholder="e.g. Appunti.txt or Bilancio2024.txt",
-        )
-        testo_mob_incollato = st.text_area(
-            "Document Text (Mobile):",
-            key="testo_mob_paste",
-            height=140,
-            placeholder="Paste document text directly here to bypass mobile file picker...",
-        )
-        if st.button("Save Pasted Text to Archive", key="btn_mob_paste"):
-            if _salva_testo_incollato_in_archivio(
-                titolo_mob_incollato,
-                testo_mob_incollato,
-                dominio_mob,
-                max_docs,
-                max_mb,
-                max_bytes,
-            ):
-                st.rerun()
-
-    if archivio_centrale:
-        if st.button("Clear Archive (Mobile)", key="btn_clear_mobile"):
-            st.session_state["documenti_archivio_sessione"] = {}
-            if hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
-                store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
-            st.rerun()
 
 chiave_effettiva_ui = (
     api_key_ui.strip()
