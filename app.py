@@ -242,6 +242,87 @@ def _elabora_file_caricati(
     return nuovi_elaborati_ora
 
 
+def _salva_testo_incollato_in_archivio(
+    titolo_doc: str,
+    testo_doc: str,
+    dominio_scelto: str,
+    max_documenti: int,
+    max_megabyte: int,
+    limite_bytes: int,
+) -> bool:
+    """Salva direttamente testo incollato in archivio e RAM senza upload multipart Axios."""
+    titolo_pulito = titolo_doc.strip()
+    if not titolo_pulito:
+        st.warning("Please specify a document title (e.g. 'Note.txt' or 'Codice_Appalti').")
+        return False
+    if not Path(titolo_pulito).suffix:
+        titolo_pulito = f"{titolo_pulito}.txt"
+
+    testo_pulito = testo_doc.strip()
+    if not testo_pulito:
+        st.warning("Please paste non-empty document text.")
+        return False
+
+    raw_bytes = testo_pulito.encode("utf-8")
+    dim_file = len(raw_bytes)
+
+    if "documenti_archivio_sessione" not in st.session_state:
+        st.session_state["documenti_archivio_sessione"] = {}
+    archivio_sess = st.session_state["documenti_archivio_sessione"]
+
+    if titolo_pulito not in archivio_sess and len(archivio_sess) >= max_documenti:
+        st.warning(
+            f"Archive already holds {max_documenti}/{max_documenti} documents. Skipped '{titolo_pulito}'."
+        )
+        return False
+
+    bytes_totali_correnti = sum(
+        info["size_bytes"]
+        for nome_f, info in archivio_sess.items()
+        if nome_f != titolo_pulito
+    )
+    if bytes_totali_correnti + dim_file > limite_bytes:
+        st.warning(
+            f"Total size limit of {max_megabyte} MB per request exceeded: skipped '{titolo_pulito}'."
+        )
+        return False
+
+    sha_file = hashlib.sha256(raw_bytes).hexdigest()
+    chiave_doc = f"{dominio_scelto}:{sha_file}"
+
+    try:
+        blocchi_doc = store_pgvector.estrai_blocchi_documento(titolo_pulito, raw_bytes)
+        n_ins = 0
+        if not blocchi_doc:
+            st.warning(f"No readable text extracted from '{titolo_pulito}'.")
+            return False
+        try:
+            store_pgvector.inizializza_schema()
+        except psycopg2.Error as err_init:
+            logging_bottega.log.info(
+                "Inizializzazione PostgreSQL non riuscita (%s): memorizzazione nell'archivio RAM",
+                err_init,
+                extra={"code": "APP_INIT_002"},
+            )
+        n_ins = store_pgvector.incasella_e_salva(dominio_scelto, titolo_pulito, blocchi_doc)
+        archivio_sess[titolo_pulito] = {
+            "chiave": chiave_doc,
+            "dominio": dominio_scelto,
+            "blocchi": blocchi_doc,
+            "size_bytes": dim_file,
+            "n_frammenti": len(blocchi_doc),
+            "n_nuovi": n_ins,
+        }
+        st.toast(f"'{titolo_pulito}' successfully saved into memory ({len(blocchi_doc)} fragments)!")
+        return True
+    except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
+        logging_bottega.log_exception(
+            "Errore salvataggio testo incollato in archivio", "APP_DOC_002", err
+        )
+        st.error(f"Could not index pasted document '{titolo_pulito}': {err}")
+        return False
+
+
 max_docs = getattr(config, "MAX_DOCUMENTI_PER_RICHIESTA", 30)
 max_mb = getattr(config, "MAX_MB_PER_RICHIESTA", 200)
 max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * DIVISORE_MB)
@@ -330,6 +411,29 @@ with st.sidebar:
     )
     clic_salva = st.button("Save to Archive")
 
+    with st.expander("📋 Or Paste Document Text Directly (Mobile Zero-Upload Fallback)"):
+        titolo_sb_incollato = st.text_input(
+            "Document Title:",
+            key="titolo_sb_paste",
+            placeholder="e.g. OIC_19_estratto.txt or Linee_Guida.txt",
+        )
+        testo_sb_incollato = st.text_area(
+            "Document Text (raw text, markdown or code):",
+            key="testo_sb_paste",
+            height=140,
+            placeholder="Paste your document content here...",
+        )
+        if st.button("Save Pasted Text to Archive", key="btn_sb_paste"):
+            if _salva_testo_incollato_in_archivio(
+                titolo_sb_incollato,
+                testo_sb_incollato,
+                dominio_doc,
+                max_docs,
+                max_mb,
+                max_bytes,
+            ):
+                st.rerun()
+
     if files_caricati:
         nuovi_sb = _elabora_file_caricati(
             files_caricati, dominio_doc, max_docs, max_mb, max_bytes
@@ -403,6 +507,29 @@ with st.expander("📄 Upload Documents / PDFs (Mobile & Quick Access — up to 
         if nuovi_mob > 0:
             st.toast(f"{nuovi_mob} document(s) successfully indexed into memory!")
             st.rerun()
+
+    with st.expander("📋 Or Paste Document Text Directly (Mobile Zero-Upload Fallback)"):
+        titolo_mob_incollato = st.text_input(
+            "Document Title (Mobile):",
+            key="titolo_mob_paste",
+            placeholder="e.g. Appunti.txt or Bilancio2024.txt",
+        )
+        testo_mob_incollato = st.text_area(
+            "Document Text (Mobile):",
+            key="testo_mob_paste",
+            height=140,
+            placeholder="Paste document text directly here to bypass mobile file picker...",
+        )
+        if st.button("Save Pasted Text to Archive", key="btn_mob_paste"):
+            if _salva_testo_incollato_in_archivio(
+                titolo_mob_incollato,
+                testo_mob_incollato,
+                dominio_mob,
+                max_docs,
+                max_mb,
+                max_bytes,
+            ):
+                st.rerun()
 
     if archivio_centrale:
         if st.button("Clear Archive (Mobile)", key="btn_clear_mobile"):
