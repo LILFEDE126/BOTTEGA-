@@ -3,7 +3,7 @@
 and provides the multilingual cascading search connector (Handbook -> AI Web Search -> Direct Web)."""
 
 import re
-from typing import List, Optional, Tuple
+from typing import List, Optional, Set, Tuple
 import requests
 
 import config
@@ -535,24 +535,51 @@ _STOPWORDS_RICERCA_WEB = frozenset({
     "what", "which", "where", "when", "does", "govern", "under", "according", "between",
     "with", "from", "into", "that", "this", "their", "about", "official", "documentary",
     "source", "fuente", "documental", "fonte", "documentale", "ufficiale",
+    "preciso", "precisione", "sfidato", "sfidati", "sfida", "hanno", "dire", "sai",
+    "parte", "parti", "prossimi", "prossimo", "prossima", "prossime", "andamento",
+    "anni", "anno", "mesi", "mese", "giorni", "due", "tre", "puoi", "dimmi", "sapere", "vorrei",
+})
+
+SIGLE_FINANZIARIE_BREVI = frozenset({
+    "sp", "s&p", "pil", "bce", "fed", "etf", "iva", "tfr", "irpef", "ires", "oic", "ias", "ifrs",
 })
 
 
 def _estrai_query_compatta_web(query: str) -> str:
     """Extracts a compact 4-6 keyword search string for Wikipedia/DuckDuckGo when the full conversational query is too verbose."""
     testo_base = query.split("?")[0].strip() if "?" in query else query.strip()
-    token_lista = re.findall(r"\b\d+(?:/\d+)?\b|[A-Za-zÀ-ÿ]{3,}", testo_base)
+    testo_base = re.sub(r"(?i)\b(?:s&p|sp)\s*500\b", "S&P 500", testo_base)
+    token_lista = re.findall(r"S&P\s+500|\bS&P\b|\b\d+(?:/\d+)?\b|[A-Za-zÀ-ÿ0-9&]{2,}", testo_base)
     filtrati: List[str] = []
     visti = set()
     for token_elem in token_lista:
-        token_minuscolo = token_elem.lower()
+        token_minuscolo = token_elem.lower().strip()
         if token_minuscolo in _STOPWORDS_RICERCA_WEB or token_minuscolo in visti:
+            continue
+        if len(token_minuscolo) < 3 and token_minuscolo not in SIGLE_FINANZIARIE_BREVI and not any(ch.isdigit() for ch in token_minuscolo):
             continue
         visti.add(token_minuscolo)
         filtrati.append(token_elem)
         if len(filtrati) >= 6:
             break
     return " ".join(filtrati) if filtrati else tronca_senza_spezzare_parola(testo_base, MAX_CARATTERI_TITOLO_RICERCA)
+
+
+def _estrai_termini_chiave_sostantivi(query_testo: str) -> Set[str]:
+    """Estrae i termini chiave sostantivi e codici normativi/finanziari per il filtro di pertinenza enciclopedica."""
+    testo_norm = re.sub(r"(?i)\b(?:s&p|sp)\s*500\b", "s&p 500", query_testo.lower())
+    token_lista = re.findall(r"s&p\s+500|\bs&p\b|\b\d+(?:[.,/-]\d+)*\b|[a-z0-9à-ÿ&]{2,}", testo_norm)
+    termini = set()
+    for tok in token_lista:
+        tok_pulito = tok.strip()
+        if tok_pulito in _STOPWORDS_RICERCA_WEB:
+            continue
+        if len(tok_pulito) < 3 and not any(ch.isdigit() for ch in tok_pulito) and tok_pulito not in ("sp", "s&p"):
+            continue
+        termini.add(tok_pulito)
+        if tok_pulito in ("s&p 500", "sp 500"):
+            termini.update(["s&p", "sp", "500"])
+    return termini
 
 
 def cerca_nel_prontuario_locale(query: str) -> List[Tuple[str, str]]:
@@ -689,7 +716,13 @@ def _cerca_tramite_wikipedia_api(query: str, query_compatta: str) -> List[Tuple[
         lingua_wiki = "en"
     url_wiki = f"https://{lingua_wiki}.wikipedia.org/w/api.php"
 
-    for query_candidata in (query, query_compatta):
+    termini_filtro = _estrai_termini_chiave_sostantivi(query_compatta or query)
+
+    candidati = [query_compatta] if query_compatta else []
+    if query and query != query_compatta:
+        candidati.append(query)
+
+    for query_candidata in candidati:
         if not query_candidata:
             continue
         try:
@@ -701,7 +734,7 @@ def _cerca_tramite_wikipedia_api(query: str, query_compatta: str) -> List[Tuple[
                     "srsearch": query_candidata,
                     "utf8": 1,
                     "format": "json",
-                    "srlimit": 2,
+                    "srlimit": 4,
                 },
                 headers={"User-Agent": USER_AGENT_BOTTEGA},
                 timeout=TIMEOUT_HTTP_BREVE,
@@ -711,6 +744,17 @@ def _cerca_tramite_wikipedia_api(query: str, query_compatta: str) -> List[Tuple[
             for item in risultati_api:
                 titolo = item.get("title", "Fonte Web")
                 estratto = re.sub(r"<[^>]+>", "", item.get("snippet", "")).strip()
+
+                if termini_filtro:
+                    testo_da_valutare = f"{titolo} {estratto}".lower()
+                    parole_trovate = set(re.findall(r"[a-z0-9&/]+", testo_da_valutare))
+                    pertinente = any(
+                        term in parole_trovate or f" {term} " in f" {testo_da_valutare} "
+                        for term in termini_filtro
+                    )
+                    if not pertinente:
+                        continue
+
                 if requests.get is _REQUESTS_GET_ORIGINALE and titolo:
                     try:
                         res_ext = requests.get(

@@ -3,8 +3,9 @@
 Supports any input language (EN, ES, IT, etc.) with automatic search translation,
 natural-language final response synthesis and deterministic RAG fallback."""
 
+import re
 from types import MappingProxyType
-from typing import Callable, List, Literal, Optional, Tuple
+from typing import Callable, List, Literal, Optional, Set, Tuple
 import psycopg2
 import requests
 from pydantic import BaseModel, Field
@@ -426,13 +427,71 @@ _SPIE_DATO_ASSENTE_NEI_FRAMMENTI = (
     "omettendo totalmente",
     "estranei alla norma",
     "trattano esclusivamente argomenti di",
+    "trattano esclusivamente di",
+    "trattano esclusivamente",
     "non contengono informazioni",
+    "non disponiamo di informazioni",
+    "mancanza totale di dati",
+    "non è possibile formulare alcuna previsione",
+    "non e' possibile formulare alcuna previsione",
+    "non contengono dati",
+    "nessuna informazione disponibile",
     "no reference to",
     "not present in the retrieved",
     "impossible to answer",
     "no contiene ninguna referencia",
     "imposibilidad de responder",
 )
+
+_STOPWORDS_CHIRURGICHE = frozenset({
+    "qual", "quale", "quali", "cosa", "come", "dove", "quando", "perche", "perché",
+    "del", "della", "delle", "degli", "dello", "dei", "dal", "dalla", "dalle",
+    "nel", "nella", "nelle", "negli", "nello", "nei", "con", "per", "tra", "fra",
+    "questo", "questa", "questi", "queste", "quello", "quella", "che", "chi",
+    "preciso", "precisione", "sfidato", "sfidati", "sfida", "hanno", "dire", "sai",
+    "parte", "parti", "prossimi", "prossimo", "prossima", "prossime", "andamento",
+    "anni", "anno", "mesi", "mese", "giorni", "due", "tre", "puoi", "dimmi", "sapere",
+    "vorrei", "the", "and", "for", "with", "from", "into", "that", "this", "what",
+    "which", "para", "como", "desde", "hasta", "sobre", "entre", "cual", "cuál",
+})
+
+
+def _estrai_termini_chiave_chirurgici(query_testo: str) -> Set[str]:
+    testo_norm = re.sub(r"(?i)\b(?:s&p|sp)\s*500\b", "s&p 500", query_testo.lower())
+    token_lista = re.findall(r"s&p\s+500|\bs&p\b|\b\d+(?:[.,/-]\d+)*\b|[a-z0-9à-ÿ&]{2,}", testo_norm)
+    termini = set()
+    for tok in token_lista:
+        tok_pulito = tok.strip()
+        if tok_pulito in _STOPWORDS_CHIRURGICHE:
+            continue
+        if len(tok_pulito) < 3 and not any(ch.isdigit() for ch in tok_pulito) and tok_pulito not in ("sp", "s&p"):
+            continue
+        termini.add(tok_pulito)
+        if tok_pulito in ("s&p 500", "sp 500"):
+            termini.update(["s&p", "sp", "500"])
+    return termini
+
+
+def _verifica_pertinenza_blocchi_esterni(
+    blocchi: List[Tuple[str, str]],
+    query_riferimento: str,
+) -> bool:
+    """Verifica che i blocchi restituiti dalla ricerca esterna contengano almeno un termine chiave della query chirurgica."""
+    if not blocchi:
+        return False
+    termini = _estrai_termini_chiave_chirurgici(query_riferimento)
+    if not termini:
+        return True
+    testo_unito = " ".join(f"{sez} {txt}" for sez, txt in blocchi).lower()
+    parole_blocchi = set(re.findall(r"[a-z0-9&/]+", testo_unito))
+    for t in termini:
+        if " " in t:
+            if t in testo_unito:
+                return True
+        else:
+            if t in parole_blocchi or f" {t} " in f" {testo_unito} ":
+                return True
+    return False
 
 
 def _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione: SoluzioneArtigiano) -> bool:
@@ -527,9 +586,11 @@ def _esegui_fase_rojo_con_ricerca(
         piano = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
 
     if cercatore_esterno_fn is not None:
-        query_ricerca_est = f"{problema} {piano.query_chirurgica_esterna}".strip()
+        chirurgica = (piano.query_chirurgica_esterna or "").strip()
+        query_ricerca_est = chirurgica if chirurgica else problema.strip()
         nuovi_blocchi = cercatore_esterno_fn(query_ricerca_est)
-        if nuovi_blocchi:
+        pertinenti = _verifica_pertinenza_blocchi_esterni(nuovi_blocchi, query_ricerca_est) if nuovi_blocchi else False
+        if nuovi_blocchi and pertinenti:
             ricerca_esterna_eseguita = True
             try:
                 incasella_e_salva(dominio, f"Ricerca: {piano.dato_esatto_mancante}", nuovi_blocchi)
@@ -538,10 +599,10 @@ def _esegui_fase_rojo_con_ricerca(
                 if semaforo == "ROJO":
                     rag = {
                         "semaforo": "VERDE",
-                        "s_max": 0.90,
-                        "s_dominio": 0.85,
+                        "s_max": 0.85,
+                        "s_dominio": 0.80,
                         "frammenti": [
-                            {"id": indice_b, "testo": f"[{dominio.upper()}] {sez_b}: {txt_b}", "similitudine": 0.90}
+                            {"id": indice_b, "testo": f"[{dominio.upper()}] {sez_b}: {txt_b}", "similitudine": 0.85}
                             for indice_b, (sez_b, txt_b) in enumerate(nuovi_blocchi, start=1)
                         ],
                     }
@@ -557,6 +618,13 @@ def _esegui_fase_rojo_con_ricerca(
                     ],
                 }
                 semaforo = "AMBAR"
+        else:
+            if nuovi_blocchi and not pertinenti:
+                log.warning(
+                    "Blocchi esterni scartati perche non pertinenti alla query chirurgica '%s'",
+                    query_ricerca_est,
+                    extra={"code": "ART_RELEVANCE_001"},
+                )
 
     if semaforo == "ROJO":
         log.info(
@@ -752,8 +820,11 @@ def risolvi_da_artigiano(
 
     if not ricerca_esterna_eseguita and _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione):
         if cercatore_esterno_fn is not None:
-            nuovi_blocchi_recupero = cercatore_esterno_fn(problema)
-            if nuovi_blocchi_recupero:
+            chirurgica = (piano.query_chirurgica_esterna or "").strip() if "piano" in locals() else ""
+            query_recupero = chirurgica if chirurgica else problema
+            nuovi_blocchi_recupero = cercatore_esterno_fn(query_recupero)
+            pertinenti_rec = _verifica_pertinenza_blocchi_esterni(nuovi_blocchi_recupero, query_recupero) if nuovi_blocchi_recupero else False
+            if nuovi_blocchi_recupero and pertinenti_rec:
                 ricerca_esterna_eseguita = True
                 rag = {
                     "semaforo": "VERDE",
@@ -783,25 +854,26 @@ def risolvi_da_artigiano(
                     soluzione = _costruisci_soluzione_deterministica(
                         problema, rag["frammenti"], escluse_pulite, lingua=lingua_rilevata
                     )
-        else:
-            piano_auto = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
-            piano_dict = piano_auto.model_dump()
-            return {
-                "semaforo": "ROJO",
-                "s_max": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
-                "modalita": "RICERCA_PRIMA_DI_AGIRE",
-                "lingua": lingua_rilevata,
-                "ricerca_esterna_eseguita": False,
-                "ipotesi_escluse_applicate": escluse_pulite,
-                "colore_nodo_ewd496a": "GRIGIO",
-                "percentuali_conservate": True,
-                "risultato": piano_dict,
-                "risposta_discorsiva": formatta_risposta_artigiano_leggibile(
-                    piano_dict, "RICERCA_PRIMA_DI_AGIRE", lingua=lingua_rilevata
-                ),
-                "frammenti_usati": [],
-                "cifre_non_ancorate": [],
-            }
+
+    if _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione):
+        piano_stop = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
+        piano_dict = piano_stop.model_dump()
+        return {
+            "semaforo": "ROJO",
+            "s_max": SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
+            "modalita": "RICERCA_PRIMA_DI_AGIRE",
+            "lingua": lingua_rilevata,
+            "ricerca_esterna_eseguita": ricerca_esterna_eseguita,
+            "ipotesi_escluse_applicate": escluse_pulite,
+            "colore_nodo_ewd496a": "GRIGIO",
+            "percentuali_conservate": True,
+            "risultato": piano_dict,
+            "risposta_discorsiva": formatta_risposta_artigiano_leggibile(
+                piano_dict, "RICERCA_PRIMA_DI_AGIRE", lingua=lingua_rilevata
+            ),
+            "frammenti_usati": [],
+            "cifre_non_ancorate": [],
+        }
 
     tag_fals_uscita = _ETICHETTE_FALSIFICATA.get(lingua_rilevata, _ETICHETTE_FALSIFICATA["it"])
     scarti_finali = list(soluzione.elementi_scartati_per_non_fare_mucchio)

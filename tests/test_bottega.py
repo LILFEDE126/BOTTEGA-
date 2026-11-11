@@ -376,7 +376,7 @@ def test_cerca_nel_prontuario_esterno_chiama_api_wikipedia_su_tema_nuovo(monkeyp
                 "search": [
                     {
                         "title": "Colpo d'ariete",
-                        "snippet": 'Fenomeno idraulico di <span class="searchmatch">sovrappressione</span>.',
+                        "snippet": 'Fenomeno idraulico di <span class="searchmatch">sovrappressione</span> nella pompa centrifuga.',
                     }
                 ]
             }
@@ -1417,8 +1417,101 @@ def test_senior_engineering_20_principi_integrita_architetturale():
     assert isinstance(store_pgvector.STOPWORDS_RICERCA_COMUNI, frozenset)
     assert isinstance(seed_bottega.STOPWORDS_PRONTUARIO, frozenset)
     assert isinstance(seed_bottega._STOPWORDS_RICERCA_WEB, frozenset)
+    assert isinstance(seed_bottega.SIGLE_FINANZIARIE_BREVI, frozenset)
+    assert isinstance(risolutore_artigiano._STOPWORDS_CHIRURGICHE, frozenset)
     assert isinstance(client_ollama.GLOSSARIO_MULTILINGUA_IT, MappingProxyType)
     assert isinstance(client_ollama.PAROLE_SPIA_LINGUA, MappingProxyType)
     assert isinstance(risolutore_artigiano._ETICHETTE_FALSIFICATA, MappingProxyType)
     assert isinstance(risolutore_artigiano._ETICHETTE_SCARTATO, MappingProxyType)
     assert isinstance(config.GERARCHIA_LIVELLI_THE, MappingProxyType)
+
+
+def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_stop_onesto_rojo(monkeypatch):
+    domanda_sfida = "Si preciso che ti hanno sfidato : mi sai dire l'andamento dei prossimi due anni dell'S&P 500?"
+
+    def cercatore_spuri(query: str):
+        return [
+            ("API Wikipedia: Oriana Fallaci", "Oriana Fallaci è stata una scrittrice e giornalista italiana."),
+            ("API Wikipedia: Metamorfosi (Ovidio)", "Le metamorfosi sono un poema epico-mitologico di Ovidio."),
+        ]
+
+    esito_a1 = risolutore_artigiano.risolvi_da_artigiano(
+        domanda_sfida,
+        dominio="generale",
+        cercatore_esterno_fn=cercatore_spuri,
+    )
+    assert esito_a1["semaforo"] == "ROJO", f"Atteso ROJO su frammenti spuri Fallaci/Ovidio, ottenuto {esito_a1['semaforo']}"
+    assert esito_a1["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    assert esito_a1["s_max"] != 0.90, "Il punteggio s_max non deve essere forzato a 0.90 su frammenti spuri"
+    assert esito_a1["frammenti_usati"] == []
+
+    def mock_llm_rifiuto(sistema, utente, schema):
+        if schema is risolutore_artigiano.PianoRicercaArtigiano:
+            return risolutore_artigiano.PianoRicercaArtigiano(
+                stato_memoria="INSUFFICIENTE_CERCA_FUORI",
+                fatti_accertati_nel_problema=["Richiesta previsione S&P 500"],
+                dato_esatto_mancante="Dati storici e quotazioni indice",
+                query_chirurgica_esterna="S&P 500",
+                ispezione_preliminare_sul_campo="Verificare fonti finanziarie ufficiali",
+            )
+        return risolutore_artigiano.SoluzioneArtigiano(
+            principio_guida_unico="Prudenza e veridicita contabile",
+            elementi_scartati_per_non_fare_mucchio=["Previsioni non dimostrabili"],
+            precondizione_wp_richiesta="Dati certificati disponibili",
+            invariante_violato="wp(S, false) = false",
+            ipotesi_causale_unica="Non disponiamo di informazioni sufficienti per formulare alcuna previsione sui prossimi due anni",
+            azione_correttiva_singola="Sospendere il giudizio predittivo in assenza di dati",
+            esperimento_di_verifica_pratica="Consultare il prospetto dell'indice ufficiale",
+            risposta_finale_discorsiva="Non disponiamo di informazioni nei documenti recuperati e non è possibile formulare alcuna previsione attendibile sui prossimi due anni per S&P 500.",
+        )
+
+    monkeypatch.setattr(
+        risolutore_artigiano,
+        "recupera_con_semaforo",
+        lambda q, dominio="generale", top_k=5: {
+            "semaforo": "VERDE",
+            "s_max": 0.85,
+            "frammenti": [{"id": 1, "testo": "[GENERALE] Dati di mercato generici"}],
+        },
+    )
+
+    esito_a2 = risolutore_artigiano.risolvi_da_artigiano(
+        domanda_sfida,
+        dominio="generale",
+        llm_fn=mock_llm_rifiuto,
+    )
+    assert esito_a2["semaforo"] == "ROJO", f"Atteso ROJO su rifiuto esplicito LLM, ottenuto {esito_a2['semaforo']}"
+    assert esito_a2["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
+    assert esito_a2["s_max"] == 0.18
+    assert esito_a2["frammenti_usati"] == []
+
+    query_compatta = seed_bottega._estrai_query_compatta_web(domanda_sfida)
+    assert "S&P 500" in query_compatta
+    assert "sfidato" not in query_compatta.lower()
+    assert "preciso" not in query_compatta.lower()
+
+    termini = seed_bottega._estrai_termini_chiave_sostantivi(query_compatta)
+    assert any(t in ("s&p", "sp", "500") for t in termini)
+
+    class _FakeWikiMista:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {
+                "query": {
+                    "search": [
+                        {"title": "Oriana Fallaci", "snippet": "Scrittrice e giornalista italiana."},
+                        {"title": "S&P 500", "snippet": "Indice azionario composto da 500 titoli USA."},
+                    ]
+                }
+            }
+
+    def finto_get_wiki(url, params=None, headers=None, timeout=10):
+        return _FakeWikiMista()
+
+    monkeypatch.setattr(seed_bottega.requests, "get", finto_get_wiki)
+    risultati_wiki = seed_bottega._cerca_tramite_wikipedia_api(domanda_sfida, query_compatta)
+    assert len(risultati_wiki) == 1
+    assert "S&P 500" in risultati_wiki[0][0]
+    assert "Oriana Fallaci" not in [item[0] for item in risultati_wiki]
