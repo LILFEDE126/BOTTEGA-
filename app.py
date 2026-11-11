@@ -99,6 +99,7 @@ PROMPT_TASCHINO_UNIVERSALE = (
 )
 
 DOMINI_DISPONIBILI = ("generale", "tecnico", "normativo")
+ESTENSIONI_SUPPORTATE = frozenset({".pdf", ".txt", ".md", ".csv", ".py"})
 PROVIDERS_DISPONIBILI = ("gemini", "groq", "openrouter", "ollama", "deepseek", "openai")
 
 _STILE_EDITORIALE_SOBRIO = """
@@ -143,7 +144,113 @@ def _conta_frammenti_ram_sicuro(titolo=None) -> int:
     return sum(1 for item in archivio if item.get("titolo") == titolo)
 
 
-st.set_page_config(page_title="Bottega — Engine & Diagnostic Solver", layout="wide")
+def _elabora_file_caricati(
+    files_caricati,
+    dominio_scelto: str,
+    max_documenti: int,
+    max_megabyte: int,
+    limite_bytes: int,
+) -> int:
+    """Indicizza i documenti caricati in archivio e RAM con validazione estensione file."""
+    if not files_caricati:
+        return 0
+    if "documenti_archivio_sessione" not in st.session_state:
+        st.session_state["documenti_archivio_sessione"] = {}
+    archivio_sess = st.session_state["documenti_archivio_sessione"]
+    files_da_elaborare = list(files_caricati)
+    if len(files_da_elaborare) > max_documenti:
+        st.warning(
+            f"Maximum limit of {max_documenti} documents per request reached: "
+            f"indexing the first {max_documenti} files."
+        )
+        files_da_elaborare = files_da_elaborare[:max_documenti]
+
+    bytes_totali_correnti = sum(
+        info["size_bytes"]
+        for nome_f, info in archivio_sess.items()
+        if nome_f not in {file_up.name for file_up in files_da_elaborare}
+    )
+
+    ram_globale = _conta_frammenti_ram_sicuro()
+    nuovi_elaborati_ora = 0
+
+    for singolo_file in files_da_elaborare:
+        estensione = Path(singolo_file.name).suffix.lower()
+        if estensione not in ESTENSIONI_SUPPORTATE:
+            st.warning(
+                f"Unsupported file format for '{singolo_file.name}': "
+                f"only .pdf, .txt, .md, .csv, .py are accepted."
+            )
+            continue
+
+        raw_bytes = singolo_file.getvalue()
+        dim_file = len(raw_bytes)
+        if singolo_file.name not in archivio_sess and len(archivio_sess) >= max_documenti:
+            st.warning(
+                f"Archive already holds {max_documenti}/{max_documenti} documents. "
+                f"Skipped '{singolo_file.name}'."
+            )
+            continue
+        if bytes_totali_correnti + dim_file > limite_bytes:
+            st.warning(
+                f"Total size limit of {max_megabyte} MB per request exceeded: "
+                f"skipped '{singolo_file.name}'."
+            )
+            continue
+
+        bytes_totali_correnti += dim_file
+        sha_file = hashlib.sha256(raw_bytes).hexdigest()
+        chiave_doc = f"{dominio_scelto}:{sha_file}"
+        info_esistente = archivio_sess.get(singolo_file.name)
+
+        if (
+            info_esistente is None
+            or info_esistente.get("chiave") != chiave_doc
+            or ram_globale == 0
+        ):
+            try:
+                blocchi_doc = store_pgvector.estrai_blocchi_documento(singolo_file.name, raw_bytes)
+                n_ins = 0
+                if not blocchi_doc:
+                    st.warning(f"No readable text found in '{singolo_file.name}'.")
+                else:
+                    try:
+                        store_pgvector.inizializza_schema()
+                    except psycopg2.Error as err_init:
+                        logging_bottega.log.info(
+                            "Inizializzazione PostgreSQL non riuscita (%s): memorizzazione nell'archivio RAM",
+                            err_init,
+                            extra={"code": "APP_INIT_001"},
+                        )
+                    n_ins = store_pgvector.incasella_e_salva(dominio_scelto, singolo_file.name, blocchi_doc)
+                    ram_globale = _conta_frammenti_ram_sicuro()
+                archivio_sess[singolo_file.name] = {
+                    "chiave": chiave_doc,
+                    "dominio": dominio_scelto,
+                    "blocchi": blocchi_doc,
+                    "size_bytes": dim_file,
+                    "n_frammenti": len(blocchi_doc),
+                    "n_nuovi": n_ins,
+                }
+                nuovi_elaborati_ora += 1
+            except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
+                logging_bottega.log_exception(
+                    "Errore indicizzazione documento caricato", "APP_DOC_001", err
+                )
+                st.error(f"Could not read document '{singolo_file.name}': {err}")
+
+    return nuovi_elaborati_ora
+
+
+max_docs = getattr(config, "MAX_DOCUMENTI_PER_RICHIESTA", 30)
+max_mb = getattr(config, "MAX_MB_PER_RICHIESTA", 200)
+max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * DIVISORE_MB)
+
+st.set_page_config(
+    page_title="Bottega — Engine & Diagnostic Solver",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 st.markdown(_STILE_EDITORIALE_SOBRIO, unsafe_allow_html=True)
 st.title("Bottega — Engine & Diagnostic Solver")
 st.caption(
@@ -213,97 +320,21 @@ with st.sidebar:
         key="dom_upload",
         help="Assigns a domain label (generale = Strato L, tecnico = Strato A, normativo = Strato D) to uploaded fragments.",
     )
-    max_docs = getattr(config, "MAX_DOCUMENTI_PER_RICHIESTA", 30)
-    max_mb = getattr(config, "MAX_MB_PER_RICHIESTA", 200)
-    max_bytes = getattr(config, "MAX_BYTES_PER_RICHIESTA", 200 * DIVISORE_MB)
-
     if "documenti_archivio_sessione" not in st.session_state:
         st.session_state["documenti_archivio_sessione"] = {}
 
     files_caricati = st.file_uploader(
         f"Upload up to {max_docs} documents (.pdf, .txt, .md, .csv, .py — max {max_mb} MB total):",
-        type=["pdf", "txt", "md", "csv", "py"],
+        key="uploader_sidebar",
         accept_multiple_files=True,
     )
     clic_salva = st.button("Save to Archive")
 
     if files_caricati:
-        archivio_sess = st.session_state["documenti_archivio_sessione"]
-        files_da_elaborare = list(files_caricati)
-        if len(files_da_elaborare) > max_docs:
-            st.warning(
-                f"Maximum limit of {max_docs} documents per request reached: "
-                f"indexing the first {max_docs} files."
-            )
-            files_da_elaborare = files_da_elaborare[:max_docs]
-
-        bytes_totali_correnti = sum(
-            info["size_bytes"]
-            for nome_f, info in archivio_sess.items()
-            if nome_f not in {file_up.name for file_up in files_da_elaborare}
+        nuovi_sb = _elabora_file_caricati(
+            files_caricati, dominio_doc, max_docs, max_mb, max_bytes
         )
-
-        ram_globale = _conta_frammenti_ram_sicuro()
-        nuovi_elaborati_ora = 0
-
-        for singolo_file in files_da_elaborare:
-            raw_bytes = singolo_file.getvalue()
-            dim_file = len(raw_bytes)
-            if singolo_file.name not in archivio_sess and len(archivio_sess) >= max_docs:
-                st.warning(
-                    f"Archive already holds {max_docs}/{max_docs} documents. "
-                    f"Skipped '{singolo_file.name}'."
-                )
-                continue
-            if bytes_totali_correnti + dim_file > max_bytes:
-                st.warning(
-                    f"Total size limit of {max_mb} MB per request exceeded: "
-                    f"skipped '{singolo_file.name}'."
-                )
-                continue
-
-            bytes_totali_correnti += dim_file
-            sha_file = hashlib.sha256(raw_bytes).hexdigest()
-            chiave_doc = f"{dominio_doc}:{sha_file}"
-            info_esistente = archivio_sess.get(singolo_file.name)
-
-            if (
-                info_esistente is None
-                or info_esistente.get("chiave") != chiave_doc
-                or ram_globale == 0
-            ):
-                try:
-                    blocchi_doc = store_pgvector.estrai_blocchi_documento(singolo_file.name, raw_bytes)
-                    n_ins = 0
-                    if not blocchi_doc:
-                        st.warning(f"No readable text found in '{singolo_file.name}'.")
-                    else:
-                        try:
-                            store_pgvector.inizializza_schema()
-                        except psycopg2.Error as err_init:
-                            logging_bottega.log.info(
-                                "Inizializzazione PostgreSQL non riuscita (%s): memorizzazione nell'archivio RAM",
-                                err_init,
-                                extra={"code": "APP_INIT_001"},
-                            )
-                        n_ins = store_pgvector.incasella_e_salva(dominio_doc, singolo_file.name, blocchi_doc)
-                        ram_globale = _conta_frammenti_ram_sicuro()
-                    archivio_sess[singolo_file.name] = {
-                        "chiave": chiave_doc,
-                        "dominio": dominio_doc,
-                        "blocchi": blocchi_doc,
-                        "size_bytes": dim_file,
-                        "n_frammenti": len(blocchi_doc),
-                        "n_nuovi": n_ins,
-                    }
-                    nuovi_elaborati_ora += 1
-                except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
-                    logging_bottega.log_exception(
-                        "Errore indicizzazione documento caricato", "APP_DOC_001", err
-                    )
-                    st.error(f"Could not read document '{singolo_file.name}': {err}")
-
-        if clic_salva and nuovi_elaborati_ora == 0 and archivio_sess:
+        if clic_salva and nuovi_sb == 0 and st.session_state.get("documenti_archivio_sessione"):
             st.toast("All uploaded documents are already indexed and active in the Archive!")
 
     archivio_attivo = st.session_state.get("documenti_archivio_sessione", {})
@@ -331,6 +362,54 @@ with st.sidebar:
                 if hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
                     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
                 st.rerun()
+
+archivio_centrale = st.session_state.get("documenti_archivio_sessione", {})
+if archivio_centrale:
+    tot_docs_c = len(archivio_centrale)
+    tot_frammenti_ram_c = _conta_frammenti_ram_sicuro()
+    tot_frammenti_c = (
+        tot_frammenti_ram_c
+        if tot_frammenti_ram_c > 0
+        else sum(voce_c["n_frammenti"] for voce_c in archivio_centrale.values())
+    )
+    tot_mb_c = sum(voce_c["size_bytes"] for voce_c in archivio_centrale.values()) / DIVISORE_MB
+    st.success(
+        f"Active Archive: {tot_docs_c}/{max_docs} documents indexed "
+        f"({tot_frammenti_c} unique fragments in memory, {tot_mb_c:.2f} MB / {max_mb} MB). "
+        "Ready for automated diagnostic solving."
+    )
+
+with st.expander("📄 Upload Documents / PDFs (Mobile & Quick Access — up to 30 files / 200 MB)"):
+    col_mob_1, col_mob_2 = st.columns([1, 2])
+    with col_mob_1:
+        dominio_mob = st.selectbox(
+            "Target Domain (Mobile):",
+            DOMINI_DISPONIBILI,
+            key="dom_upload_mobile",
+            help="Assigns a domain label (generale = Strato L, tecnico = Strato A, normativo = Strato D).",
+        )
+    with col_mob_2:
+        st.write("")
+        st.caption("Supports .pdf, .txt, .md, .csv, .py. On Android/iOS, choose files from Download or Storage.")
+
+    files_mobile = st.file_uploader(
+        f"Select documents to upload (max {max_docs} files / {max_mb} MB total):",
+        key="uploader_mobile",
+        accept_multiple_files=True,
+        help="Supports .pdf, .txt, .md, .csv, .py. On mobile, browse files directly from Download or Storage.",
+    )
+    if files_mobile:
+        nuovi_mob = _elabora_file_caricati(files_mobile, dominio_mob, max_docs, max_mb, max_bytes)
+        if nuovi_mob > 0:
+            st.toast(f"{nuovi_mob} document(s) successfully indexed into memory!")
+            st.rerun()
+
+    if archivio_centrale:
+        if st.button("Clear Archive (Mobile)", key="btn_clear_mobile"):
+            st.session_state["documenti_archivio_sessione"] = {}
+            if hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
+                store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+            st.rerun()
 
 chiave_effettiva_ui = (
     api_key_ui.strip()
