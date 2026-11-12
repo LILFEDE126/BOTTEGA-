@@ -204,24 +204,92 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
     return sorted(set(orfane))
 
 
+def _rileva_coppie_entita_contesto(contesto: str, domanda: str) -> List[Tuple[str, str]]:
+    """Automatically extracts (target, antagonist) pairs from context and question
+    by analyzing model prefixes, numbered identifiers, tax years, and contrasting concepts."""
+    if not contesto or not domanda:
+        return []
+    contesto_basso = contesto.lower()
+    domanda_bassa = domanda.lower()
+    coppie: List[Tuple[str, str]] = []
+
+    anni_ctx = sorted(set(re.findall(r"\b(?:19|20)\d{2}\b", contesto)))
+    if len(anni_ctx) >= 2:
+        for a in anni_ctx:
+            if a in domanda_bassa:
+                for antag in anni_ctx:
+                    if antag != a and antag not in domanda_bassa:
+                        coppie.append((a, antag))
+
+    pat_pref = re.compile(
+        r"\b(Modello|Serie|Caldaia|Compressore|Pompa|Regime|Versione|Chiller|Articolo|Anno(?:\s+di\s+imposta)?)\s+([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)?)",
+        re.IGNORECASE,
+    )
+    trovati = pat_pref.findall(contesto)
+    gruppi: Dict[str, Set[str]] = {}
+    for tipo, nome in trovati:
+        gruppi.setdefault(tipo.lower(), set()).add(nome.strip())
+    for tipo, nomi in gruppi.items():
+        if len(nomi) >= 2:
+            nomi_list = list(nomi)
+            for n in nomi_list:
+                if n.lower() in domanda_bassa:
+                    for antag in nomi_list:
+                        if antag.lower() != n.lower() and antag.lower() not in domanda_bassa:
+                            coppie.append((f"{tipo} {n}", f"{tipo} {antag}"))
+                            coppie.append((n, antag))
+
+    pat_modello_num = re.compile(r"\b([A-Za-z]{3,})\s+(\d+)\b")
+    modelli = pat_modello_num.findall(contesto)
+    gruppi_mod: Dict[str, Set[str]] = {}
+    for pref, num in modelli:
+        gruppi_mod.setdefault(pref.lower(), set()).add(num)
+    for pref_low, numeri in gruppi_mod.items():
+        if len(numeri) >= 2:
+            for num in numeri:
+                sigla = f"{pref_low} {num}"
+                if sigla in domanda_bassa or (pref_low in domanda_bassa and num in domanda):
+                    for antag_num in numeri:
+                        if antag_num != num and antag_num not in domanda:
+                            coppie.append((f"{pref_low} {num}", f"{pref_low} {antag_num}"))
+
+    if "nuova attivit" in contesto_basso and "ordinario" in contesto_basso:
+        if "nuova attivit" in domanda_bassa or "start-up" in domanda_bassa:
+            coppie.append(("nuova attività", "ordinario"))
+            coppie.append(("start-up", "ordinario"))
+
+    coppie_uniche: List[Tuple[str, str]] = []
+    viste: Set[Tuple[str, str]] = set()
+    for t_ent, a_ent in coppie:
+        chiave = (t_ent.lower().strip(), a_ent.lower().strip())
+        if chiave not in viste and chiave[0] != chiave[1]:
+            viste.add(chiave)
+            coppie_uniche.append((t_ent, a_ent))
+    return coppie_uniche
+
+
 def verifica_grounding_relazionale(
     risposta: str,
     contesto: str,
     soggetto_target: str = "",
     soggetto_antagonista: str = "",
+    domanda: str = "",
     ampiezza_finestra_caratteri: int = 140,
 ) -> List[str]:
     """Detects relational attribution errors where a number from the context is erroneously assigned
     to a competing entity or model present in the same document (e.g. Model Alpha vs Model Beta).
     Returns list of mismatching figures."""
-    if not soggetto_target or not soggetto_antagonista:
-        return []
-    target_norm = soggetto_target.strip().lower()
-    antagonista_norm = soggetto_antagonista.strip().lower()
-    if not target_norm or not antagonista_norm:
-        return []
-    contesto_lower = contesto.lower()
-    if target_norm not in contesto_lower or antagonista_norm not in contesto_lower:
+    coppie_da_verificare: List[Tuple[str, str]] = []
+    if soggetto_target and soggetto_antagonista:
+        coppie_da_verificare.append((soggetto_target, soggetto_antagonista))
+    elif domanda:
+        coppie_da_verificare = _rileva_coppie_entita_contesto(contesto, domanda)
+    elif contesto:
+        prima_riga = contesto.strip().splitlines()[0] if contesto.strip() else ""
+        if prima_riga:
+            coppie_da_verificare = _rileva_coppie_entita_contesto(contesto, prima_riga)
+
+    if not coppie_da_verificare:
         return []
 
     cifre_risposta = PATRON_NUM.findall(risposta)
@@ -231,51 +299,60 @@ def verifica_grounding_relazionale(
     if not cifre_risposta:
         return []
 
-    cifre_scambiate: List[str] = []
+    contesto_lower = contesto.lower()
+    cifre_scambiate_totali: List[str] = []
 
-    for cifra_token in cifre_risposta:
-        norm_cifra = _normalizza_separatore_decimale(cifra_token)
-        pulito_cifra = re.sub(r"[\s\xa0]", "", cifra_token)
-        candidati_cifra = _converti_in_decimal_esatti(pulito_cifra)
-
-        occorrenze: List[int] = [
-            m.start() for m in re.finditer(re.escape(cifra_token), contesto, re.IGNORECASE)
-        ]
-        if not occorrenze:
-            for cand in candidati_cifra:
-                cand_str = str(cand)
-                occorrenze.extend(
-                    [m.start() for m in re.finditer(re.escape(cand_str), contesto, re.IGNORECASE)]
-                )
-
-        if not occorrenze:
+    for target_cand, antag_cand in coppie_da_verificare:
+        target_norm = target_cand.strip().lower()
+        antagonista_norm = antag_cand.strip().lower()
+        if not target_norm or not antagonista_norm:
+            continue
+        if target_norm not in contesto_lower or antagonista_norm not in contesto_lower:
             continue
 
-        presenze_target = 0
-        presenze_antagonista = 0
-        for pos in occorrenze:
-            inizio_frase = max(
-                contesto_lower.rfind(".", 0, pos),
-                contesto_lower.rfind("\n", 0, pos),
-                contesto_lower.rfind(";", 0, pos),
-            )
-            inizio = 0 if inizio_frase == -1 else inizio_frase + 1
-            fine_frase = -1
-            for sep in (".", "\n", ";"):
-                idx_sep = contesto_lower.find(sep, pos)
-                if idx_sep != -1 and (fine_frase == -1 or idx_sep < fine_frase):
-                    fine_frase = idx_sep
-            fine = len(contesto_lower) if fine_frase == -1 else fine_frase
-            finestra = contesto_lower[inizio:fine]
-            if target_norm in finestra:
-                presenze_target += 1
-            if antagonista_norm in finestra:
-                presenze_antagonista += 1
+        for cifra_token in cifre_risposta:
+            norm_cifra = _normalizza_separatore_decimale(cifra_token)
+            pulito_cifra = re.sub(r"[\s\xa0]", "", cifra_token)
+            candidati_cifra = _converti_in_decimal_esatti(pulito_cifra)
 
-        if presenze_antagonista > 0 and presenze_target == 0:
-            cifre_scambiate.append(norm_cifra)
+            occorrenze: List[int] = [
+                m.start() for m in re.finditer(re.escape(cifra_token), contesto, re.IGNORECASE)
+            ]
+            if not occorrenze:
+                for cand in candidati_cifra:
+                    cand_str = str(cand)
+                    occorrenze.extend(
+                        [m.start() for m in re.finditer(re.escape(cand_str), contesto, re.IGNORECASE)]
+                    )
 
-    return sorted(set(cifre_scambiate))
+            if not occorrenze:
+                continue
+
+            presenze_target = 0
+            presenze_antagonista = 0
+            for pos in occorrenze:
+                inizio_frase = max(
+                    contesto_lower.rfind(".", 0, pos),
+                    contesto_lower.rfind("\n", 0, pos),
+                    contesto_lower.rfind(";", 0, pos),
+                )
+                inizio = 0 if inizio_frase == -1 else inizio_frase + 1
+                fine_frase = -1
+                for sep in (".", "\n", ";"):
+                    idx_sep = contesto_lower.find(sep, pos)
+                    if idx_sep != -1 and (fine_frase == -1 or idx_sep < fine_frase):
+                        fine_frase = idx_sep
+                fine = len(contesto_lower) if fine_frase == -1 else fine_frase
+                finestra = contesto_lower[inizio:fine]
+                if target_norm in finestra:
+                    presenze_target += 1
+                if antagonista_norm in finestra:
+                    presenze_antagonista += 1
+
+            if presenze_antagonista > 0 and presenze_target == 0:
+                cifre_scambiate_totali.append(norm_cifra)
+
+    return sorted(set(cifre_scambiate_totali))
 
 
 def classifica_nodo_tricolore(
@@ -283,13 +360,18 @@ def classifica_nodo_tricolore(
     contesto: str,
     soggetto_target: str = "",
     soggetto_antagonista: str = "",
+    domanda: str = "",
 ) -> Tuple[str, List[str]]:
     """EWD496A (Tri-Color Marking & Write Barrier): BIANCO (empty), GRIGIO (hallucinated or misattributed), NERO (grounded)."""
     if not risposta or not risposta.strip():
         return ("BIANCO", [])
     cifre_orfane = verifica_grounding_numerico(risposta, contesto)
     cifre_scambiate = verifica_grounding_relazionale(
-        risposta, contesto, soggetto_target=soggetto_target, soggetto_antagonista=soggetto_antagonista
+        risposta,
+        contesto,
+        soggetto_target=soggetto_target,
+        soggetto_antagonista=soggetto_antagonista,
+        domanda=domanda,
     )
     totale_errori = sorted(set(cifre_orfane + cifre_scambiate))
     if totale_errori:

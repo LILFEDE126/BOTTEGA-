@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 5 (THE): Complete suite of 35 pure unit tests (zero network, zero DB, zero LLM).
+"""Layer 5 (THE): Complete suite of 42 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
 import ast

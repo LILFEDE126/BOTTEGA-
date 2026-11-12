@@ -708,7 +708,7 @@ with tab_artigiano:
         )
         cerca_fuori = st.checkbox(
             "Enable cascading external search (Handbook -> AI Web Search -> DuckDuckGo/Wikipedia) on ROJO Semaphore",
-            value=True,
+            value=False,
         )
     with col_escl:
         ipotesi_escluse_testo = st.text_area(
@@ -853,17 +853,16 @@ with tab_ponte_web:
     if audit_corrente and risposta_incollata.strip() == audit_corrente.get("testo"):
         if audit_corrente["colore"] == "NERO" and audit_corrente["pct_ok"]:
             st.success(
-                "Certified BLACK Node (Strato D Verified): 100% of figures and percentages are strictly "
-                "grounded in the source context (Decimal ROUND_HALF_UP)."
+                "Numeric Check Passed (Node NERO): All figures and percentages match the source context (Decimal ROUND_HALF_UP)."
             )
-            if st.button("Optional: Save Certified BLACK Node Response to Volatile Session Memory"):
+            if st.button("Optional: Save Verified Response to Volatile Session Memory"):
                 titolo_audit = grounding_numerico.tronca_senza_spezzare_parola(
                     audit_corrente["problema"], 50
                 )
                 n_salvati_web = store_pgvector.incasella_e_salva(
                     "generale",
                     f"Verified Web Bridge Audit: {titolo_audit}",
-                    [("Certified BLACK Node", audit_corrente["testo"])],
+                    [("Verified Response", audit_corrente["testo"])],
                 )
                 st.toast(f"Saved {n_salvati_web} certified fragment(s) to volatile session memory!")
         else:

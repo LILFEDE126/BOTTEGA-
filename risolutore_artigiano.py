@@ -796,11 +796,11 @@ def risolvi_da_artigiano(
             "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer (4-6 sentences) "
             "that any person can easily read and understand, directly answering the user's question with the exact "
             "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "
-            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select ONLY ONE guiding principle from those retrieved, "
-            "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant, "
-            "and formulate ONE SINGLE causal hypothesis with its practical verification test. "
-            "CRITICAL NUMERIC RULE: Every single number or percentage you write MUST appear identically in FRAMMENTI RECUPERATI or PROBLEMA. "
-            "Do NOT write intermediate arithmetic steps or numbers that are not explicitly written in FRAMMENTI RECUPERATI or PROBLEMA.\n\n"
+            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select the single governing principle from those retrieved, "
+            "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant. "
+            "If field exclusions isolate a single root cause, formulate that causal hypothesis with its verification test; "
+            "if multiple non-falsified candidate causes remain, list all open candidate causes explicitly and specify the discriminant instrumental test. "
+            "VERIFIED ARITHMETIC RULE: Direct arithmetic derivations from retrieved numbers (e.g. sums, subtractions, multiplications, percentage applications like A * B or A + B%) are permitted provided that every calculation explicitly displays its formula and source operands. Hallucinated numbers ungrounded in context or arithmetic are strictly forbidden.\n\n"
             f"{blocco_lingua}",
             f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
             f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
@@ -895,7 +895,7 @@ def risolvi_da_artigiano(
         f"{soluzione.azione_correttiva_singola}"
     )
     contesto_totale = f"{problema}\n{contesto_rag}"
-    colore_nodo, cifre_errate = classifica_nodo_tricolore(testo_uscita, contesto_totale)
+    colore_nodo, cifre_errate = classifica_nodo_tricolore(testo_uscita, contesto_totale, domanda=problema)
 
     pct_uscita = estrai_percentuali_decimal(testo_uscita)
     pct_contesto = estrai_percentuali_decimal(contesto_totale)

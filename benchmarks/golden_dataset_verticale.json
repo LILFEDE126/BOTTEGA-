@@ -249,7 +249,7 @@
       "ipotesi_escluse": ["Omissione o errore di invio corrispettivo telematico giornaliero"],
       "cause_attese_aperte": [
         "Prelievo contante da parte dei soci non registrato",
-        "Errore di conteggio nel fondo cassa iniziale"
+        "Errore di conteggio o trascrizione nel fondo cassa iniziale"
       ],
       "test_discriminante_richiesto": "Verifica delle ricevute di prelievo soci versus riconciliazione analitica del fondo cassa iniziale",
       "comportamento_atteso": "NON_INVENTARE_CAUSA_UNICA",
@@ -288,7 +288,7 @@
       "domanda": "Il ventilatore emette forte rumore in funzionamento. Abbiamo montato una cinghia nuova e l'abbiamo tesa al valore nominale di 45 Hz col frequenzimetro.",
       "ipotesi_escluse": ["Tensione insufficiente della cinghia trapezoidale"],
       "cause_attese_aperte": [
-        "Usura e gioco radiale del cuscinetto dell'albero rotore",
+        "Usura e gioco radiale eccessivo del cuscinetto dell'albero rotore",
         "Disallineamento angolare delle pulegge di trasmissione"
       ],
       "test_discriminante_richiesto": "Rotazione manuale dell'albero a motore disconnesso per valutare rugosità del cuscinetto vs controllo allineamento pulegge con riga laser",
@@ -372,7 +372,7 @@
         },
         {
           "titolo": "Circolare_Agenzia_Entrate_Regime_Premiale_ISA_2024.pdf",
-          "testo": "I contribuenti con livello di affidabilità fiscale ISA pari ad almeno 8 beneficiano dell'esonero dall'apposizione del visto di conformità per compensazioni IVA fino a 50.000 euro annui."
+          "testo": "Circolare n. 12/E Agenzia delle Entrate: Regime Premiale ISA 2024. I contribuenti con livello di affidabilità fiscale ISA pari ad almeno 8 beneficiano dell'esonero e della soglia limite di compensazione senza visto di conformità per crediti IVA fino a 50.000 euro annui."
         }
       ],
       "domanda": "Qual è la soglia limite di compensazione senza visto di conformità per un'azienda con punteggio ISA pari a 8,5?",

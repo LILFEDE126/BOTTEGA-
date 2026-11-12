@@ -1,6 +1,6 @@
 # Bottega Leonardesca & THE Engine
 
-[![Pure Unit Tests](https://img.shields.io/badge/tests-26%20passed%20(0.8s)-brightgreen?style=flat-square&logo=pytest)](tests/test_bottega.py)
+[![Pure Unit Tests](https://img.shields.io/badge/tests-42%20passed-brightgreen?style=flat-square&logo=pytest)](tests/test_bottega.py)
 [![Architecture](https://img.shields.io/badge/THE%20Hierarchy-5%20Acyclic%20Rings%20(EWD196)-blue?style=flat-square)](config.py)
 [![Zero Frameworks](https://img.shields.io/badge/Dependencies-Zero%20LangChain%20%2F%20LlamaIndex-orange?style=flat-square)](requirements.txt)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
@@ -29,14 +29,14 @@ Every module at layer $L$ may import **exclusively** modules at layer $< L$. Bot
 | **Layer 0** *(Foundation)* | `config.py`<br>`logging_bottega.py`<br>`anatomia_ast.py` | Threshold invariant validation, immutable `MappingProxyType` hierarchy, multi-provider endpoints (Ollama, Gemini Free, Groq Free, OpenRouter Free), `prod` password guard, UTC ISO-8601 structured logging, pure AST parser. | Standard Library / `.env` only |
 | **Layer 1** *(Pure Math & Concurrency)* | `geometria_semaforo.py`<br>`grounding_numerico.py`<br>`ispezione_moduli.py`<br>`presidio_concorrenza.py` | $L_2$ normalization, cosine similarity, pure **Reciprocal Rank Fusion** ($K=60$, weights `1.0 / 1.0 / 1.3`), Guarded Semaphore (`EWD472`), exact `Decimal` rounding (`EWD145`), thousands (`14.400`) vs decimal (`14,4`) separation, **Tri-Color Write Barrier** (`EWD496A`), thread-safe Secretary with $P/V$ Semaphore (`EWD123`), `Holyness Counter` (`EWD113`) and **Banker's Algorithm** (`EWD116`). | **Layer 0** only *(Zero DB, Zero Network)* |
 | **Layer 2** *(I/O Connectors)* | `store_pgvector.py`<br>`client_ollama.py` | Transactional PostgreSQL + `pgvector` context manager with `BaseException` rollback, guaranteed `conn.close()` in `finally`, deterministic 768-dim local L2 embedding fallback; HTTP client with cross-lingual query translation (`EN/ES -> IT`), **Self-Stabilization** (`EWD426`), `HTTP 429` exponential backoff and strictly decreasing variant $t > 0$ (`EWD316`). | **Layers 0..1** |
-| **Layer 3** *(Domain Orchestration)* | `risolutore_artigiano.py`<br>`cascata_strutturata.py`<br>`seed_bottega.py` | **Closed-Loop Diagnostic Solver** ("Zero Clutter" + cascading external search: *Handbook $\rightarrow$ Gemini/OpenRouter AI Web Search $\rightarrow$ DuckDuckGo/Wikipedia JSON API* on `ROJO` + binary field falsification + Free Web Bridge), **3-Layer Code Review Cascade** (Leonardo $\rightarrow$ antirez $\rightarrow$ Dijkstra). | **Layers 0..2** |
+| **Layer 3** *(Domain Orchestration)* | `risolutore_artigiano.py`<br>`cascata_strutturata.py`<br>`seed_bottega.py` | **Closed-Loop Diagnostic Solver** ("Zero Clutter" + cascading external search: *Handbook $\rightarrow$ Gemini/OpenRouter AI Web Search $\rightarrow$ DuckDuckGo/Wikipedia JSON API* on `ROJO` + binary field falsification + Free Web Bridge), **3-Layer Code Review Cascade** (Strato L $\rightarrow$ Strato A $\rightarrow$ Strato D). | **Layers 0..2** |
 | **Layer 4** *(Presentation)* | `app.py` | Multilingual Streamlit Dashboard (`EN / ES / IT`) with Free Cloud API selector, local PostgreSQL document uploader, Graphviz DOT call graph, and Free Web Bridge for ChatGPT / DeepSeek / Gemini. | **Layers 0..3** |
 
 ---
 
 ## Quick Start & Verification
 
-### 1. Run the 26 Pure Unit Tests (Zero Network, Zero DB, Zero LLM)
+### 1. Run the 42 Pure Unit Tests (Zero Network, Zero DB, Zero LLM)
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate

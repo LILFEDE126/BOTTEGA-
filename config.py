@@ -10,10 +10,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-_PARTI_CHIAVE_CLOUD_DEFAULT = (
-    "QVEuQWI4Uk42SXM2SHA=",
-    "LXRwQUVybDFfejJpYjd2Z05lN2lhRmY5MFdDX3Q3cDlPNVZ5Q0hB",
-)
+_PARTI_CHIAVE_CLOUD_DEFAULT = ()
 
 MODELLI_FALLBACK_GEMINI = (
     "gemini-3.5-flash-lite",
