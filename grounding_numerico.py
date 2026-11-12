@@ -19,6 +19,10 @@ PATRON_MIGLIAIA = re.compile(r"^\d{1,3}(?:\.\d{3})+(?:,\d+)?$")
 PATRON_MIGLIAIA_EN_DEC = re.compile(r"^\d{1,3}(?:,\d{3})+\.\d+$")
 PATRON_MIGLIAIA_EN_INT = re.compile(r"^\d{1,3}(?:,\d{3})+$")
 PATRON_INTERI_PURI = re.compile(r"(?<![\d.,])\d+(?![\d%]|[.,]\d)")
+PATRON_INTERI_TECNICI = re.compile(
+    r"(?<![\d.,])\d+(?=\s*(?:kwh|kw|litri|l|bar|euro|eur|€|\$|km|giorni|ore|h|mesi|anni|min|minuti|sec|secondi|m|cm|mm|kg|g|hz|db|v|a|w|ohm)\b)",
+    re.IGNORECASE,
+)
 
 MAX_CARATTERI_PAGINA_DEFAULT: int = 2400
 LIMITE_PASSI_PAGINAZIONE: int = 10000
@@ -99,10 +103,57 @@ def verifica_conservazione_percentuali_decimal(prosa_narrata: str, fonte_ufficia
     return bool(ufficiali & estrai_percentuali_decimal(prosa_narrata))
 
 
+def _calcola_derivati_aritmetici_ammissibili(
+    dec_ctx: Set[Decimal],
+    pct_ctx: Set[Decimal],
+) -> Set[Decimal]:
+    """Generates exact Decimal arithmetic derivations (A*B, A+B, A-B, A*(P/100), A+A*(P/100), A-A*(P/100))
+    strictly formed by positive operands certified in the context to prevent false-negative Node GRIGIO on valid calculations."""
+    derivati: Set[Decimal] = set()
+    tutti_operandi = [x for x in dec_ctx if Decimal("0") < x < Decimal("10000000")]
+
+    for a in tutti_operandi:
+        for p in pct_ctx:
+            if p <= Decimal("0"):
+                continue
+            quota_pct = (a * p) / Decimal("100")
+            derivati.add(quota_pct)
+            derivati.add(arrotonda_esatto_el_x8(quota_pct, 2))
+            somma_pct = a + quota_pct
+            derivati.add(somma_pct)
+            derivati.add(arrotonda_esatto_el_x8(somma_pct, 2))
+            if a > quota_pct:
+                diff_pct = a - quota_pct
+                derivati.add(diff_pct)
+                derivati.add(arrotonda_esatto_el_x8(diff_pct, 2))
+
+    for i, a in enumerate(tutti_operandi):
+        for b in tutti_operandi[i:]:
+            somma = a + b
+            derivati.add(somma)
+            derivati.add(arrotonda_esatto_el_x8(somma, 2))
+            prodotto = a * b
+            derivati.add(prodotto)
+            derivati.add(arrotonda_esatto_el_x8(prodotto, 2))
+            if a > b:
+                diff = a - b
+                derivati.add(diff)
+                derivati.add(arrotonda_esatto_el_x8(diff, 2))
+            elif b > a:
+                diff = b - a
+                derivati.add(diff)
+                derivati.add(arrotonda_esatto_el_x8(diff, 2))
+
+    return derivati
+
+
 def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
     """Returns the sorted list of figures cited in the response but absent from the context,
-    comparing Decimal values for percentages, thousands, and technical decimals without confusing thousands."""
+    comparing Decimal values for percentages, thousands, technical decimals, and exact arithmetic derivations."""
     raw_risp = PATRON_NUM.findall(risposta)
+    for match_int in PATRON_INTERI_TECNICI.findall(risposta):
+        if match_int not in raw_risp:
+            raw_risp.append(match_int)
     raw_ctx = PATRON_NUM.findall(contesto)
 
     migliaia_ctx: Set[str] = set()
@@ -125,6 +176,8 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
         else:
             altri_ctx.add(norm)
 
+    derivati_validi = _calcola_derivati_aritmetici_ammissibili(dec_ctx, pct_ctx)
+
     orfane: List[str] = []
     for token_match in raw_risp:
         pulito = re.sub(r"[\s\xa0]", "", token_match)
@@ -145,17 +198,102 @@ def verifica_grounding_numerico(risposta: str, contesto: str) -> List[str]:
             candidati_dec = _converti_in_decimal_esatti(pulito)
             if candidati_dec and (candidati_dec & dec_ctx):
                 continue
+            if candidati_dec and (candidati_dec & derivati_validi):
+                continue
         orfane.append(cifra_normalizzata)
     return sorted(set(orfane))
 
 
-def classifica_nodo_tricolore(risposta: str, contesto: str) -> Tuple[str, List[str]]:
-    """EWD496A (Tri-Color Marking & Write Barrier): BIANCO (empty), GRIGIO (hallucinated), NERO (grounded)."""
+def verifica_grounding_relazionale(
+    risposta: str,
+    contesto: str,
+    soggetto_target: str = "",
+    soggetto_antagonista: str = "",
+    ampiezza_finestra_caratteri: int = 140,
+) -> List[str]:
+    """Detects relational attribution errors where a number from the context is erroneously assigned
+    to a competing entity or model present in the same document (e.g. Model Alpha vs Model Beta).
+    Returns list of mismatching figures."""
+    if not soggetto_target or not soggetto_antagonista:
+        return []
+    target_norm = soggetto_target.strip().lower()
+    antagonista_norm = soggetto_antagonista.strip().lower()
+    if not target_norm or not antagonista_norm:
+        return []
+    contesto_lower = contesto.lower()
+    if target_norm not in contesto_lower or antagonista_norm not in contesto_lower:
+        return []
+
+    cifre_risposta = PATRON_NUM.findall(risposta)
+    for match_int in PATRON_INTERI_TECNICI.findall(risposta):
+        if match_int not in cifre_risposta:
+            cifre_risposta.append(match_int)
+    if not cifre_risposta:
+        return []
+
+    cifre_scambiate: List[str] = []
+
+    for cifra_token in cifre_risposta:
+        norm_cifra = _normalizza_separatore_decimale(cifra_token)
+        pulito_cifra = re.sub(r"[\s\xa0]", "", cifra_token)
+        candidati_cifra = _converti_in_decimal_esatti(pulito_cifra)
+
+        occorrenze: List[int] = [
+            m.start() for m in re.finditer(re.escape(cifra_token), contesto, re.IGNORECASE)
+        ]
+        if not occorrenze:
+            for cand in candidati_cifra:
+                cand_str = str(cand)
+                occorrenze.extend(
+                    [m.start() for m in re.finditer(re.escape(cand_str), contesto, re.IGNORECASE)]
+                )
+
+        if not occorrenze:
+            continue
+
+        presenze_target = 0
+        presenze_antagonista = 0
+        for pos in occorrenze:
+            inizio_frase = max(
+                contesto_lower.rfind(".", 0, pos),
+                contesto_lower.rfind("\n", 0, pos),
+                contesto_lower.rfind(";", 0, pos),
+            )
+            inizio = 0 if inizio_frase == -1 else inizio_frase + 1
+            fine_frase = -1
+            for sep in (".", "\n", ";"):
+                idx_sep = contesto_lower.find(sep, pos)
+                if idx_sep != -1 and (fine_frase == -1 or idx_sep < fine_frase):
+                    fine_frase = idx_sep
+            fine = len(contesto_lower) if fine_frase == -1 else fine_frase
+            finestra = contesto_lower[inizio:fine]
+            if target_norm in finestra:
+                presenze_target += 1
+            if antagonista_norm in finestra:
+                presenze_antagonista += 1
+
+        if presenze_antagonista > 0 and presenze_target == 0:
+            cifre_scambiate.append(norm_cifra)
+
+    return sorted(set(cifre_scambiate))
+
+
+def classifica_nodo_tricolore(
+    risposta: str,
+    contesto: str,
+    soggetto_target: str = "",
+    soggetto_antagonista: str = "",
+) -> Tuple[str, List[str]]:
+    """EWD496A (Tri-Color Marking & Write Barrier): BIANCO (empty), GRIGIO (hallucinated or misattributed), NERO (grounded)."""
     if not risposta or not risposta.strip():
         return ("BIANCO", [])
     cifre_orfane = verifica_grounding_numerico(risposta, contesto)
-    if cifre_orfane:
-        return ("GRIGIO", cifre_orfane)
+    cifre_scambiate = verifica_grounding_relazionale(
+        risposta, contesto, soggetto_target=soggetto_target, soggetto_antagonista=soggetto_antagonista
+    )
+    totale_errori = sorted(set(cifre_orfane + cifre_scambiate))
+    if totale_errori:
+        return ("GRIGIO", totale_errori)
     return ("NERO", [])
 
 

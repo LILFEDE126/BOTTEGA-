@@ -1549,3 +1549,18 @@ def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_sto
     assert len(risultati_wiki) == 1
     assert "S&P 500" in risultati_wiki[0][0]
     assert "Oriana Fallaci" not in [item[0] for item in risultati_wiki]
+
+
+def test_benchmark_verticale_25_casi_b2b_qualita_e_sicurezza():
+    from benchmarks.valuta_benchmark_verticale import esegui_benchmark_completo
+    radice = _trova_radice_progetto()
+    file_json = radice / "benchmarks" / "golden_dataset_verticale.json"
+    report = esegui_benchmark_completo(file_json)
+    assert report["casi_totali"] == 25
+    assert report["casi_superati"] == 25
+    assert report["accuratezza_complessiva_pct"] == 100.0
+    assert report["metriche_chiave_b2b"]["precisione_relazionale_write_barrier_pct"] == 100.0
+    assert report["metriche_chiave_b2b"]["accuratezza_calcoli_derivati_pct"] == 100.0
+    assert report["metriche_chiave_b2b"]["diagnostica_cause_multiple_pct"] == 100.0
+    assert report["metriche_chiave_b2b"]["gestione_revisioni_documentali_pct"] == 100.0
+    assert report["metriche_chiave_b2b"]["sicurezza_owasp_rag_injection_pct"] == 100.0
