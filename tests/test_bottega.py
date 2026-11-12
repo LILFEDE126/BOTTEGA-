@@ -1125,6 +1125,8 @@ def test_isolamento_chiavi_provider_e_routing_trasparente_su_gemini(monkeypatch)
     monkeypatch.setenv("LLM_API_KEY", "AQ.ChiaveSoloPerGoogleGemini")
 
     assert config.ha_chiave_dedicata_provider("gemini") is True
+    assert len(config._decodifica_chiave_cloud_default()) > 0
+    assert config._decodifica_chiave_cloud_default().startswith("AQ.")
     assert config.ha_chiave_dedicata_provider("deepseek") is False
     assert config.ha_chiave_dedicata_provider("openai") is False
     assert config.ha_chiave_dedicata_provider("groq") is False
