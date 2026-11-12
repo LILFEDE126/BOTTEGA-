@@ -7,6 +7,7 @@ from decimal import Decimal
 import io
 import math
 from pathlib import Path
+import tempfile
 import tokenize
 from types import MappingProxyType
 from pydantic import BaseModel
@@ -1577,6 +1578,10 @@ def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
     assert store_pgvector._e_slide_rumore_o_indice("/ AGENDA DEL GIORNO 2\nOggi dalle 9 alle 18") is True
     assert store_pgvector._e_slide_rumore_o_indice("APPENDICE\nSOLO PER PREPARARE · NON SI PROIETTA") is True
     assert store_pgvector._e_slide_rumore_o_indice("Sette regole per chi legge\n01 Nomi che dicono cosa contengono") is False
+    assert store_pgvector._e_slide_rumore_o_indice("IL METODO · A OGNI TAPPA\nscrivete al posto di pass") is True
+    assert store_pgvector._e_slide_rumore_o_indice("LE SQUADRE · TAPPA PER TAPPA\nChi fa cosa nel team") is True
+    assert store_pgvector._e_slide_rumore_o_indice("LE REGOLE DI OGGI\n1. Niente AI: Copilot spento\n2. Ognuno tocca solo il suo file") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Binario 9¾: chi sale?\nTutti a bordo per la prima tappa") is True
 
     match_interi = grounding_numerico.PATRON_INTERI_TECNICI.findall("da 1 a 5")
     assert "1" not in match_interi
@@ -1604,6 +1609,16 @@ def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
     assert "CODICE PULITO" in testi_recuperati or "Sette regole" in testi_recuperati
     assert "Nomi che dicono" in testi_recuperati
 
+    rag_metodo = store_pgvector.recupera_con_semaforo(
+        "mi dici come e quali regole sono fondamentali per avere metodo nella scrittura python",
+        dominio="tecnico",
+        top_k=3,
+    )
+    assert rag_metodo["semaforo"] == "VERDE"
+    testo_primo = rag_metodo["frammenti"][0]["testo"]
+    assert "Codice pulito" in testo_primo or "CODICE PULITO" in testo_primo or "Regola 1" in testo_primo
+    assert "LE REGOLE DI OGGI" not in testo_primo
+
     esito_finto = {
         "semaforo": "VERDE",
         "s_max": 0.88,
@@ -1622,3 +1637,42 @@ def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
     assert "## 📚 Voce Wiki:" in wiki_entry
     assert "### Sintesi Consolidata in Markdown" in wiki_entry
     assert "### Fonti Documentali Citate" in wiki_entry
+
+    with tempfile.TemporaryDirectory() as cartella_tmp:
+        percorso_wiki_tmp = Path(cartella_tmp) / "bottega_llm_wiki.md"
+        path_salvato = risolutore_artigiano.salva_voce_wiki_su_disco(wiki_entry, percorso_wiki=percorso_wiki_tmp)
+        assert path_salvato.exists()
+        assert percorso_wiki_tmp.exists()
+
+        voci_lette = risolutore_artigiano.carica_voci_wiki_da_disco(percorso_wiki=percorso_wiki_tmp)
+        assert len(voci_lette) == 1
+        assert "come si imposta il codice pulito in python?" in voci_lette[0]
+
+        risolutore_artigiano.salva_voce_wiki_su_disco(wiki_entry, percorso_wiki=percorso_wiki_tmp)
+        voci_lette_doppie = risolutore_artigiano.carica_voci_wiki_da_disco(percorso_wiki=percorso_wiki_tmp)
+        assert len(voci_lette_doppie) == 1
+
+        testo_esportato = percorso_wiki_tmp.read_text(encoding="utf-8")
+        voci_estratte = risolutore_artigiano.estrai_voci_wiki_da_testo_markdown(testo_esportato)
+        assert len(voci_estratte) == 1
+        assert "come si imposta il codice pulito in python?" in voci_estratte[0]
+
+        voci_estratte_doppie = risolutore_artigiano.estrai_voci_wiki_da_testo_markdown(testo_esportato + "\n\n" + wiki_entry)
+        assert len(voci_estratte_doppie) == 1
+
+        risolutore_artigiano.svuota_wiki_su_disco(percorso_wiki=percorso_wiki_tmp)
+        voci_svuotate = risolutore_artigiano.carica_voci_wiki_da_disco(percorso_wiki=percorso_wiki_tmp)
+        assert len(voci_svuotate) == 0
+        assert "# Bottega — Gen III Personal LLM Wiki" in percorso_wiki_tmp.read_text(encoding="utf-8")
+
+    def llm_offline_finto(sys_p, usr_p, schema):
+        raise RuntimeError("Google AI Studio connection failed (400 API_KEY_INVALID)")
+
+    esito_offline = risolutore_artigiano.risolvi_da_artigiano(
+        "quali sono le regole fondamentali per il codice pulito?",
+        dominio="tecnico",
+        llm_fn=llm_offline_finto,
+    )
+    assert esito_offline["semaforo"] == "VERDE"
+    assert esito_offline["sintesi_deterministica_attiva"] is True
+    assert "Nomi che dicono" in esito_offline["risposta_discorsiva"]

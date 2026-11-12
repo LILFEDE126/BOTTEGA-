@@ -158,6 +158,11 @@ GLOSSARIO_MULTILINGUA_IT = MappingProxyType({
     "reembolsa": "rimborsa",
     "cuota": "quota",
     "obligaciones": "obbligazionario",
+    "metodo": "metodo codice pulito regole",
+    "scrittura": "scrittura codice pulito leggibile",
+    "impostare": "impostare codice pulito regole",
+    "imposta": "imposta codice pulito regole",
+    "fondamentali": "fondamentali sette regole codice pulito",
 })
 
 PAROLE_SPIA_LINGUA = MappingProxyType({

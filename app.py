@@ -42,6 +42,7 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(store_pgvector, "normalizza_spazi_testo_pdf")
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
         or not hasattr(risolutore_artigiano, "compila_voce_wiki_markdown")
+        or not hasattr(risolutore_artigiano, "carica_voci_wiki_da_disco")
         or not hasattr(config, "ha_chiave_dedicata_provider")
     )
     if necessita_reload:
@@ -87,6 +88,9 @@ def _allinea_moduli_in_memoria() -> None:
 
 
 _allinea_moduli_in_memoria()
+
+if "llm_wiki_voci" not in st.session_state:
+    st.session_state["llm_wiki_voci"] = risolutore_artigiano.carica_voci_wiki_da_disco()
 
 PROMPT_TASCHINO_UNIVERSALE = (
     'Always act with the "Craftsman Method (Strato L + Strato A + Strato D)":\n'
@@ -308,6 +312,18 @@ def _elabora_file_caricati(
 
         raw_bytes = singolo_file.getvalue()
         dim_file = len(raw_bytes)
+        testo_file_wiki = raw_bytes.decode("utf-8", errors="ignore")
+        if "## 📚 Voce Wiki:" in testo_file_wiki:
+            voci_ripristinate = risolutore_artigiano.estrai_voci_wiki_da_testo_markdown(testo_file_wiki)
+            if voci_ripristinate:
+                if "llm_wiki_voci" not in st.session_state:
+                    st.session_state["llm_wiki_voci"] = risolutore_artigiano.carica_voci_wiki_da_disco()
+                voci_wiki_stato = st.session_state["llm_wiki_voci"]
+                for voce_r in voci_ripristinate:
+                    if voce_r not in voci_wiki_stato:
+                        voci_wiki_stato.append(voce_r)
+                    risolutore_artigiano.salva_voce_wiki_su_disco(voce_r)
+                st.toast(f"Gen III Wiki: {len(voci_ripristinate)} voci ripristinate con successo!")
         if singolo_file.name not in archivio_sess and len(archivio_sess) >= max_documenti:
             st.warning(
                 f"Archive already holds {max_documenti}/{max_documenti} documents. "
@@ -385,6 +401,18 @@ def _salva_testo_incollato_in_archivio(
     if not testo_pulito:
         st.warning("Please paste non-empty document text.")
         return False
+
+    if "## 📚 Voce Wiki:" in testo_pulito:
+        voci_ripristinate = risolutore_artigiano.estrai_voci_wiki_da_testo_markdown(testo_pulito)
+        if voci_ripristinate:
+            if "llm_wiki_voci" not in st.session_state:
+                st.session_state["llm_wiki_voci"] = risolutore_artigiano.carica_voci_wiki_da_disco()
+            voci_wiki_stato = st.session_state["llm_wiki_voci"]
+            for voce_r in voci_ripristinate:
+                if voce_r not in voci_wiki_stato:
+                    voci_wiki_stato.append(voce_r)
+                risolutore_artigiano.salva_voce_wiki_su_disco(voce_r)
+            st.toast(f"Gen III Wiki: {len(voci_ripristinate)} voci ripristinate con successo!")
 
     raw_bytes = testo_pulito.encode("utf-8")
     dim_file = len(raw_bytes)
@@ -754,10 +782,16 @@ with tab_artigiano:
                 voci_wiki = st.session_state.setdefault("llm_wiki_voci", [])
                 if voce_wiki not in voci_wiki:
                     voci_wiki.append(voce_wiki)
+                risolutore_artigiano.salva_voce_wiki_su_disco(voce_wiki)
                 m1, m2, m3 = st.columns(3)
                 m1.metric("RAG Semaphore", f"{esito['semaforo']} (s_max={esito['s_max']})")
                 m2.metric("Mode", esito["modalita"])
                 m3.metric("Write Barrier (Strato D)", f"Node {esito['colore_nodo_ewd496a']}")
+                if esito.get("sintesi_deterministica_attiva"):
+                    st.caption(
+                        "ℹ️ Modalità Sintesi Deterministica Locale attiva "
+                        "(Per attivare la generazione neurale Gemini, inserisci una chiave Google AI Studio 'AIzaSy...' nella sidebar)."
+                    )
 
                 testo_leggibile = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(
                     esito["risultato"],
@@ -785,13 +819,20 @@ with tab_artigiano:
         testo_wiki_completo = "# Bottega — Gen III Personal LLM Wiki\n\n" + "\n\n".join(voci_accumulate)
         with st.expander(f"📚 Gen III LLM Wiki — Cumulative Markdown Knowledge Base ({len(voci_accumulate)} entries)"):
             st.markdown(testo_wiki_completo)
-            st.download_button(
-                "💾 Download Personal LLM Wiki (.md)",
-                data=testo_wiki_completo.encode("utf-8"),
-                file_name="bottega_llm_wiki.md",
-                mime="text/markdown",
-                key="dl_wiki_md",
-            )
+            col_dl, col_clr = st.columns([2, 1])
+            with col_dl:
+                st.download_button(
+                    "💾 Download Personal LLM Wiki (.md)",
+                    data=testo_wiki_completo.encode("utf-8"),
+                    file_name="bottega_llm_wiki.md",
+                    mime="text/markdown",
+                    key="dl_wiki_md",
+                )
+            with col_clr:
+                if st.button("🗑️ Clear Wiki", key="clear_wiki_btn"):
+                    risolutore_artigiano.svuota_wiki_su_disco()
+                    st.session_state["llm_wiki_voci"] = []
+                    st.rerun()
 
 with tab_ponte_web:
     st.subheader("Zero-API Mode: Generate a Grounded Prompt & Audit External AI Responses")

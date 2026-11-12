@@ -4,6 +4,7 @@ Supports any input language (EN, ES, IT, etc.) with automatic search translation
 natural-language final response synthesis and deterministic RAG fallback."""
 
 import re
+from pathlib import Path
 from types import MappingProxyType
 from typing import Callable, List, Literal, Optional, Set, Tuple
 import psycopg2
@@ -30,6 +31,10 @@ from grounding_numerico import (
 from presidio_concorrenza import SEGRETARIO_THE
 from store_pgvector import _ARCHIVIO_MEMORIA_RAM, incasella_e_salva, recupera_con_semaforo
 from client_ollama import chiama_ollama_json, rileva_lingua_testo, traduci_query_per_ricerca
+
+
+PERCORSO_WIKI_DEFAULT = Path(__file__).resolve().parent / "wiki" / "bottega_llm_wiki.md"
+INTESTAZIONE_WIKI_DEFAULT = "# Bottega — Gen III Personal LLM Wiki\n\n"
 
 
 class PianoRicercaArtigiano(BaseModel):
@@ -309,6 +314,74 @@ def _ripulisci_prefisso_tecnico_frammento(testo: str) -> str:
     return testo_pulito.strip()
 
 
+def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict]) -> str:
+    """Synthesizes key operational points, rules, headings, and numerical constraints
+    from retrieved RAG fragments into clean, structured Markdown, eliminating raw repetition and noise."""
+    if not frammenti:
+        return problema.strip()
+
+    righe_sintesi: List[str] = []
+    viste: Set[str] = set()
+    sezioni_trovate: List[str] = []
+
+    for frammento in frammenti[:4]:
+        testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
+        if not testo:
+            continue
+
+        for riga in testo.splitlines():
+            riga_pulita = riga.strip()
+            if not riga_pulita:
+                continue
+
+            riga_lower = riga_pulita.lower()
+            if any(riga_lower.startswith(pref) for pref in ("cp ", "touch ", "rm ", "cd ", "mkdir ", "chmod ", "git ")):
+                continue
+            if riga_pulita in ("pass", "...", "return None"):
+                continue
+
+            chiave_normalizzata = " ".join(riga_pulita.lower().split())
+            if chiave_normalizzata in viste:
+                continue
+            viste.add(chiave_normalizzata)
+
+            if riga_pulita.startswith("#"):
+                sezioni_trovate.append(riga_pulita)
+            elif len(riga_pulita) <= 80 and re.match(
+                r"^(?:\[?(?:page|pagina|slide|sezione|par(?:agrafo)?)\s*\d+\]?|codice pulito|regola\s*\d+|linee guida)",
+                riga_lower,
+            ):
+                sezioni_trovate.append(f"### {riga_pulita.lstrip('#').strip()}")
+            elif re.match(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", riga_pulita):
+                contenuto = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", riga_pulita).strip()
+                if len(contenuto) < 80:
+                    righe_sintesi.append(f"- **{contenuto}**")
+                else:
+                    righe_sintesi.append(f"- {contenuto}")
+            elif re.match(
+                r"^(?:prima|dopo|regola\s*\d+|fase\s*\d+|passo\s*\d+|warning|nota|attenzione)\s*[:\-]",
+                riga_lower,
+            ):
+                righe_sintesi.append(f"- **{riga_pulita}**")
+            elif ":" in riga_pulita and len(riga_pulita.split(":", 1)[0]) <= 35:
+                parti = riga_pulita.split(":", 1)
+                righe_sintesi.append(f"- **{parti[0].strip()}:** {parti[1].strip()}")
+            else:
+                righe_sintesi.append(f"- {riga_pulita}")
+
+    parti_output: List[str] = []
+    if sezioni_trovate:
+        parti_output.append("\n\n".join(sezioni_trovate[:3]))
+
+    if righe_sintesi:
+        parti_output.append("### Prescrizioni e Regole Operative Certificate\n" + "\n".join(righe_sintesi))
+    elif not sezioni_trovate:
+        testi_base = [_ripulisci_prefisso_tecnico_frammento(f.get("testo", "")) for f in frammenti[:3]]
+        return "\n\n---\n\n".join(t for t in testi_base if t) or problema.strip()
+
+    return "\n\n".join(parti_output)
+
+
 def _costruisci_soluzione_deterministica(
     problema: str,
     frammenti: List[dict],
@@ -317,14 +390,11 @@ def _costruisci_soluzione_deterministica(
 ) -> SoluzioneArtigiano:
     """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
     when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
-    pertinenti_raw = frammenti[:3] if frammenti else []
+    pertinenti_raw = frammenti[:4] if frammenti else []
     pertinenti_testi = [_ripulisci_prefisso_tecnico_frammento(f["testo"]) for f in pertinenti_raw]
     pertinenti_testi = [t for t in pertinenti_testi if t]
 
-    if pertinenti_testi:
-        risposta_finale = "\n\n---\n\n".join(pertinenti_testi)
-    else:
-        risposta_finale = problema.strip()
+    risposta_finale = _sintetizza_blocchi_in_markdown_pulito(problema, frammenti)
 
     primo_testo = pertinenti_testi[0] if pertinenti_testi else problema.strip()
     principale_breve = _sintetizza_etichetta_frammento(primo_testo, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
@@ -549,6 +619,7 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
             "risposta_discorsiva": testo_erogato,
             "frammenti_usati": [],
             "cifre_non_ancorate": [],
+            "sintesi_deterministica_attiva": False,
         }
     msg_vuoto = {
         "it": "Nessuna continuazione in sospeso. Tutte le informazioni sono state erogate oppure inserisci una nuova domanda.",
@@ -568,6 +639,7 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
         "risposta_discorsiva": msg_vuoto,
         "frammenti_usati": [],
         "cifre_non_ancorate": [],
+        "sintesi_deterministica_attiva": False,
     }
 
 
@@ -586,6 +658,7 @@ def _esegui_fase_rojo_con_ricerca(
     rag = dict(rag_iniziale)
     semaforo = rag["semaforo"]
     ricerca_esterna_eseguita = False
+    sintesi_deterministica_attiva = False
 
     try:
         piano: PianoRicercaArtigiano = llm_fn(
@@ -668,6 +741,7 @@ def _esegui_fase_rojo_con_ricerca(
             ),
             "frammenti_usati": [],
             "cifre_non_ancorate": [],
+            "sintesi_deterministica_attiva": False,
         }
         return rag, semaforo, ricerca_esterna_eseguita, risultato_stop
 
@@ -775,6 +849,7 @@ def risolvi_da_artigiano(
 
     semaforo = rag["semaforo"]
     ricerca_esterna_eseguita = False
+    sintesi_deterministica_attiva = False
 
     if semaforo == "ROJO":
         rag, semaforo, ricerca_esterna_eseguita, risultato_stop = _esegui_fase_rojo_con_ricerca(
@@ -838,6 +913,7 @@ def risolvi_da_artigiano(
         soluzione = _costruisci_soluzione_deterministica(
             problema, rag["frammenti"], escluse_pulite, lingua=lingua_rilevata
         )
+        sintesi_deterministica_attiva = True
 
     if not ricerca_esterna_eseguita and _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione):
         if cercatore_esterno_fn is not None:
@@ -872,10 +948,12 @@ def risolvi_da_artigiano(
                         f"{blocco_lingua}",
                         SoluzioneArtigiano,
                     )
+                    sintesi_deterministica_attiva = False
                 except (RuntimeError, requests.exceptions.RequestException):
                     soluzione = _costruisci_soluzione_deterministica(
                         problema, rag["frammenti"], escluse_pulite, lingua=lingua_rilevata
                     )
+                    sintesi_deterministica_attiva = True
 
     if _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione):
         piano_stop = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
@@ -895,6 +973,7 @@ def risolvi_da_artigiano(
             ),
             "frammenti_usati": [],
             "cifre_non_ancorate": [],
+            "sintesi_deterministica_attiva": False,
         }
 
     tag_fals_uscita = _ETICHETTE_FALSIFICATA.get(lingua_rilevata, _ETICHETTE_FALSIFICATA["it"])
@@ -962,6 +1041,7 @@ def risolvi_da_artigiano(
         "risposta_discorsiva": risposta_discorsiva_piena,
         "frammenti_usati": [framm.get("testo", "") for framm in rag.get("frammenti", [])],
         "cifre_non_ancorate": cifre_errate,
+        "sintesi_deterministica_attiva": sintesi_deterministica_attiva,
     }
 
 
@@ -998,3 +1078,89 @@ def compila_voce_wiki_markdown(problema: str, esito: dict) -> str:
         f"{fonti_md}\n\n"
         f"---\n"
     )
+
+
+def salva_voce_wiki_su_disco(voce_md: str, percorso_wiki: Optional[Path] = None) -> Path:
+    """Appends a new Gen III Wiki card to the persistent Markdown file on disk,
+    initializing the directory and file if not present and preventing duplicate entries."""
+    target = Path(percorso_wiki) if percorso_wiki is not None else PERCORSO_WIKI_DEFAULT
+    target.parent.mkdir(parents=True, exist_ok=True)
+    testo_esistente = ""
+    if target.exists():
+        try:
+            testo_esistente = target.read_text(encoding="utf-8")
+        except OSError as err:
+            log.warning("Impossibile leggere file wiki su disco (%s): %s", target, err)
+            testo_esistente = ""
+    else:
+        testo_esistente = INTESTAZIONE_WIKI_DEFAULT
+
+    voce_pulita = voce_md.strip()
+    if not voce_pulita:
+        if not target.exists():
+            target.write_text(INTESTAZIONE_WIKI_DEFAULT, encoding="utf-8")
+        return target
+
+    prima_riga = voce_pulita.splitlines()[0].strip()
+    if prima_riga and prima_riga in testo_esistente:
+        return target
+
+    if not testo_esistente.endswith("\n\n"):
+        testo_esistente = testo_esistente.rstrip() + "\n\n"
+
+    nuovo_contenuto = testo_esistente + voce_pulita + "\n\n"
+    target.write_text(nuovo_contenuto, encoding="utf-8")
+    return target
+
+
+def carica_voci_wiki_da_disco(percorso_wiki: Optional[Path] = None) -> List[str]:
+    """Reads and parses all Gen III Wiki cards stored in the persistent Markdown file on disk."""
+    target = Path(percorso_wiki) if percorso_wiki is not None else PERCORSO_WIKI_DEFAULT
+    if not target.exists():
+        return []
+    try:
+        contenuto = target.read_text(encoding="utf-8")
+        return estrai_voci_wiki_da_testo_markdown(contenuto)
+    except OSError as err:
+        log.warning("Impossibile caricare voci wiki da disco (%s): %s", target, err)
+        return []
+
+
+def estrai_voci_wiki_da_testo_markdown(
+    testo_md: str, percorso_wiki_salvataggio: Optional[Path] = None
+) -> List[str]:
+    """Pure parser: extracts deduplicated Gen III Wiki cards from Markdown text
+    (e.g. downloaded bottega_llm_wiki.md) splitting on '## 📚 Voce Wiki:'."""
+    if not testo_md or "## 📚 Voce Wiki:" not in testo_md:
+        return []
+
+    blocchi = re.split(r"(?=## 📚 Voce Wiki:)", testo_md)
+    voci: List[str] = []
+    viste_domande: Set[str] = set()
+
+    for blocco in blocchi:
+        blocco_pulito = blocco.strip()
+        if not blocco_pulito.startswith("## 📚 Voce Wiki:"):
+            continue
+        prima_riga = blocco_pulito.splitlines()[0].strip()
+        if prima_riga in viste_domande:
+            continue
+        viste_domande.add(prima_riga)
+        if not blocco_pulito.endswith("---"):
+            blocco_pulito = f"{blocco_pulito}\n\n---"
+        card_finale = f"{blocco_pulito}\n"
+        voci.append(card_finale)
+        if percorso_wiki_salvataggio is not None:
+            salva_voce_wiki_su_disco(card_finale, percorso_wiki=percorso_wiki_salvataggio)
+
+    return voci
+
+
+def svuota_wiki_su_disco(percorso_wiki: Optional[Path] = None) -> None:
+    """Resets the persistent Gen III Wiki Markdown file to its empty initial header."""
+    target = Path(percorso_wiki) if percorso_wiki is not None else PERCORSO_WIKI_DEFAULT
+    target.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target.write_text(INTESTAZIONE_WIKI_DEFAULT, encoding="utf-8")
+    except OSError as err:
+        log.warning("Impossibile svuotare wiki su disco (%s): %s", target, err)
