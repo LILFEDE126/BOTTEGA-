@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.10.v9"
+_VERSIONE_MODULI_THE = "2026.11.13.v11"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -41,6 +41,7 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(store_pgvector, "conta_frammenti_archivio_ram")
         or not hasattr(store_pgvector, "normalizza_spazi_testo_pdf")
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
+        or not hasattr(risolutore_artigiano, "compila_voce_wiki_markdown")
         or not hasattr(config, "ha_chiave_dedicata_provider")
     )
     if necessita_reload:
@@ -747,6 +748,12 @@ with tab_artigiano:
                         ipotesi_gia_escluse=lista_escluse,
                         llm_fn=llm_selezionato_fn,
                     )
+                st.session_state["ultimo_esito_artigiano"] = esito
+                st.session_state["ultima_domanda_artigiano"] = testo_input_effettivo
+                voce_wiki = risolutore_artigiano.compila_voce_wiki_markdown(testo_input_effettivo, esito)
+                voci_wiki = st.session_state.setdefault("llm_wiki_voci", [])
+                if voce_wiki not in voci_wiki:
+                    voci_wiki.append(voce_wiki)
                 m1, m2, m3 = st.columns(3)
                 m1.metric("RAG Semaphore", f"{esito['semaforo']} (s_max={esito['s_max']})")
                 m2.metric("Mode", esito["modalita"])
@@ -772,6 +779,19 @@ with tab_artigiano:
             except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                 logging_bottega.log_exception("Errore in risolvi_da_artigiano UI", "APP_ART_001", err)
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
+
+    voci_accumulate = st.session_state.get("llm_wiki_voci", [])
+    if voci_accumulate:
+        testo_wiki_completo = "# Bottega — Gen III Personal LLM Wiki\n\n" + "\n\n".join(voci_accumulate)
+        with st.expander(f"📚 Gen III LLM Wiki — Cumulative Markdown Knowledge Base ({len(voci_accumulate)} entries)"):
+            st.markdown(testo_wiki_completo)
+            st.download_button(
+                "💾 Download Personal LLM Wiki (.md)",
+                data=testo_wiki_completo.encode("utf-8"),
+                file_name="bottega_llm_wiki.md",
+                mime="text/markdown",
+                key="dl_wiki_md",
+            )
 
 with tab_ponte_web:
     st.subheader("Zero-API Mode: Generate a Grounded Prompt & Audit External AI Responses")

@@ -963,3 +963,38 @@ def risolvi_da_artigiano(
         "frammenti_usati": [framm.get("testo", "") for framm in rag.get("frammenti", [])],
         "cifre_non_ancorate": cifre_errate,
     }
+
+
+def compila_voce_wiki_markdown(problema: str, esito: dict) -> str:
+    """GEN III LLM Wiki Compiler: compiles a verified diagnostic/documentary answer into a persistent,
+    cumulative Markdown Knowledge Base entry with source citations and Strato D grounding status."""
+    domanda_pulita = " ".join(problema.strip().split())
+    risultato = esito.get("risultato") or {}
+    sintesi = (esito.get("risposta_discorsiva") or "").strip()
+    principio = risultato.get("principio_guida_unico", "Fonte documentale verificata")
+    azione = risultato.get("azione_correttiva_singola", "")
+    verifica = risultato.get("esperimento_di_verifica_pratica", "")
+    semaforo = esito.get("semaforo", "VERDE")
+    s_max = esito.get("s_max", 0.0)
+    nodo = esito.get("colore_nodo_ewd496a", "NERO")
+    frammenti = esito.get("frammenti_usati") or []
+
+    fonti_md = "\n".join(
+        f"- `Fonte {idx}`: {_sintetizza_etichetta_frammento(f, max_len=140)}"
+        for idx, f in enumerate(frammenti[:4], start=1)
+    ) or "- Nessun frammento esterno registrato."
+
+    return (
+        f"## 📚 Voce Wiki: {domanda_pulita}\n\n"
+        f"- **Stato Memoria (Gen II/III):** Semaforo `{semaforo}` (`s_max={s_max}`) | "
+        f"**Barriera Numerica (Strato D):** `Nodo {nodo}`\n"
+        f"- **Fonte Guida Primaria:** {principio}\n\n"
+        f"### Sintesi Consolidata in Markdown\n"
+        f"{sintesi}\n\n"
+        f"### Regola Operativa e Verifica\n"
+        f"- **Azione / Regola:** {azione}\n"
+        f"- **Controllo Pratico:** {verifica}\n\n"
+        f"### Fonti Documentali Citate\n"
+        f"{fonti_md}\n\n"
+        f"---\n"
+    )

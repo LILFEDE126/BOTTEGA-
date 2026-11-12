@@ -89,8 +89,9 @@ STOPWORDS_RICERCA_COMUNI = frozenset({
     "que", "qué", "con", "para", "por", "los", "las", "una", "uno", "cual", "cuál", "como",
     "cómo", "según", "segun", "according", "document", "documentos", "appunti", "corso",
     "azienda", "societa", "società", "impresa", "euro", "euros", "eur",
-    "spieghi", "spiega", "spiegami", "meglio", "imposta", "impostare", "qusli",
-    "fondamentali", "fondamentale", "regola", "regole",
+    "spieghi", "spiega", "spiegami", "meglio", "imposta", "impostare", "impostano",
+    "qusli", "fondamentali", "fondamentale", "principali", "principale",
+    "vorrei", "posso", "sapere", "capire", "funziona", "funzionano", "usare", "scrivere",
 })
 
 PATRON_CODICE_NORMATIVO = re.compile(
@@ -140,7 +141,7 @@ PAROLE_POLISEMICHE_TRASVERSALI = frozenset({
     "centrali", "strumentale", "assenza", "verificare", "contabile",
     "materiali", "flusso", "flussi", "annuo", "annua", "acquisizione",
     "ore", "minuti", "minuto", "secondi", "fatture", "fattura", "subiscono",
-    "continui", "codice", "appena", "supera", "operazioni", "nonostante",
+    "continui", "appena", "supera", "operazioni", "nonostante",
     "impostato", "risolvere", "singola", "verificabile", "scatta", "blocco",
     "costo", "costi", "attiva", "pieno", "piena", "diagnostica", "diagnostico",
     "immobilizzazioni", "immobilizzazione", "svalutazione", "ammortamento",
@@ -170,6 +171,8 @@ def _ha_match_parola_o_radice(parola_q: str, parole_frammento: set[str]) -> bool
     """Checks exact word match or shared morphological stem (stripping final inflection vowel/s) on whole words only."""
     if parola_q in parole_frammento:
         return True
+    if parola_q == "regole":
+        return any(pf in ("regole", "regola") for pf in parole_frammento)
     if len(parola_q) >= 6:
         radice = parola_q[:-2] if parola_q.endswith("es") and len(parola_q) >= 7 else parola_q[:-1]
         return any(pf.startswith(radice) and abs(len(pf) - len(parola_q)) <= 2 for pf in parole_frammento)
@@ -205,6 +208,8 @@ def _copertura_termini_specifici(
     trovati = sum(1 for token_str in token_q if _ha_match_parola_o_radice(token_str, parole_f))
     if trovati <= 1 and len(token_q) >= 5:
         return (0, 0.0)
+    if 1 <= len(token_q) <= 3 and trovati >= 1:
+        return (max(2, trovati), max(0.35, trovati / len(token_q)))
     rapporto = trovati / len(token_q)
     return (trovati, rapporto)
 
@@ -288,14 +293,31 @@ def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
 
 
 def normalizza_spazi_testo_pdf(testo: str) -> str:
-    """Repairs missing spaces between glued words, numbers, currencies, and punctuation in justified PDFs,
-    and maps font ligatures and PUA characters to standard ASCII/Unicode."""
+    """Repairs PUA font ligatures, strips repetitive slide footers, and restores missing spaces in PDFs."""
     if not testo:
         return ""
-    testo_lavorato = testo.replace("\ue009", "tt").replace("\ue008", "ff")
-    testo_lavorato = testo_lavorato.replace("\ufb00", "ff").replace("\ufb01", "fi")
-    testo_lavorato = testo_lavorato.replace("\ufb02", "fl").replace("\ufb03", "ffi").replace("\ufb04", "ffl")
-    testo_lavorato = testo_lavorato.replace("\r\n", "\n")
+    mappa_ligature = (
+        ("\ue009", "tt"),
+        ("\ue008", "ff"),
+        ("\ue007", "fi"),
+        ("\ue006", "fl"),
+        ("\ufb00", "ff"),
+        ("\ufb01", "fi"),
+        ("\ufb02", "fl"),
+        ("\ufb03", "ffi"),
+        ("\ufb04", "ffl"),
+        ("\r\n", "\n"),
+        ("\r", "\n"),
+    )
+    testo_lavorato = testo
+    for glifo, sostituto in mappa_ligature:
+        if glifo in testo_lavorato:
+            testo_lavorato = testo_lavorato.replace(glifo, sostituto)
+    testo_lavorato = re.sub(
+        r"(?im)^\s*(?:AK\s+)?Corso\s+intensivo\s+di\s+coding\s*[·.]?\s*Giorno\s+\d+.*$",
+        "",
+        testo_lavorato,
+    )
     testo_lavorato = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"([a-zA-Zàèéìòùáéíóúñ]{2,})(\d)", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"(\d)(€)", r"\1 \2", testo_lavorato)
@@ -305,27 +327,49 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     testo_lavorato = re.sub(r"([,:;])([a-zA-Zàèéìòùáéíóúñ€])", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", testo_lavorato)
     testo_lavorato = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", testo_lavorato)
-    return testo_lavorato
+    testo_lavorato = re.sub(r"\n{3,}", "\n\n", testo_lavorato)
+    return testo_lavorato.strip()
 
 
-_PAROLE_CHIAVE_SLIDE_RUMORE = (
+_MARCATORI_SLIDE_RUMORE = (
     "solo per preparare",
     "non si proietta",
     "appendice ahaslides",
-    "per il docente",
+    "/ appendice ahaslides",
+    "/ per il docente",
+    "per il docente stasera",
+    "per il docente domani",
     "agenda del giorno",
-    "pausa pranzo",
-    "rompighiaccio",
-    "due verita e una bugia",
+    "/ agenda del giorno",
     "due verità e una bugia",
+    "due verita e una bugia",
     "biglietto di uscita",
+    "il parcheggio delle domande",
 )
 
 
 def _e_slide_rumore_o_indice(testo_pagina: str) -> bool:
-    """Detects service slides, agendas, breaks, icebreakers, and teacher appendix slides to discard from RAG."""
-    testo_norm = _normalizza_accenti_minuscolo(testo_pagina or "")
-    return any(chiave in testo_norm for chiave in _PAROLE_CHIAVE_SLIDE_RUMORE)
+    """Returns True if a PDF page is a non-instructional agenda, break slide, or teacher-only appendix."""
+    if not testo_pagina or not testo_pagina.strip():
+        return True
+    basso = normalizza_spazi_testo_pdf(testo_pagina).lower()
+    if any(marcatore in basso for marcatore in _MARCATORI_SLIDE_RUMORE):
+        return True
+    righe = [r.strip() for r in basso.splitlines() if r.strip()]
+    if len(righe) <= 6 and any(k in basso for k in ("pausa pranzo", "si riparte alle", "rompighiaccio")):
+        return True
+    return False
+
+
+def _formatta_pagina_in_markdown(numero_pagina: int, testo_pagina: str) -> str:
+    """Formats a raw PDF page/slide into clean, structured Markdown."""
+    pulito = normalizza_spazi_testo_pdf(testo_pagina)
+    righe = [r.strip() for r in pulito.splitlines() if r.strip()]
+    if not righe:
+        return ""
+    prima_riga = righe[0].lstrip("/ ").strip()
+    corpo = "\n".join(righe[1:]).strip() if len(righe) > 1 else prima_riga
+    return f"### [Page {numero_pagina}] {prima_riga}\n{corpo}".strip()
 
 
 def _suddividi_testo_in_blocchi(
@@ -405,7 +449,7 @@ def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[st
         return []
 
     media_caratteri = sum(len(t) for _, t in pagine_valide) / len(pagine_valide)
-    e_presentazione_slide = totale_pagine > 5 and media_caratteri < 600
+    e_presentazione_slide = totale_pagine > 5 and media_caratteri < 900 and len(pagine_valide) > 3
 
     if not e_presentazione_slide:
         blocchi: List[Tuple[str, str]] = []
@@ -418,16 +462,12 @@ def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[st
     caratteri_accumulati = 0
 
     for idx, testo_pag in pagine_valide:
-        righe = [r.strip() for r in testo_pag.splitlines() if r.strip()]
-        titolo = righe[0] if righe else f"Page {idx}"
-        resto = "\n".join(righe[1:]) if len(righe) > 1 else ""
-        if resto:
-            markdown_slide = f"### [Page {idx}] {titolo}\n{resto}"
-        else:
-            markdown_slide = f"### [Page {idx}] {titolo}"
+        markdown_slide = _formatta_pagina_in_markdown(idx, testo_pag)
+        if not markdown_slide:
+            continue
 
         lunghezza_nuova = caratteri_accumulati + len(markdown_slide) + 2
-        raggiunto_limite = lunghezza_nuova > 2500 or len(cluster_corrente) >= 6
+        raggiunto_limite = lunghezza_nuova > 2200 or len(cluster_corrente) >= 6
 
         if cluster_corrente and raggiunto_limite:
             idx_inizio = cluster_corrente[0][0]
@@ -643,7 +683,7 @@ def incasella_e_salva(dominio: str, titolo: str, blocchi: List[Tuple[str, str]])
     if not righe_grezze:
         return 0
 
-    righe = sorted(righe_grezze, key=lambda item: len(item[1]), reverse=True)
+    righe = list(righe_grezze)
     vettori = calcola_embedding([r[1] for r in righe])
     valori = [
         (dominio, titolo, righe[i][0], righe[i][1], righe[i][2], str(vettori[i]))
@@ -807,6 +847,48 @@ def _valuta_singolo_frammento_ram(
     }
 
 
+def _naviga_e_espandi_riferimenti_agentici(
+    ordinati: List[Dict[str, Any]],
+    candidati_ram: List[Dict[str, Any]],
+    top_k: int = 5,
+) -> List[Dict[str, Any]]:
+    """GEN II Agentic File Search: dynamically navigates adjacent sections of the same document
+    when a retrieved fragment is part of a multi-page sequence or chapter, preventing truncated context."""
+    if not ordinati or not candidati_ram:
+        return ordinati
+    mappa_per_id = {item["id"]: item for item in candidati_ram}
+    ids_presenti = {f["id"] for f in ordinati}
+    espansi: List[Dict[str, Any]] = []
+
+    for framm in ordinati:
+        espansi.append(framm)
+        id_corr = framm["id"]
+        doc_corr = framm.get("titolo", "")
+        sim_base = float(framm.get("similitudine", 0.70))
+        rrf_base = float(framm.get("rrf", 0.01))
+
+        for delta in (1, 2):
+            vicino = mappa_per_id.get(id_corr + delta)
+            if (
+                vicino is not None
+                and vicino.get("titolo") == doc_corr
+                and vicino["id"] not in ids_presenti
+                and len(espansi) < max(top_k, 6)
+            ):
+                ids_presenti.add(vicino["id"])
+                espansi.append({
+                    "id": vicino["id"],
+                    "dominio": vicino.get("dominio", framm.get("dominio", "")),
+                    "titolo": vicino.get("titolo", doc_corr),
+                    "sezione": vicino.get("sezione", ""),
+                    "testo": vicino["testo"],
+                    "similitudine": round(max(0.60, sim_base - 0.02 * delta), 4),
+                    "rrf": rrf_base * (0.95 ** delta),
+                })
+
+    return espansi[:max(top_k, 6)]
+
+
 def _recupera_da_archivio_ram(
     query: str,
     q_vec: List[float],
@@ -872,6 +954,8 @@ def _recupera_da_archivio_ram(
     lista_simple = list(lista_it)
 
     ordinati = fondi_rrf(lista_vett, lista_it, lista_simple, top_k=limite_k)
+    if len(candidati) > 2:
+        ordinati = _naviga_e_espandi_riferimenti_agentici(ordinati, candidati, top_k=limite_k)
     ha_match = bool(con_match)
     if ha_match and s_dom < 0.35:
         s_dom = 0.55

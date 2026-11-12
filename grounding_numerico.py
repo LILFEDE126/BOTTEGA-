@@ -20,7 +20,7 @@ PATRON_MIGLIAIA_EN_DEC = re.compile(r"^\d{1,3}(?:,\d{3})+\.\d+$")
 PATRON_MIGLIAIA_EN_INT = re.compile(r"^\d{1,3}(?:,\d{3})+$")
 PATRON_INTERI_PURI = re.compile(r"(?<![\d.,])\d+(?![\d%]|[.,]\d)")
 PATRON_INTERI_TECNICI = re.compile(
-    r"(?<![\d.,])\d+(?=\s*(?:kwh|kw|litri|l|bar|euro|eur|€|\$|km|giorni|ore|h|mesi|anni|min|minuti|sec|secondi|m|cm|mm|kg|g|hz|db|v|a|w|ohm)\b)",
+    r"(?<![\d.,])\d+(?=\s*(?:kwh|kw|litri|l/min|l/h|bar|euro|eur|€|\$|km|giorni|ore|mesi|anni|min|minuti|sec|secondi|cm|mm|kg|hz|db|ohm)\b)",
     re.IGNORECASE,
 )
 

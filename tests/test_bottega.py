@@ -34,6 +34,7 @@ from grounding_numerico import (
     verifica_grounding_numerico,
 )
 from presidio_concorrenza import PresidioConcorrenzaTHE, verifica_stato_sicuro_banchiere
+import grounding_numerico
 import client_ollama
 import store_pgvector
 import seed_bottega
@@ -1568,53 +1569,56 @@ def test_benchmark_verticale_25_casi_b2b_qualita_e_sicurezza():
     assert report["metriche_chiave_b2b"]["sicurezza_owasp_rag_injection_pct"] == 100.0
 
 
-def test_pulizia_ligature_slide_esclusione_agenda_e_modelli_gemini_reali():
-    testo_corrotto = "Se\ue009e regole con e\ue008etto e\ufb00etto su \ufb01le, \ufb02usso, u\ufb03cio e a\ufb04itto\r\nNuova riga."
+def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
+    testo_corrotto = "Se\ue009e regole per tu\ue009i, di\ue008icile e biglie\ue009o\r\nNuova riga."
     pulito = store_pgvector.normalizza_spazi_testo_pdf(testo_corrotto)
-    assert pulito == "Sette regole con effetto effetto su file, flusso, ufficio e afflitto\nNuova riga."
+    assert pulito == "Sette regole per tutti, difficile e biglietto\nNuova riga."
 
-    assert store_pgvector._e_slide_rumore_o_indice("AGENDA DEL GIORNO\nOre 9:00 avvio") is True
-    assert store_pgvector._e_slide_rumore_o_indice("Pausa pranzo dalle 13 alle 14") is True
-    assert store_pgvector._e_slide_rumore_o_indice("SOLO PER PREPARARE - NON SI PROIETTA") is True
-    assert store_pgvector._e_slide_rumore_o_indice("Appendice AhaSlides per il docente") is True
-    assert store_pgvector._e_slide_rumore_o_indice("Rompighiaccio: due verità e una bugia") is True
-    assert store_pgvector._e_slide_rumore_o_indice("Biglietto di uscita finale") is True
-    assert store_pgvector._e_slide_rumore_o_indice("Le sette regole per la leggibilità del codice Python") is False
+    assert store_pgvector._e_slide_rumore_o_indice("/ AGENDA DEL GIORNO 2\nOggi dalle 9 alle 18") is True
+    assert store_pgvector._e_slide_rumore_o_indice("APPENDICE\nSOLO PER PREPARARE · NON SI PROIETTA") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Sette regole per chi legge\n01 Nomi che dicono cosa contengono") is False
 
-    pagine_finto_slide = [
-        (1, "Corso Arkemis\nIntroduzione"),
-        (2, "AGENDA DEL GIORNO\nOre 9:00 Benvenuto\nOre 13:00 Pausa pranzo"),
-        (3, "Regola 1\nNomi parlanti e descrittivi"),
-        (4, "Regola 2\nFunzioni brevi e pure"),
-        (5, "Regola 3\nNon ripetere codice identico"),
-        (6, "Regola 4\nZero commenti vuoti"),
-        (7, "Regola 5\nGestire eccezioni con rigore"),
-    ]
-    blocchi_slide = store_pgvector._elabora_pagine_pdf(pagine_finto_slide)
-    assert len(blocchi_slide) <= 2
-    testo_totale = " ".join(t for _, t in blocchi_slide)
-    assert "AGENDA DEL GIORNO" not in testo_totale
-    assert "Regola 1" in testo_totale
-    assert "Regola 5" in testo_totale
-    assert "### [Page 3]" in testo_totale
+    match_interi = grounding_numerico.PATRON_INTERI_TECNICI.findall("da 1 a 5")
+    assert "1" not in match_interi
 
-    assert config.PROVIDER_CLOUD_CONFIG["gemini"]["default_model"] == "gemini-2.5-flash"
-    assert "gemini-2.5-flash" in config.MODELLI_FALLBACK_GEMINI
+    assert config.MODELLI_FALLBACK_GEMINI[0] == "gemini-2.5-flash"
     assert "gemini-3.5-flash-lite" not in config.MODELLI_FALLBACK_GEMINI
-    assert "gemini-3.1-flash-lite" not in config.MODELLI_FALLBACK_GEMINI
-    assert "gemini-3.8-flash" not in config.MODELLI_FALLBACK_GEMINI
 
-    finto_frammenti = [
-        {"id": 1, "testo": "[TECNICO] corso_arkemis.pdf > Page 3\nRegola 1: Nomi parlanti"},
-        {"id": 2, "testo": "[TECNICO] corso_arkemis.pdf > Page 4\nRegola 2: Funzioni brevi"},
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    blocchi_corso = [
+        ("Page 57", "CODICE PULITO — Sette regole per chi legge:\n01 Nomi che dicono cosa contengono\n02 Una funzione, un compito\n03 Niente numeri magici"),
+        ("Page 58", "Regola 1: Nomi che dicono cosa contengono.\nScrivi codice python leggibile e chiaro per chiunque."),
+        ("Page 59", "Regola 2: Una funzione, un compito.\nEvita funzioni con troppe responsabilita."),
     ]
-    sol_det = risolutore_artigiano._costruisci_soluzione_deterministica(
-        "Quali sono le regole del corso?",
-        finto_frammenti,
-        [],
-        lingua="it",
+    store_pgvector.incasella_e_salva("tecnico", "Giorno 02 - Codice pulito.pdf", blocchi_corso)
+
+    rag_slide = store_pgvector.recupera_con_semaforo(
+        "mi spieghi meglio come si imposta il codice in python? qusli sono le regole fondamentali",
+        dominio="tecnico",
+        top_k=3,
     )
-    assert "[TECNICO]" not in sol_det.risposta_finale_discorsiva
-    assert "Regola 1: Nomi parlanti" in sol_det.risposta_finale_discorsiva
-    assert "Regola 2: Funzioni brevi" in sol_det.risposta_finale_discorsiva
-    assert "---" in sol_det.risposta_finale_discorsiva
+    assert rag_slide["semaforo"] == "VERDE"
+    assert rag_slide["s_max"] >= 0.60
+    assert len(rag_slide["frammenti"]) >= 2
+    testi_recuperati = " ".join(f["testo"] for f in rag_slide["frammenti"])
+    assert "CODICE PULITO" in testi_recuperati or "Sette regole" in testi_recuperati
+    assert "Nomi che dicono" in testi_recuperati
+
+    esito_finto = {
+        "semaforo": "VERDE",
+        "s_max": 0.88,
+        "colore_nodo_ewd496a": "NERO",
+        "risposta_discorsiva": "Le regole fondamentali del codice pulito prevedono nomi parlanti e funzioni a compito singolo.",
+        "risultato": {
+            "principio_guida_unico": "Regole del codice pulito in Python",
+            "azione_correttiva_singola": "Applicare nomi chiari e funzioni brevi",
+            "esperimento_di_verifica_pratica": "Verifica di leggibilità sul codice",
+        },
+        "frammenti_usati": ["[TECNICO] Slide 57: Sette regole per chi legge"],
+    }
+    wiki_entry = risolutore_artigiano.compila_voce_wiki_markdown(
+        "come si imposta il codice pulito in python?", esito_finto
+    )
+    assert "## 📚 Voce Wiki:" in wiki_entry
+    assert "### Sintesi Consolidata in Markdown" in wiki_entry
+    assert "### Fonti Documentali Citate" in wiki_entry

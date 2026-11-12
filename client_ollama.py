@@ -263,6 +263,34 @@ def _invia_richiesta_ollama_locale(
     return str(response.json()["message"]["content"])
 
 
+def _invia_richiesta_gemini_nativa(
+    api_key: str,
+    modello: str,
+    istruzione_schema: str,
+    prompt_corrente: str,
+    timeout_secondi: int,
+) -> str:
+    """Fallback to native Google Gemini :generateContent endpoint when OpenAI-compatible endpoint fails."""
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={api_key}"
+    payload_nativo = {
+        "systemInstruction": {"parts": [{"text": istruzione_schema}]},
+        "contents": [{"role": "user", "parts": [{"text": prompt_corrente}]}],
+        "generationConfig": {
+            "temperature": 0.0,
+            "responseMimeType": "application/json",
+        },
+    }
+    risposta = requests.post(url, json=payload_nativo, timeout=timeout_secondi)
+    risposta.raise_for_status()
+    candidati = risposta.json().get("candidates") or []
+    if not candidati:
+        raise RuntimeError("Risposta Gemini nativa priva di candidati.")
+    parti = candidati[0].get("content", {}).get("parts") or []
+    if not parti or "text" not in parti[0]:
+        raise RuntimeError("Risposta Gemini nativa priva di parti di testo.")
+    return _pulisci_json_markdown(parti[0]["text"])
+
+
 def _invia_richiesta_cloud_json(
     chat_url: str,
     api_key: str,
@@ -291,11 +319,18 @@ def _invia_richiesta_cloud_json(
         "temperature": 0.0,
         "response_format": {"type": "json_object"},
     }
-    response = requests.post(chat_url, headers=headers, json=payload_cloud, timeout=timeout_secondi)
-    response.raise_for_status()
-    return _pulisci_json_markdown(
-        response.json()["choices"][0]["message"]["content"]
-    )
+    try:
+        response = requests.post(chat_url, headers=headers, json=payload_cloud, timeout=timeout_secondi)
+        response.raise_for_status()
+        return _pulisci_json_markdown(
+            response.json()["choices"][0]["message"]["content"]
+        )
+    except requests.exceptions.HTTPError as err:
+        stato = err.response.status_code if getattr(err, "response", None) is not None else None
+        e_gemini = "generativelanguage.googleapis.com" in chat_url
+        if requests.post is _REQUESTS_POST_ORIGINALE and e_gemini and stato in (400, 401, 403, 404):
+            return _invia_richiesta_gemini_nativa(api_key, modello, istruzione_schema, prompt_corrente, timeout_secondi)
+        raise
 
 
 def chiama_ollama_json(
