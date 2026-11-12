@@ -16,11 +16,10 @@ _PARTI_CHIAVE_CLOUD_DEFAULT = (
 )
 
 MODELLI_FALLBACK_GEMINI = (
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.8-flash",
-    "gemini-flash-latest",
     "gemini-2.5-flash",
+    "gemini-2.5-flash-lite",
+    "gemini-2.0-flash",
+    "gemini-flash-latest",
 )
 
 _VARIABILI_CHIAVE_PER_PROVIDER = MappingProxyType({
@@ -135,7 +134,7 @@ EMBED_DIM = int(os.getenv("EMBED_DIM") or "768")
 PROVIDER_CLOUD_CONFIG = MappingProxyType({
     "gemini": MappingProxyType({
         "chat_url": "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions",
-        "default_model": "gemini-3.5-flash-lite",
+        "default_model": "gemini-2.5-flash",
     }),
     "groq": MappingProxyType({
         "chat_url": "https://api.groq.com/openai/v1/chat/completions",

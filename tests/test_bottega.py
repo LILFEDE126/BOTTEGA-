@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 5 (THE): Complete suite of 42 pure unit tests (zero network, zero DB, zero LLM).
+"""Layer 5 (THE): Complete suite of 43 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
 import ast
@@ -678,7 +678,7 @@ def test_rotazione_modelli_gemini_su_404_503_e_fallback_deterministico_artigiano
     )
     assert ris.esito == "rotazione_ok"
     assert modelli_tentati[0] == "gemini-2.5-flash"
-    assert modelli_tentati[1] == "gemini-3.5-flash-lite"
+    assert modelli_tentati[1] == "gemini-2.5-flash-lite"
 
     monkeypatch.setattr(
         risolutore_artigiano,
@@ -1566,3 +1566,55 @@ def test_benchmark_verticale_25_casi_b2b_qualita_e_sicurezza():
     assert report["metriche_chiave_b2b"]["diagnostica_cause_multiple_pct"] == 100.0
     assert report["metriche_chiave_b2b"]["gestione_revisioni_documentali_pct"] == 100.0
     assert report["metriche_chiave_b2b"]["sicurezza_owasp_rag_injection_pct"] == 100.0
+
+
+def test_pulizia_ligature_slide_esclusione_agenda_e_modelli_gemini_reali():
+    testo_corrotto = "Se\ue009e regole con e\ue008etto e\ufb00etto su \ufb01le, \ufb02usso, u\ufb03cio e a\ufb04itto\r\nNuova riga."
+    pulito = store_pgvector.normalizza_spazi_testo_pdf(testo_corrotto)
+    assert pulito == "Sette regole con effetto effetto su file, flusso, ufficio e afflitto\nNuova riga."
+
+    assert store_pgvector._e_slide_rumore_o_indice("AGENDA DEL GIORNO\nOre 9:00 avvio") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Pausa pranzo dalle 13 alle 14") is True
+    assert store_pgvector._e_slide_rumore_o_indice("SOLO PER PREPARARE - NON SI PROIETTA") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Appendice AhaSlides per il docente") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Rompighiaccio: due verità e una bugia") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Biglietto di uscita finale") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Le sette regole per la leggibilità del codice Python") is False
+
+    pagine_finto_slide = [
+        (1, "Corso Arkemis\nIntroduzione"),
+        (2, "AGENDA DEL GIORNO\nOre 9:00 Benvenuto\nOre 13:00 Pausa pranzo"),
+        (3, "Regola 1\nNomi parlanti e descrittivi"),
+        (4, "Regola 2\nFunzioni brevi e pure"),
+        (5, "Regola 3\nNon ripetere codice identico"),
+        (6, "Regola 4\nZero commenti vuoti"),
+        (7, "Regola 5\nGestire eccezioni con rigore"),
+    ]
+    blocchi_slide = store_pgvector._elabora_pagine_pdf(pagine_finto_slide)
+    assert len(blocchi_slide) <= 2
+    testo_totale = " ".join(t for _, t in blocchi_slide)
+    assert "AGENDA DEL GIORNO" not in testo_totale
+    assert "Regola 1" in testo_totale
+    assert "Regola 5" in testo_totale
+    assert "### [Page 3]" in testo_totale
+
+    assert config.PROVIDER_CLOUD_CONFIG["gemini"]["default_model"] == "gemini-2.5-flash"
+    assert "gemini-2.5-flash" in config.MODELLI_FALLBACK_GEMINI
+    assert "gemini-3.5-flash-lite" not in config.MODELLI_FALLBACK_GEMINI
+    assert "gemini-3.1-flash-lite" not in config.MODELLI_FALLBACK_GEMINI
+    assert "gemini-3.8-flash" not in config.MODELLI_FALLBACK_GEMINI
+
+    finto_frammenti = [
+        {"id": 1, "testo": "[TECNICO] corso_arkemis.pdf > Page 3\nRegola 1: Nomi parlanti"},
+        {"id": 2, "testo": "[TECNICO] corso_arkemis.pdf > Page 4\nRegola 2: Funzioni brevi"},
+    ]
+    sol_det = risolutore_artigiano._costruisci_soluzione_deterministica(
+        "Quali sono le regole del corso?",
+        finto_frammenti,
+        [],
+        lingua="it",
+    )
+    assert "[TECNICO]" not in sol_det.risposta_finale_discorsiva
+    assert "Regola 1: Nomi parlanti" in sol_det.risposta_finale_discorsiva
+    assert "Regola 2: Funzioni brevi" in sol_det.risposta_finale_discorsiva
+    assert "---" in sol_det.risposta_finale_discorsiva

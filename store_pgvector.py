@@ -89,6 +89,8 @@ STOPWORDS_RICERCA_COMUNI = frozenset({
     "que", "qué", "con", "para", "por", "los", "las", "una", "uno", "cual", "cuál", "como",
     "cómo", "según", "segun", "according", "document", "documentos", "appunti", "corso",
     "azienda", "societa", "società", "impresa", "euro", "euros", "eur",
+    "spieghi", "spiega", "spiegami", "meglio", "imposta", "impostare", "qusli",
+    "fondamentali", "fondamentale", "regola", "regole",
 })
 
 PATRON_CODICE_NORMATIVO = re.compile(
@@ -286,10 +288,15 @@ def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
 
 
 def normalizza_spazi_testo_pdf(testo: str) -> str:
-    """Repairs missing spaces between glued words, numbers, currencies, and punctuation in justified PDFs."""
+    """Repairs missing spaces between glued words, numbers, currencies, and punctuation in justified PDFs,
+    and maps font ligatures and PUA characters to standard ASCII/Unicode."""
     if not testo:
         return ""
-    testo_lavorato = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo)
+    testo_lavorato = testo.replace("\ue009", "tt").replace("\ue008", "ff")
+    testo_lavorato = testo_lavorato.replace("\ufb00", "ff").replace("\ufb01", "fi")
+    testo_lavorato = testo_lavorato.replace("\ufb02", "fl").replace("\ufb03", "ffi").replace("\ufb04", "ffl")
+    testo_lavorato = testo_lavorato.replace("\r\n", "\n")
+    testo_lavorato = re.sub(r"([a-zàèéìòùáéíóúñ])([A-ZÀÈÉÌÒÙ])", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"([a-zA-Zàèéìòùáéíóúñ]{2,})(\d)", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"(\d)(€)", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"(€)(\d)", r"\1 \2", testo_lavorato)
@@ -299,6 +306,26 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     testo_lavorato = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", testo_lavorato)
     testo_lavorato = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", testo_lavorato)
     return testo_lavorato
+
+
+_PAROLE_CHIAVE_SLIDE_RUMORE = (
+    "solo per preparare",
+    "non si proietta",
+    "appendice ahaslides",
+    "per il docente",
+    "agenda del giorno",
+    "pausa pranzo",
+    "rompighiaccio",
+    "due verita e una bugia",
+    "due verità e una bugia",
+    "biglietto di uscita",
+)
+
+
+def _e_slide_rumore_o_indice(testo_pagina: str) -> bool:
+    """Detects service slides, agendas, breaks, icebreakers, and teacher appendix slides to discard from RAG."""
+    testo_norm = _normalizza_accenti_minuscolo(testo_pagina or "")
+    return any(chiave in testo_norm for chiave in _PAROLE_CHIAVE_SLIDE_RUMORE)
 
 
 def _suddividi_testo_in_blocchi(
@@ -352,6 +379,78 @@ def _suddividi_testo_in_blocchi(
     return blocchi
 
 
+def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[str, str]]:
+    """Filters noisy service/agenda slides and clusters slide presentations into cohesive Markdown chunks."""
+    if not pagine_estratte:
+        return []
+
+    pagine_normalizzate = [
+        (idx, normalizza_spazi_testo_pdf(testo).strip())
+        for idx, testo in pagine_estratte
+    ]
+    pagine_non_vuote = [(idx, t) for idx, t in pagine_normalizzate if t]
+    if not pagine_non_vuote:
+        return []
+
+    totale_pagine = len(pagine_estratte)
+    if totale_pagine > 5:
+        pagine_valide = [
+            (idx, t) for idx, t in pagine_non_vuote
+            if not _e_slide_rumore_o_indice(t)
+        ]
+    else:
+        pagine_valide = pagine_non_vuote
+
+    if not pagine_valide:
+        return []
+
+    media_caratteri = sum(len(t) for _, t in pagine_valide) / len(pagine_valide)
+    e_presentazione_slide = totale_pagine > 5 and media_caratteri < 600
+
+    if not e_presentazione_slide:
+        blocchi: List[Tuple[str, str]] = []
+        for idx, testo_pag in pagine_valide:
+            blocchi.extend(_suddividi_testo_in_blocchi(testo_pag, f"Page {idx}"))
+        return blocchi
+
+    blocchi_slide: List[Tuple[str, str]] = []
+    cluster_corrente: List[Tuple[int, str]] = []
+    caratteri_accumulati = 0
+
+    for idx, testo_pag in pagine_valide:
+        righe = [r.strip() for r in testo_pag.splitlines() if r.strip()]
+        titolo = righe[0] if righe else f"Page {idx}"
+        resto = "\n".join(righe[1:]) if len(righe) > 1 else ""
+        if resto:
+            markdown_slide = f"### [Page {idx}] {titolo}\n{resto}"
+        else:
+            markdown_slide = f"### [Page {idx}] {titolo}"
+
+        lunghezza_nuova = caratteri_accumulati + len(markdown_slide) + 2
+        raggiunto_limite = lunghezza_nuova > 2500 or len(cluster_corrente) >= 6
+
+        if cluster_corrente and raggiunto_limite:
+            idx_inizio = cluster_corrente[0][0]
+            idx_fine = cluster_corrente[-1][0]
+            etichetta = f"Page {idx_inizio}" if idx_inizio == idx_fine else f"Pages {idx_inizio}-{idx_fine}"
+            testo_unito = "\n\n".join(s for _, s in cluster_corrente)
+            blocchi_slide.append((etichetta, testo_unito))
+            cluster_corrente = []
+            caratteri_accumulati = 0
+
+        cluster_corrente.append((idx, markdown_slide))
+        caratteri_accumulati += len(markdown_slide) + 2
+
+    if cluster_corrente:
+        idx_inizio = cluster_corrente[0][0]
+        idx_fine = cluster_corrente[-1][0]
+        etichetta = f"Page {idx_inizio}" if idx_inizio == idx_fine else f"Pages {idx_inizio}-{idx_fine}"
+        testo_unito = "\n\n".join(s for _, s in cluster_corrente)
+        blocchi_slide.append((etichetta, testo_unito))
+
+    return blocchi_slide
+
+
 def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tuple[str, str]]:
     """Extracts structured (section, text) tuples from PDF files (.pdf) or plain-text files (.txt, .md, .csv, .py),
     using fast native C++ pypdfium2 when available and caching results by SHA-256."""
@@ -374,10 +473,11 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
             doc_pdfium = None
             try:
                 doc_pdfium = pdfium.PdfDocument(contenuto_bytes)
+                pagine_raw: List[Tuple[int, str]] = []
                 for idx, pagina in enumerate(doc_pdfium, start=1):
                     testo_pag = (pagina.get_textpage().get_text_bounded() or "").strip()
-                    if testo_pag:
-                        blocchi_pdf.extend(_suddividi_testo_in_blocchi(testo_pag, f"Page {idx}"))
+                    pagine_raw.append((idx, testo_pag))
+                blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
                 estratto_con_pdfium = True
             except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
                 blocchi_pdf = []
@@ -388,13 +488,14 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
 
         if not estratto_con_pdfium:
             lettore = PdfReader(io.BytesIO(contenuto_bytes))
+            pagine_raw = []
             for idx, pagina in enumerate(lettore.pages, start=1):
                 try:
                     testo_pag = (pagina.extract_text() or "").strip()
                 except (PyPdfError, ValueError, KeyError, TypeError):
                     testo_pag = ""
-                if testo_pag:
-                    blocchi_pdf.extend(_suddividi_testo_in_blocchi(testo_pag, f"Page {idx}"))
+                pagine_raw.append((idx, testo_pag))
+            blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
 
         if usa_estrattore_reale and chiave_cache:
             _CACHE_BLOCCHI_DOCUMENTO[chiave_cache] = list(blocchi_pdf)

@@ -300,6 +300,15 @@ def svuota_pagine_continua(dominio: Optional[str] = None) -> None:
             _REGISTRO_CONTINUAZIONI_MEMORIA.pop(dominio, None)
 
 
+def _ripulisci_prefisso_tecnico_frammento(testo: str) -> str:
+    """Strips technical metadata header like [TAG] Title > Section from fragment text."""
+    if not testo:
+        return ""
+    testo_pulito = testo.strip()
+    testo_pulito = re.sub(r"^\[[A-Za-z0-9_-]+\]\s*[^>\n]+>[^\n]*\n*", "", testo_pulito)
+    return testo_pulito.strip()
+
+
 def _costruisci_soluzione_deterministica(
     problema: str,
     frammenti: List[dict],
@@ -308,71 +317,82 @@ def _costruisci_soluzione_deterministica(
 ) -> SoluzioneArtigiano:
     """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
     when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
-    principale = frammenti[0]["testo"] if frammenti else problema.strip()
-    principale_breve = _sintetizza_etichetta_frammento(principale, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
+    pertinenti_raw = frammenti[:3] if frammenti else []
+    pertinenti_testi = [_ripulisci_prefisso_tecnico_frammento(f["testo"]) for f in pertinenti_raw]
+    pertinenti_testi = [t for t in pertinenti_testi if t]
+
+    if pertinenti_testi:
+        risposta_finale = "\n\n---\n\n".join(pertinenti_testi)
+    else:
+        risposta_finale = problema.strip()
+
+    primo_testo = pertinenti_testi[0] if pertinenti_testi else problema.strip()
+    principale_breve = _sintetizza_etichetta_frammento(primo_testo, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
     tag_scarto = _ETICHETTE_SCARTATO.get(lingua, _ETICHETTE_SCARTATO["it"])
     tag_fals = _ETICHETTE_FALSIFICATA.get(lingua, _ETICHETTE_FALSIFICATA["it"])
+
+    frammenti_rimanenti = frammenti[len(pertinenti_raw):] if frammenti else []
     scartati = [
         f"{tag_scarto} {_sintetizza_etichetta_frammento(frammento['testo'], max_len=MAX_CARATTERI_SCARTO_DEFAULT)}"
-        for frammento in frammenti[1:]
+        for frammento in frammenti_rimanenti
     ]
     for ipotesi_esclusa in escluse_pulite:
         scartati.append(f"{tag_fals} {ipotesi_esclusa}")
 
     if lingua == "en":
         return SoluzioneArtigiano(
-            risposta_finale_discorsiva=principale,
+            risposta_finale_discorsiva=risposta_finale,
             principio_guida_unico=principale_breve,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
-                "Direct compliance verification on the fragments extracted from the official archive."
+                "Verification and direct matching against certified technical archive references and constraints."
             ),
             invariante_violato=(
-                "Alignment between the problem requirements and the certified parameters in the documentary source."
+                "Ensure strict adherence to certified parameters, specifications, and rules from the source archive."
             ),
-            ipotesi_causale_unica=f"Direct documentary match from the priority source: {principale_breve}",
+            ipotesi_causale_unica=f"Priority documentary reference: {principale_breve}",
             azione_correttiva_singola=(
-                f"Apply exclusively the parameters and constraints of the selected source to the case: {problema.strip()}"
+                "Apply the verified operating steps, formulas, and parameters documented in the certified source."
             ),
             esperimento_di_verifica_pratica=(
-                "Verify exact correspondence of all figures, caps, and percentages with the archive text."
+                "Verify exact correspondence of each parameter, figure, and rule with the source documentation."
             ),
         )
     if lingua == "es":
         return SoluzioneArtigiano(
-            risposta_finale_discorsiva=principale,
+            risposta_finale_discorsiva=risposta_finale,
             principio_guida_unico=principale_breve,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
-                "Verificación directa de conformidad sobre los fragmentos extraídos del archivo oficial."
+                "Verificación y contraste directo con las referencias y límites del archivo técnico certificado."
             ),
             invariante_violato=(
-                "Alineación entre los requisitos del problema y los parámetros certificados en la fuente documental."
+                "Garantizar la estricta coherencia con los parámetros, especificaciones y reglas de la fuente documental."
             ),
-            ipotesi_causale_unica=f"Respaldo documental directo de la fuente prioritaria: {principale_breve}",
+            ipotesi_causale_unica=f"Referencia documental prioritaria: {principale_breve}",
             azione_correttiva_singola=(
-                f"Aplicar exclusivamente los parámetros y límites de la fuente seleccionada al caso: {problema.strip()}"
+                "Aplicar con fidelidad los pasos operativos, fórmulas y parámetros certificados en la documentación."
             ),
             esperimento_di_verifica_pratica=(
-                "Comprobar la correspondencia exacta de todas las cifras, topes y porcentajes con el texto del archivo."
+                "Comprobar la correspondencia exacta de cada parámetro, cifra y regla con la documentación de origen."
             ),
         )
     return SoluzioneArtigiano(
-        risposta_finale_discorsiva=principale,
+        risposta_finale_discorsiva=risposta_finale,
         principio_guida_unico=principale_breve,
         elementi_scartati_per_non_fare_mucchio=scartati,
         precondizione_wp_richiesta=(
-            "Verifica diretta di conformita' sui frammenti estratti dall'archivio ufficiale."
+            "Verifica e riscontro documentale sui riferimenti e sui vincoli dell'archivio tecnico certificato."
         ),
         invariante_violato=(
-            "Allineamento tra i requisiti del problema e i parametri certificati nella fonte documentale."
+            "Mantenere piena aderenza ai parametri, alle specifiche e alle regole stabilite nel testo d'archivio."
         ),
-        ipotesi_causale_unica=f"Riscontro documentale diretto dalla fonte prioritaria: {principale_breve}",
+        ipotesi_causale_unica=f"Estratto documentale prioritario: {principale_breve}",
         azione_correttiva_singola=(
-            f"Applicare esclusivamente i parametri e i vincoli della fonte selezionata al caso: {problema.strip()}"
+            "Applicare fedelmente le prescrizioni, le formule e i passaggi operativi documentati nella fonte certificata."
         ),
         esperimento_di_verifica_pratica=(
-            "Controllare la corrispondenza esatta di tutte le cifre, massimali e percentuali con il testo d'archivio."
+            "Controllare la corrispondenza puntuale di ciascun parametro, valore numerico e specifica con la documentazione d'origine."
         ),
     )
 
@@ -796,6 +816,7 @@ def risolvi_da_artigiano(
             "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer (4-6 sentences) "
             "that any person can easily read and understand, directly answering the user's question with the exact "
             "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "
+            "COMPLEMENTARY FRAGMENTS RULE: If multiple fragments originate from the same document/course or address complementary parts/steps/rules of the user's query, do NOT discard them as clutter. Synthesize them coherently together in 'risposta_finale_discorsiva' to provide the complete picture (e.g. all numbered rules, checklist points, or procedural phases). Only place truly off-topic or contradictory items in 'elementi_scartati_per_non_fare_mucchio'. "
             "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select the single governing principle from those retrieved, "
             "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant. "
             "If field exclusions isolate a single root cause, formulate that causal hypothesis with its verification test; "
@@ -843,7 +864,8 @@ def risolvi_da_artigiano(
                     soluzione = llm_fn(
                         f"{blocco_lingua}\n\n"
                         "You are a master diagnostic engineer applying Strato L, Strato A, and Strato D. "
-                        "Answer the user's question directly using the verified external fragments below.\n\n"
+                        "Answer the user's question directly using the verified external fragments below, "
+                        "synthesizing all complementary points and rules from the fragments into a clear, complete answer.\n\n"
                         f"{blocco_lingua}",
                         f"FRAMMENTI RECUPERATI (VERDE):\n{contesto_rag}\n\n"
                         f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
