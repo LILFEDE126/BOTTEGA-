@@ -5,6 +5,7 @@ natural-language final response synthesis and deterministic RAG fallback."""
 
 import datetime
 import io
+import json
 import re
 import sys
 import zipfile
@@ -2076,3 +2077,94 @@ def importa_vault_wiki_zip(
         "IMPORT_ZIP", "vault", f"Importati {n_importati} file Markdown", radice
     )
     return n_importati
+
+
+def costruisci_diagramma_flusso_risposta_dot(
+    problema: str, esito: Optional[Dict[str, Any]] = None
+) -> str:
+    """Generates an action flowchart in Graphviz DOT format (Napkin.ai style)
+    with 4 sequential horizontal nodes:
+    1. Question / Case (Blue)
+    2. Key Rule / Source (Green or Red if ROJO)
+    3. What To Do (Action) (Amber)
+    4. Final Verification (Purple)
+    Safe string sanitization: quotes and backslashes converted to spaces."""
+    dati_esito = esito if isinstance(esito, dict) else {}
+    semaforo = str(dati_esito.get("semaforo") or "AMBAR").upper()
+    risultato = dati_esito.get("risultato")
+    res = risultato if isinstance(risultato, dict) else {}
+
+    def _sanifica(val: Any) -> str:
+        if not val:
+            return ""
+        s = str(val).replace('"', ' ').replace('\\', ' ').replace('\n', ' ').replace('\r', ' ')
+        return re.sub(r"\s+", " ", s).strip()
+
+    q_raw = _sanifica(problema or "Question / Case")
+    q_txt = tronca_senza_spezzare_parola(q_raw, 70, suffisso="...")
+
+    regola_raw = ""
+    if res.get("principio_guida_unico"):
+        regola_raw = str(res["principio_guida_unico"])
+    elif res.get("fonte_prioritaria_selezionata"):
+        regola_raw = str(res["fonte_prioritaria_selezionata"])
+    elif semaforo == "ROJO":
+        regola_raw = str(res.get("dato_esatto_mancante") or "Document missing or insufficient confidence")
+    elif dati_esito.get("frammenti_usati"):
+        regola_raw = str(dati_esito["frammenti_usati"][0])
+    if not regola_raw:
+        regola_raw = "Documental Rule / Principle"
+    rule_txt = tronca_senza_spezzare_parola(_sanifica(regola_raw), 70, suffisso="...")
+
+    if semaforo == "ROJO":
+        r_fill = "#FADBD8"
+        r_col = "#EF4444"
+    else:
+        r_fill = "#D4EDDA"
+        r_col = "#10B981"
+
+    azione_raw = ""
+    if res.get("azione_correttiva_singola"):
+        azione_raw = str(res["azione_correttiva_singola"])
+    elif semaforo == "ROJO" and res.get("query_chirurgica_esterna"):
+        azione_raw = f"Acquire: {res['query_chirurgica_esterna']}"
+    elif res.get("risposta_finale_discorsiva"):
+        azione_raw = str(res["risposta_finale_discorsiva"])
+    elif dati_esito.get("risposta_discorsiva"):
+        azione_raw = str(dati_esito["risposta_discorsiva"])
+    if not azione_raw:
+        azione_raw = "Execute validated procedure"
+    act_txt = tronca_senza_spezzare_parola(_sanifica(azione_raw), 80, suffisso="...")
+
+    stato_memoria = str(dati_esito.get("stato_memoria") or res.get("stato_memoria") or "")
+    if not stato_memoria:
+        stato_memoria = "BLOCCO_SICUREZZA" if semaforo == "ROJO" else "SOLUZIONE_FONDATA"
+    colore_nodo = str(dati_esito.get("colore_nodo_ewd496a") or "NERO")
+    text_ver = f"{stato_memoria} ({semaforo}) - Nodo {colore_nodo}"
+    ver_txt = tronca_senza_spezzare_parola(_sanifica(text_ver), 70, suffisso="...")
+
+    return (
+        "digraph VisualStepFlow {\n"
+        "    rankdir=LR;\n"
+        '    node [shape=box, style="filled,rounded", fontname="Helvetica", fontsize=10];\n'
+        '    edge [color="#64748B", penwidth=1.5];\n\n'
+        f'    q [label="1. Question / Case\\n{q_txt}", fillcolor="#D0E8FF", color="#3B82F6"];\n'
+        f'    r [label="2. Key Rule / Source\\n{rule_txt}", fillcolor="{r_fill}", color="{r_col}"];\n'
+        f'    a [label="3. What To Do (Action)\\n{act_txt}", fillcolor="#FFE8B6", color="#F59E0B"];\n'
+        f'    c [label="4. Final Verification\\n{ver_txt}", fillcolor="#E2D9F3", color="#8B5CF6"];\n\n'
+        "    q -> r -> a -> c;\n"
+        "}"
+    )
+
+
+if __name__ == "__main__":
+    args = sys.argv[1:]
+    modalita_json = "--json" in args
+    domanda_arg = " ".join(a for a in args if a != "--json").strip()
+    if not domanda_arg:
+        domanda_arg = "Test diagnosi predefinita"
+    risultato_cli = risolvi_da_artigiano(domanda_arg)
+    if modalita_json:
+        print(json.dumps(risultato_cli, ensure_ascii=False, indent=2))
+    else:
+        print(risultato_cli.get("risposta_discorsiva", ""))

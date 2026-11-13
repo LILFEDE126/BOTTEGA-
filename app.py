@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v14"
+_VERSIONE_MODULI_THE = "2026.11.13.v15"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -800,6 +800,14 @@ with tab_artigiano:
                     parti.append(nuova_p)
                     st.session_state["ultimo_esito_artigiano"] = esito_cont
                     st.rerun()
+
+        st.markdown("#### 🗺️ Visual Step-by-Step Summary")
+        st.graphviz_chart(
+            risolutore_artigiano.costruisci_diagramma_flusso_risposta_dot(
+                st.session_state.get("ultima_domanda_artigiano", problema_testo),
+                esito,
+            )
+        )
 
         with st.expander("🔬 Technical Audit & Step-by-Step Verification Details (Strato L · A · D)"):
             testo_completo_diagnostica = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(

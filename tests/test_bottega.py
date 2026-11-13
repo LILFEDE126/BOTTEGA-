@@ -1760,4 +1760,23 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     assert "magic" not in sintesi_pulita
     assert "Nomi che dicono cosa contengono" in sintesi_pulita
 
+    esito_finto = {
+        "semaforo": "VERDE",
+        "stato_memoria": "SOLUZIONE_FONDATA",
+        "risultato": {
+            "principio_guida_unico": "Applicare rigorosamente la Regola 1 del codice pulito",
+            "azione_correttiva_singola": "Rinominare le variabili con identificatori autoesplicativi",
+            "risposta_finale_discorsiva": "Definire nomi chiari ed espliciti senza abbreviazioni criptiche.",
+        },
+    }
+    grafo_dot = risolutore_artigiano.costruisci_diagramma_flusso_risposta_dot(
+        "Come impostare il codice?", esito_finto
+    )
+    assert "digraph VisualStepFlow" in grafo_dot
+    assert "1. Question / Case" in grafo_dot
+    assert "3. What To Do (Action)" in grafo_dot
+
+    radice_repo = _trova_radice_progetto()
+    assert (radice_repo / "AGENTS.md").is_file()
+
 
