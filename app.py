@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v16"
+_VERSIONE_MODULI_THE = "2026.11.13.v17"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -256,10 +256,8 @@ _HTML_JS_ZERO_AXIOS = """
 
 
 def _stream_testo_parole(testo: str):
-    """Yields words preserving markdown newlines for real-time streaming in Streamlit."""
-    for token in re.findall(r"\S+\s*", testo):
-        yield token
-        time.sleep(INTERVALLO_STREAMING_UI_SECONDI)
+    """Yields the complete markdown text block atomically to preserve all newlines and code formatting."""
+    yield testo
 
 
 def _conta_frammenti_ram_sicuro(titolo=None) -> int:
@@ -1101,10 +1099,7 @@ with tab_codice:
                     try:
                         with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade (Strato L -> Strato A -> Strato D)..."):
                             referto = cascata_strutturata.esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
-                        if "```" in referto:
-                            st.markdown(referto)
-                        else:
-                            st.write_stream(_stream_testo_parole(referto))
+                        st.markdown(referto)
                         st.download_button(
                             "Download Markdown Report",
                             referto,

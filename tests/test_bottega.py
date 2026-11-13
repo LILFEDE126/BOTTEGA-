@@ -1785,10 +1785,22 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     assert taglio_audit == "Testo principale pulito"
 
     frammenti_codice_attaccato = [
-        {"titolo": "Giorno 02 - Codice pulito.pdf", "testo": "def calc (d):res = {}for i in d:p = int (i[1] / 10)\nEURO_PER_PUNTO = 10SOGLIA_BONUS = 100MOLTIPLICATORE_BONUS = 2\nreturn puntipunti = punti_acquisto (importo)"}
+        {
+            "titolo": "Giorno 02 - Codice pulito.pdf",
+            "testo": (
+                "from punti import punti_acquistoimport sys, csvdef calc (d):\n"
+                "EURO_PER_PUNTO = 10SOGLIA_BONUS = 100MOLTIPLICATORE_BONUS = 2\n"
+                "return puntipunti = punti_acquisto (importo)"
+            ),
+        }
     ]
     sintesi_codice = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito("Codice pulito", frammenti_codice_attaccato)
-    assert "EURO_PER_PUNTO = 10\nSOGLIA_BONUS = 100" in sintesi_codice
-    assert "return punti\npunti = punti_acquisto" in sintesi_codice
+    assert "EURO_PER_PUNTO = 10" in sintesi_codice
+    assert "SOGLIA_BONUS = 100" in sintesi_codice
+    assert "return punti" in sintesi_codice
+    assert "punti = punti_acquisto" in sintesi_codice
+    assert "punti_acquistoimport" not in sintesi_codice
+    assert "csvdef" not in sintesi_codice
+    assert "\n" in sintesi_codice
 
 

@@ -446,6 +446,20 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
         if not testo:
             continue
 
+        testo = re.sub(
+            r"(?<=\S)(?=(?:def |for |if |elif |else:|try:|except|return |raise |import |from ))",
+            "\n",
+            testo,
+        )
+        testo = re.sub(r"(\d)([A-Z_]{3,}\s*=)", r"\1\n\2", testo)
+        testo = re.sub(r"(\b[a-zA-Z_]{3,})(\1\s*=)", r"\1\n\2", testo)
+        testo = re.sub(r"(\breturn\s+[a-zA-Z_]\w*?)([a-zA-Z_]\w*\s*=)", r"\1\n\2", testo)
+        testo = re.sub(
+            r":\s*(?=(?:def |for |if |elif |else:|try:|except|return |raise |[a-zA-Z_]\w*\s*=))",
+            ":\n    ",
+            testo,
+        )
+
         righe_grezze = [r.rstrip() for r in testo.splitlines() if r.strip()]
         righe_ricongiunte: List[str] = []
         for r in righe_grezze:
@@ -482,15 +496,19 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             viste.add(chiave_normalizzata)
 
             if _e_riga_codice_python(riga):
-                riga_cod = riga
+                riga_cod = re.sub(
+                    r"(?<=\S)(?=(?:def |for |if |elif |else:|try:|except|return |raise |import |from ))",
+                    "\n",
+                    riga,
+                )
                 riga_cod = re.sub(r"(\d)([A-Z_]{3,}\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r"(\b[a-zA-Z_]{3,})(\1\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r"(\breturn\s+[a-zA-Z_]\w*?)([a-zA-Z_]\w*\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r":\s*(?=(?:def |for |if |elif |else:|try:|except|return |raise |[a-zA-Z_]\w*\s*=))", ":\n    ", riga_cod)
                 riga_cod = re.sub(r"(?<=[}\])\w])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", riga_cod)
                 for sub_r in riga_cod.splitlines():
-                    sub_pulita = sub_r.rstrip()
-                    if sub_pulita.strip() and sub_pulita not in codice_trovato:
+                    sub_pulita = sub_r.strip()
+                    if sub_pulita and sub_pulita not in codice_trovato:
                         codice_trovato.append(sub_pulita)
             else:
                 if riga_strip.startswith("#"):
@@ -525,7 +543,8 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
         parti_output.append("### Prescrizioni e Regole Operative Certificate\n" + "\n".join(righe_sintesi))
 
     if codice_trovato:
-        parti_output.append("### Esempi di Codice Verificati\n```python\n" + "\n".join(codice_trovato) + "\n```")
+        codice_pulito_str = "\n\n".join(c.strip() for c in codice_trovato if c.strip())
+        parti_output.append(f"### Esempi di Codice Verificati\n```python\n{codice_pulito_str}\n```")
 
     if not parti_output:
         testi_base = [_ripulisci_prefisso_tecnico_frammento(f.get("testo", "")) for f in frammenti[:3]]
