@@ -11,8 +11,8 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _PARTI_CHIAVE_CLOUD_DEFAULT = (
-    "QVEuQWI4Uk42SXM2SHA=",
-    "LXRwQUVybDFfejJpYjd2Z05lN2lhRmY5MFdDX3Q3cDlPNVZ5Q0hB",
+    "QVEuQWI4Uk42S2txdWRIUg==",
+    "OEpnenpsUzRBLUVBZzJ4TzE5Z2tkVEZHOFY5WmtMMnlpeGFSdw==",
 )
 
 MODELLI_FALLBACK_GEMINI = (

@@ -390,6 +390,9 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     for spezzato, unito in _TERMINI_CAMELCASE_PROTETTI:
         if spezzato in testo_lavorato:
             testo_lavorato = testo_lavorato.replace(spezzato, unito)
+    testo_lavorato = re.sub(r"\b([a-zA-Z_]\w*)\s*-=\s*0\b", r"\1 <= 0", testo_lavorato)
+    testo_lavorato = re.sub(r"COUNT\s*\(\s*\*\s*\)\s*-=\s*(\d+)", r"COUNT(*) >= \1", testo_lavorato)
+    testo_lavorato = re.sub(r"(\b\w+\.\w+)\s*→\s*'([^']+)'", r"\1 != '\2'", testo_lavorato)
     testo_lavorato = re.sub(r"\n{3,}", "\n\n", testo_lavorato)
     return testo_lavorato.strip()
 
@@ -408,6 +411,10 @@ _MARCATORI_SLIDE_RUMORE = (
     "due verita e una bugia",
     "biglietto di uscita",
     "il parcheggio delle domande",
+    "parcheggio delle domande",
+    "hello@davidelista.com",
+    "domani alle 9:00",
+    "prossima lezione: dal canvas alle tabelle",
     "il metodo · a ogni tappa",
     "il metodo a ogni tappa",
     "le squadre · tappa per tappa",
@@ -571,6 +578,19 @@ def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[st
     caratteri_accumulati = 0
 
     for idx, testo_pag in pagine_valide:
+        e_copertina_parte = bool(re.match(r"(?i)^/?\s*parte\s+0?\d\b", testo_pag.strip()))
+        if e_copertina_parte:
+            if cluster_corrente:
+                idx_inizio = cluster_corrente[0][0]
+                idx_fine = cluster_corrente[-1][0]
+                etichetta = f"Page {idx_inizio}" if idx_inizio == idx_fine else f"Pages {idx_inizio}-{idx_fine}"
+                testo_unito = "\n\n".join(s for _, s in cluster_corrente)
+                blocchi_slide.append((etichetta, testo_unito))
+                cluster_corrente = []
+                caratteri_accumulati = 0
+            if len(testo_pag.strip()) < 180:
+                continue
+
         markdown_slide = _formatta_pagina_in_markdown(idx, testo_pag)
         if not markdown_slide:
             continue
@@ -967,34 +987,46 @@ def _naviga_e_espandi_riferimenti_agentici(
         return ordinati
     mappa_per_id = {item["id"]: item for item in candidati_ram}
     ids_presenti = {f["id"] for f in ordinati}
-    espansi: List[Dict[str, Any]] = []
+    espansi: List[Dict[str, Any]] = list(ordinati)
+    coda_vicini: List[Dict[str, Any]] = []
 
     for framm in ordinati:
-        espansi.append(framm)
         id_corr = framm["id"]
         doc_corr = framm.get("titolo", "")
         sim_base = float(framm.get("similitudine", 0.70))
         rrf_base = float(framm.get("rrf", 0.01))
+        mappa_orig = mappa_per_id.get(id_corr)
+        corpo_orig = (mappa_orig.get("corpo") if mappa_orig else None) or framm.get("testo", "")
+        parole_base = {
+            w for w in re.findall(r"[a-zA-Zà-ÿ]{4,}", corpo_orig.lower())
+            if w not in STOPWORDS_RICERCA_COMUNI and w not in ("page", "pages", "tecnico")
+        }
 
-        for delta in (1, 2):
-            vicino = mappa_per_id.get(id_corr + delta)
-            if (
-                vicino is not None
-                and vicino.get("titolo") == doc_corr
-                and vicino["id"] not in ids_presenti
-                and len(espansi) < max(top_k, 6)
-            ):
+        vicino = mappa_per_id.get(id_corr + 1)
+        if (
+            vicino is not None
+            and vicino.get("titolo") == doc_corr
+            and vicino["id"] not in ids_presenti
+            and len(espansi) + len(coda_vicini) < max(top_k, 6)
+        ):
+            corpo_vicino = vicino.get("corpo") or vicino.get("testo", "")
+            parole_vicino = {
+                w for w in re.findall(r"[a-zA-Zà-ÿ]{4,}", corpo_vicino.lower())
+                if w not in STOPWORDS_RICERCA_COMUNI and w not in ("page", "pages", "tecnico")
+            }
+            if parole_base & parole_vicino:
                 ids_presenti.add(vicino["id"])
-                espansi.append({
+                coda_vicini.append({
                     "id": vicino["id"],
                     "dominio": vicino.get("dominio", framm.get("dominio", "")),
                     "titolo": vicino.get("titolo", doc_corr),
                     "sezione": vicino.get("sezione", ""),
                     "testo": vicino["testo"],
-                    "similitudine": round(max(0.60, sim_base - 0.02 * delta), 4),
-                    "rrf": rrf_base * (0.95 ** delta),
+                    "similitudine": round(max(0.60, sim_base - 0.02), 4),
+                    "rrf": rrf_base * 0.95,
                 })
 
+    espansi.extend(coda_vicini)
     return espansi[:max(top_k, 6)]
 
 

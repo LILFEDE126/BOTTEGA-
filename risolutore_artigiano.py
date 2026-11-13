@@ -3,6 +3,7 @@
 Supports any input language (EN, ES, IT, etc.) with automatic search translation,
 natural-language final response synthesis and deterministic RAG fallback."""
 
+import ast
 import datetime
 import io
 import json
@@ -457,38 +458,67 @@ def _ripulisci_prefisso_tecnico_frammento(testo: str) -> str:
 
 def _e_riga_codice_python(riga: str) -> bool:
     r_strip = riga.strip()
+    if not r_strip or r_strip.startswith("#"):
+        return False
     r_lower = r_strip.lower()
     if any(frase in r_lower for frase in _FRASI_DISCORSIVE_SCARTO_CODICE):
         return False
-    if r_strip.startswith("from ") or r_strip.startswith("import "):
-        if ":" in r_strip:
+    parte_codice = r_strip.split("#", 1)[0].strip() if "#" in r_strip else r_strip
+    if not parte_codice:
+        return False
+    if parte_codice.startswith("except"):
+        return bool(
+            re.match(
+                r"^except(?:\s+[A-Za-z_]\w*(?:\s+as\s+[A-Za-z_]\w*)?)?\s*:\s*(?:pass|return\b.*|raise\b.*)?$",
+                parte_codice,
+            )
+        )
+    if parte_codice.startswith("from ") or parte_codice.startswith("import "):
+        if ":" in parte_codice:
             return False
-        if re.match(r"^from\s+[a-z_][a-z0-9_.]*\s+import\s+[a-zA-Z_*]", r_strip):
+        try:
+            ast.parse(parte_codice)
             return True
-        if re.match(r"^import\s+[a-z_][a-z0-9_.,\s]*$", r_strip):
+        except SyntaxError:
+            return False
+    if parte_codice.startswith(("continue", "break")):
+        return bool(re.match(r"^(?:continue|break)$", parte_codice))
+    if parte_codice in ("else:", "try:", "finally:"):
+        return True
+    if parte_codice.endswith(":"):
+        if not parte_codice.startswith(("def ", "for ", "if ", "elif ", "while ", "with ", "class ")):
+            return False
+        blocco_prova = (
+            f"if True:\n    pass\n{parte_codice}\n    pass"
+            if parte_codice.startswith("elif ")
+            else f"{parte_codice}\n    pass"
+        )
+        try:
+            ast.parse(blocco_prova)
             return True
-        return False
-    if r_strip.startswith(("continue", "break")):
-        if re.match(r"^(?:continue|break)\s*(?:#.*)?$", r_strip):
-            return True
-        return False
-    if "#" in r_strip:
-        parte_codice = r_strip.split("#", 1)[0].strip()
-        if parte_codice and (
-            any(c in parte_codice for c in ("=", "(", "[", "{", ":"))
-            or parte_codice.startswith(("return ", "pass", "raise "))
-        ):
-            return True
+        except SyntaxError:
+            return False
     if not (
-        any(c in r_strip for c in ("=", "(", ":"))
-        or r_strip.startswith(("return ", "yield ", "raise ", "pass"))
+        any(c in parte_codice for c in ("=", "(", "["))
+        or parte_codice.startswith(("return ", "yield ", "raise ", "pass"))
     ):
         return False
-    if any(r_strip.startswith(p) for p in _PREFISSI_CODICE_PYTHON):
+    if re.match(r"^[a-zA-Zà-ÿ]+\s*=\s*[a-zà-ÿ]+$", parte_codice):
+        rhs = parte_codice.split("=", 1)[1].strip()
+        if rhs not in ("True", "False", "None"):
+            return False
+    testo_ast = (
+        f"def _f():\n    {parte_codice}"
+        if parte_codice.startswith(("return ", "yield "))
+        else parte_codice
+    )
+    try:
+        ast.parse(testo_ast)
+    except SyntaxError:
+        return False
+    if any(parte_codice.startswith(p) for p in _PREFISSI_CODICE_PYTHON):
         return True
-    if r_strip in ("else:", "try:", "finally:", "except:"):
-        return True
-    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+$", r_strip):
+    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+$", parte_codice):
         return True
     return False
 
@@ -592,8 +622,8 @@ def _seleziona_frammenti_pertinenti_domanda(
     else:
         frammenti_scartati.extend(altri_frammenti)
 
-    accettati = frammenti_primo_doc[:3] + frammenti_secondo_doc[:2]
-    scartati = frammenti_primo_doc[3:] + frammenti_secondo_doc[2:] + frammenti_scartati
+    accettati = frammenti_primo_doc[:4] + frammenti_secondo_doc[:2]
+    scartati = frammenti_primo_doc[4:] + frammenti_secondo_doc[2:] + frammenti_scartati
     return (accettati or frammenti_primo_doc), scartati
 
 
@@ -612,17 +642,56 @@ _MARCATORI_AHASLIDES_RUMORE = (
 )
 
 
-def _sintetizza_frammenti_lista(frammenti_sub: List[dict]) -> str:
+def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -> str:
     """Sintetizza una lista omogenea di frammenti di un singolo documento in blocchi Markdown puliti."""
     righe_sintesi: List[str] = []
     viste: Set[str] = set()
     sezioni_trovate: List[str] = []
     codice_trovato: List[str] = []
+    termini_prob = _estrai_termini_chiave_chirurgici(problema) if problema and problema.strip() else set()
+    prob_basso = (problema or "").lower()
 
     for frammento in frammenti_sub[:5]:
         testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
         if not testo:
             continue
+
+        if "### [Page " in testo and termini_prob:
+            slides_singole = [
+                s.strip()
+                for s in re.split(r"(?=^### \[Page \d+\])", testo, flags=re.MULTILINE)
+                if s.strip()
+            ]
+            if len(slides_singole) > 1:
+                slides_filtrate = [
+                    s for s in slides_singole
+                    if any(t in s.lower() for t in termini_prob)
+                    and not (
+                        any(
+                            extra in s.lower()
+                            for extra in (
+                                "banca del tempo",
+                                "fantacalcio tra amici",
+                                "diario del caffè",
+                                "il tuo progetto nasce oggi",
+                                "head staccata",
+                                "git exercises",
+                            )
+                        )
+                        and not any(
+                            extra in prob_basso
+                            for extra in (
+                                "banca del tempo",
+                                "fantacalcio",
+                                "progetto",
+                                "head staccata",
+                                "git exercises",
+                            )
+                        )
+                    )
+                ]
+                if slides_filtrate:
+                    testo = "\n\n".join(slides_filtrate)
 
         testo = re.sub(r"([a-zA-Z0-9_])(import\s+)", r"\1\n\2", testo)
         testo = re.sub(r"([a-zA-Z0-9_])(def\s+)", r"\1\n\2", testo)
@@ -648,6 +717,10 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict]) -> str:
             if not r_pulita:
                 continue
             r_lower = r_pulita.lower()
+            if r_pulita.startswith(("=======", "<<<<<<<", ">>>>>>>")):
+                continue
+            if r_lower.startswith("# apri ") or "apri readme.md" in r_lower:
+                continue
             if any(r_lower.startswith(pref) for pref in ("cp ", "touch ", "rm ", "cd ", "mkdir ", "chmod ", "git ")):
                 continue
             if r_pulita in ("pass", "...", "return None"):
@@ -695,7 +768,7 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict]) -> str:
                 riga_cod = re.sub(r"(?<=[}\]:])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", riga_cod)
                 for sub_r in riga_cod.splitlines():
                     sub_pulita = sub_r.strip()
-                    if sub_pulita and sub_pulita not in codice_trovato:
+                    if sub_pulita and _e_riga_codice_python(sub_pulita) and sub_pulita not in codice_trovato:
                         codice_trovato.append(sub_pulita)
             else:
                 if riga_strip.startswith("#"):
@@ -765,13 +838,13 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     if len(docs_distinti) >= 2:
         sezioni_doc: List[str] = []
         for tit_doc, f_sub in docs_distinti.items():
-            sintesi_sub = _sintetizza_frammenti_lista(f_sub)
+            sintesi_sub = _sintetizza_frammenti_lista(f_sub, problema=problema)
             if sintesi_sub.strip():
                 sezioni_doc.append(f"#### 📄 Fonte: {tit_doc}\n\n{sintesi_sub}")
         if sezioni_doc:
             return "\n\n---\n\n".join(sezioni_doc)
 
-    sintesi_totale = _sintetizza_frammenti_lista(frammenti_stesso_doc)
+    sintesi_totale = _sintetizza_frammenti_lista(frammenti_stesso_doc, problema=problema)
     return sintesi_totale if sintesi_totale.strip() else problema.strip()
 
 
@@ -1442,18 +1515,36 @@ def risolvi_da_artigiano(
     limite_turno = max_caratteri_turno if max_caratteri_turno is not None else MAX_CARATTERI_TURNO_DEFAULT
     in_sospeso = False
     pagine_rimanenti = 0
-    if len(risposta_discorsiva_piena) > limite_turno:
-        pagine = suddividi_in_pagine_con_continua(
-            risposta_discorsiva_piena,
-            max_caratteri_pagina=limite_turno,
+    testo_solo_discorsivo = (sol_dict.get("risposta_finale_discorsiva") or "").strip()
+    deve_paginare = len(testo_solo_discorsivo) > limite_turno or (
+        max_caratteri_turno is not None
+        and len(risposta_discorsiva_piena) > limite_turno
+        and len(testo_solo_discorsivo) > 80
+    )
+    if deve_paginare:
+        soglia_pag = (
+            limite_turno
+            if len(testo_solo_discorsivo) > limite_turno
+            else max(80, len(testo_solo_discorsivo) // 2)
         )
-        if len(pagine) > 1:
-            imposta_pagine_continua(dominio, pagine[1:])
-            risposta_discorsiva_piena = pagine[0]
+        pagine_discorsive = suddividi_in_pagine_con_continua(
+            testo_solo_discorsivo,
+            max_caratteri_pagina=soglia_pag,
+        )
+        if len(pagine_discorsive) > 1:
+            imposta_pagine_continua(dominio, pagine_discorsive[1:])
             in_sospeso = True
-            pagine_rimanenti = len(pagine) - 1
-            if isinstance(sol_dict, dict) and "risposta_finale_discorsiva" in sol_dict:
-                sol_dict["risposta_finale_discorsiva"] = pagine[0]
+            pagine_rimanenti = len(pagine_discorsive) - 1
+            if isinstance(sol_dict, dict):
+                sol_dict["risposta_finale_discorsiva"] = pagine_discorsive[0]
+            risposta_discorsiva_piena = (
+                formatta_risposta_artigiano_leggibile(
+                    sol_dict, "AZIONE_SINGOLA_VERIFICABILE", lingua=lingua_rilevata
+                )
+                + "\n\ncontinua"
+            )
+        else:
+            svuota_pagine_continua(dominio)
     else:
         svuota_pagine_continua(dominio)
 

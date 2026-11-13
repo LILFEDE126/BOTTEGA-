@@ -1928,6 +1928,23 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert "sudo apt install" not in risp
     assert "createdb" not in risp
 
+    chiave_def = config._decodifica_chiave_cloud_default()
+    assert chiave_def.startswith("AQ.Ab8RN6KkqudHR") and chiave_def.endswith("ZkL2yixaRw") and len(chiave_def) == 53
+    assert risolutore_artigiano._e_riga_codice_python("raise dentro la funzione, try fuori") is False
+    assert risolutore_artigiano._e_riga_codice_python("return non viene mai eseguito") is False
+    assert risolutore_artigiano._e_riga_codice_python("verde = indizio") is False
+    assert risolutore_artigiano._e_riga_codice_python("def dividi(totale, persone):") is True
+    assert store_pgvector.normalizza_spazi_testo_pdf("if persone -= 0: HAVING COUNT(*) -= 3") == "if persone <= 0: HAVING COUNT(*) >= 3"
+    assert store_pgvector.normalizza_spazi_testo_pdf("WHERE o.stato → 'annullato'") == "WHERE o.stato != 'annullato'"
+
+    esito_pag = risolutore_artigiano.risolvi_da_artigiano(domanda, dominio="tecnico", max_caratteri_turno=180)
+    assert esito_pag.get("in_sospeso") is True
+    while risolutore_artigiano.ha_pagine_continua_in_sospeso("tecnico"):
+        pag_c = risolutore_artigiano.estrai_prossima_pagina_continua("tecnico")
+        assert pag_c is not None
+        assert "4. Verifica Pratica di Controllo" not in pag_c
+        assert "5. Condizione di Partenza" not in pag_c
+
     risolutore_artigiano.svuota_pagine_continua("tecnico")
     esito_cont = risolutore_artigiano.risolvi_da_artigiano("continua", dominio="tecnico")
     assert esito_cont.get("in_sospeso") is False

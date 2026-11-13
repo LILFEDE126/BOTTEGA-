@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v20"
+_VERSIONE_MODULI_THE = "2026.11.14.v21"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -802,9 +802,6 @@ with tab_artigiano:
         m1.metric("Document Match", f"{'High' if esito['semaforo'] == 'VERDE' else ('Partial' if esito['semaforo'] == 'AMBAR' else 'Not Found')} ({int(round(float(esito['s_max']) * 100))}%)")
         m2.metric("Answer Status", "Verified from Your Files" if esito["modalita"] != "RICERCA_PRIMA_DI_AGIRE" else "Honest Stop — Missing Data")
         m3.metric("Numbers & Facts Check", "100% Verified" if esito["colore_nodo_ewd496a"] == "NERO" else "Unverified Numbers Flagged")
-
-        if esito.get("sintesi_deterministica_attiva"):
-            st.caption("ℹ️ Local Document Summary Mode active. To enable full neural AI prose generation, enter a free Google AI Studio key ('AIzaSy...') in the left sidebar.")
 
         parti_acc = st.session_state.get("parti_discorso_accumulate", [])
         if parti_acc:
