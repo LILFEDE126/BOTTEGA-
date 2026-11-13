@@ -4,7 +4,7 @@ Write Barrier (EWD496A) on LLM-generated figures. Zero I/O dependencies."""
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import re
-from typing import List, Set, Tuple
+from typing import Dict, List, Set, Tuple
 
 PATRON_NUM = re.compile(
     r"\d+(?:[.,]\d+)?\s*%"

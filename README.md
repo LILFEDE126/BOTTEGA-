@@ -1,6 +1,6 @@
 # Bottega Leonardesca & THE Engine
 
-[![Pure Unit Tests](https://img.shields.io/badge/tests-45%20passed-brightgreen?style=flat-square&logo=pytest)](tests/test_bottega.py)
+[![Pure Unit Tests](https://img.shields.io/badge/tests-46%20passed-brightgreen?style=flat-square&logo=pytest)](tests/test_bottega.py)
 [![Architecture](https://img.shields.io/badge/THE%20Hierarchy-5%20Acyclic%20Rings%20(EWD196)-blue?style=flat-square)](config.py)
 [![Zero Frameworks](https://img.shields.io/badge/Dependencies-Zero%20LangChain%20%2F%20LlamaIndex-orange?style=flat-square)](requirements.txt)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
@@ -36,7 +36,7 @@ Every module at layer $L$ may import **exclusively** modules at layer $< L$. Bot
 
 ## Quick Start & Verification
 
-### 1. Run the 45 Pure Unit Tests (Zero Network, Zero DB, Zero LLM)
+### 1. Run the 46 Pure Unit Tests (Zero Network, Zero DB, Zero LLM)
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate

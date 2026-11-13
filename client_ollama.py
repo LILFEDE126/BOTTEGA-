@@ -166,6 +166,11 @@ GLOSSARIO_MULTILINGUA_IT = MappingProxyType({
     "query": "query sql select from where join order by group by",
     "database": "database sql tabella tabelle select from where join",
     "sql": "sql query select from where join group by order by",
+    "postgresql": "postgresql sql database query select from where join group by order by tabella",
+    "postgres": "postgresql sql database query select from where join group by",
+    "psql": "psql postgresql sql database query select dt",
+    "programmare": "programmare codice pulito sette regole python",
+    "programmazione": "programmazione codice pulito sette regole python",
     "comprensibile": "comprensibile codice pulito sette regole leggibile",
 })
 

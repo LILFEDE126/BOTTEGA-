@@ -51,6 +51,11 @@ _PDF_READER_ORIGINALE = PdfReader
 _OLLAMA_EMBED_OFFLINE = False
 _POSTGRES_OFFLINE = False
 
+
+def e_postgres_locale_attivo() -> bool:
+    """Restituisce True solo quando il database PostgreSQL locale e attivo, False in modalita Web RAM."""
+    return not _POSTGRES_OFFLINE
+
 _ARCHIVIO_MEMORIA_RAM: List[Dict[str, Any]] = []
 _CACHE_BLOCCHI_DOCUMENTO: Dict[str, List[Tuple[str, str]]] = {}
 
@@ -432,6 +437,23 @@ _MARCATORI_SLIDE_RUMORE = (
     "storie dell'orrore",
     "il codice peggiore che ho visto",
     "dai biglietti di uscita",
+    "/ ahaslides",
+    "ahaslides · slide",
+    "ahaslides slide",
+    "nel mazzo",
+    "voci della ruota",
+    "spinner wheel",
+    "pick answer",
+    "open ended",
+    "bonus velocità",
+    "bonus velocita",
+    "mescola l'ordine",
+    "la mappa della classe",
+    "metti un post-it sulla cartina",
+    "iscritto all'albo degli ingegneri",
+    "il corso in tre numeri",
+    "ogni giornata funziona così",
+    "dove lavoreremo",
 )
 
 
@@ -982,8 +1004,8 @@ def _bilancia_frammenti_domanda_composta(
     query_bassa: str,
     limite_k: int,
 ) -> List[Dict[str, Any]]:
-    termini_python = ("python", "codice", "funzioni")
-    termini_sql = ("query", "database", "sql", "select", "join", "tabella")
+    termini_python = ("python", "codice", "funzioni", "programmazione", "programmare")
+    termini_sql = ("query", "database", "sql", "postgresql", "postgres", "psql", "select", "join", "tabella", "tabelle")
     query_tokens = set(re.findall(r"\w+", query_bassa))
     ha_py = bool(set(termini_python) & query_tokens or "linguaggio python" in query_bassa or "codice pulito" in query_bassa)
     ha_sql = bool(set(termini_sql) & query_tokens or "query sql" in query_bassa or "per i database" in query_bassa)
@@ -1001,6 +1023,11 @@ def _bilancia_frammenti_domanda_composta(
                 "gh auth login",
                 "gh repo clone",
                 "git clone",
+                "select current_user",
+                "alter user",
+                "add connection",
+                "visualize schema",
+                "createdb ",
             )
         )
 

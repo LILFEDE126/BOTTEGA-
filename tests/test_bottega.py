@@ -1868,5 +1868,78 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     assert "gh auth login" not in sintesi_doppia
 
 
+def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresql():
+    assert store_pgvector._e_slide_rumore_o_indice(
+        "/ AHASLIDES · SLIDE 03 · DOMANDA 1\nIMPOSTAZIONI TIPO Quiz Pick Answer"
+    ) is True
+    assert store_pgvector._e_slide_rumore_o_indice("VOCI DELLA RUOTA · I 15 NOMI") is True
+    assert store_pgvector._e_slide_rumore_o_indice("nel mazzo delle carte") is True
+    assert store_pgvector._e_slide_rumore_o_indice("bonus velocità per risposte rapide") is True
+
+    import grounding_numerico
+    assert hasattr(grounding_numerico, "Dict")
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    store_pgvector.incasella_e_salva(
+        "tecnico",
+        "Giorno 02 - Codice pulito.pdf",
+        [
+            (
+                "Regole",
+                "CODICE PULITO IN PYTHON: Sette regole per chi legge e crea un metodo di programmazione.\n"
+                "01 Nomi che dicono cosa contengono\n"
+                "02 Una funzione, un compito\n"
+                "def calcola_totale(prezzo, sconto):\n    return prezzo - sconto",
+            )
+        ],
+    )
+    store_pgvector.incasella_e_salva(
+        "tecnico",
+        "Giorno 01 - Si parte.pdf",
+        [
+            (
+                "Setup",
+                "Installazione pacchetti:\n"
+                "sudo apt install postgresql\n"
+                "gh auth login\n"
+                "createdb mydb",
+            )
+        ],
+    )
+    store_pgvector.incasella_e_salva(
+        "tecnico",
+        "Giorno 05 - Il giallo SQL.pdf",
+        [
+            (
+                "Regole SQL",
+                "Scrivere query per database con metodo rigoroso:\n"
+                "SELECT c.nome FROM clienti c JOIN ordini o ON c.id = o.cliente_id WHERE o.stato = 'nuovo';\n"
+                "Raggruppamenti e filtri aggregati con GROUP BY e HAVING per isolare i record.",
+            )
+        ],
+    )
+
+    domanda = "informazioni fondamentali per python e creare un metodo di programmazione? e in postgresql che regole serve sapere?"
+    esito = risolutore_artigiano.risolvi_da_artigiano(domanda, dominio="tecnico")
+    risp = esito.get("risposta_discorsiva", "")
+
+    assert "Nomi che dicono cosa contengono" in risp or "Una funzione, un compito" in risp
+    assert "SELECT" in risp or "GROUP BY" in risp or "HAVING" in risp or "query per database" in risp
+    assert "sudo apt install" not in risp
+    assert "createdb" not in risp
+
+    risolutore_artigiano.svuota_pagine_continua("tecnico")
+    esito_cont = risolutore_artigiano.risolvi_da_artigiano("continua", dominio="tecnico")
+    assert esito_cont.get("in_sospeso") is False
+    assert esito_cont.get("pagine_rimanenti") == 0
+    res_obj = esito_cont.get("risultato", {})
+    assert res_obj.get("stato") == "NESSUNA_CONTINUAZIONE"
+    assert "Nessuna continuazione in sospeso" in res_obj.get("risposta_finale_discorsiva", "")
+    assert "Giorno 01" not in esito_cont.get("risposta_discorsiva", "")
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+
+
+
 
 

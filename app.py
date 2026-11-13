@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v19"
+_VERSIONE_MODULI_THE = "2026.11.13.v20"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -67,7 +67,11 @@ def _allinea_moduli_in_memoria() -> None:
             if nome_mod in importlib.sys.modules:
                 importlib.reload(modulo)
 
-        if archivio_precedente and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None):
+        if (
+            archivio_precedente
+            and st.session_state.get("documenti_archivio_sessione")
+            and not getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", None)
+        ):
             for voce in archivio_precedente:
                 if "testo" in voce:
                     voce["testo"] = store_pgvector.normalizza_spazi_testo_pdf(voce["testo"])
@@ -89,6 +93,18 @@ def _allinea_moduli_in_memoria() -> None:
 
 
 _allinea_moduli_in_memoria()
+
+if "sessione_web_effimera_attiva" not in st.session_state:
+    if getattr(store_pgvector, "_POSTGRES_OFFLINE", True):
+        store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+        risolutore_artigiano.svuota_pagine_continua()
+        if hasattr(risolutore_artigiano, "svuota_vault_ram"):
+            risolutore_artigiano.svuota_vault_ram()
+    st.session_state["documenti_archivio_sessione"] = {}
+    st.session_state["llm_wiki_voci"] = []
+    st.session_state["parti_discorso_accumulate"] = []
+    st.session_state["ultimo_esito_artigiano"] = None
+    st.session_state["sessione_web_effimera_attiva"] = True
 
 if "llm_wiki_voci" not in st.session_state:
     st.session_state["llm_wiki_voci"] = risolutore_artigiano.carica_voci_wiki_da_disco()
@@ -570,6 +586,10 @@ with st.sidebar:
 
     st.divider()
     st.header("2. Document & PDF Archive")
+    if getattr(store_pgvector, "_POSTGRES_OFFLINE", True):
+        st.info("🔒 Web Ephemeral RAM Mode: Zero data saved on server. Reloading the page wipes all data.")
+    else:
+        st.success("🗄️ Local Client PostgreSQL Mode: Data stored exclusively in your local database.")
     dominio_doc = st.selectbox(
         "Target Domain:",
         DOMINI_DISPONIBILI,
@@ -745,12 +765,6 @@ with tab_artigiano:
                             if parti:
                                 parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
                             parti.append(parte_pulita)
-                        else:
-                            approf = risolutore_artigiano.approfondisci_sezioni_successive_documento(dominio_scelto)
-                            if approf:
-                                if parti:
-                                    parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
-                                parti.append(approf)
                         esito_orig = st.session_state.get("esito_principale_originale")
                         st.session_state["ultimo_esito_artigiano"] = esito_orig if esito_orig is not None else esito
                     else:
@@ -818,12 +832,6 @@ with tab_artigiano:
                         if parti:
                             parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
                         parti.append(parte_pulita)
-                    else:
-                        approf = risolutore_artigiano.approfondisci_sezioni_successive_documento(dominio_scelto)
-                        if approf:
-                            if parti:
-                                parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
-                            parti.append(approf)
                     esito_orig = st.session_state.get("esito_principale_originale")
                     st.session_state["ultimo_esito_artigiano"] = esito_orig if esito_orig is not None else esito_cont
                     st.rerun()
