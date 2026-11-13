@@ -57,7 +57,6 @@ _ETICHETTE_DIDATTICHE_RUMORE = frozenset({
 _PREFISSI_CODICE_PYTHON = (
     "def ", "return ", "for ", "if ", "elif ", "else:", "try:", "except",
     "raise ", "import ", "from ", "class ", "assert ", "@", "with ",
-    "continue", "break",
 )
 
 _FRASI_DISCORSIVE_SCARTO_CODICE = (
@@ -402,16 +401,20 @@ def _e_riga_codice_python(riga: str) -> bool:
         if re.match(r"^import\s+[a-z_][a-z0-9_.,\s]*$", r_strip):
             return True
         return False
+    if r_strip.startswith(("continue", "break")):
+        if re.match(r"^(?:continue|break)\s*(?:#.*)?$", r_strip):
+            return True
+        return False
     if "#" in r_strip:
         parte_codice = r_strip.split("#", 1)[0].strip()
         if parte_codice and (
             any(c in parte_codice for c in ("=", "(", "[", "{", ":"))
-            or parte_codice.startswith(("continue", "break", "return", "pass", "raise"))
+            or parte_codice.startswith(("return ", "pass", "raise "))
         ):
             return True
     if not (
         any(c in r_strip for c in ("=", "(", ":"))
-        or r_strip.startswith(("return ", "yield ", "raise ", "pass", "continue", "break"))
+        or r_strip.startswith(("return ", "yield ", "raise ", "pass"))
     ):
         return False
     if any(r_strip.startswith(p) for p in _PREFISSI_CODICE_PYTHON):
@@ -420,9 +423,111 @@ def _e_riga_codice_python(riga: str) -> bool:
         return True
     if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+$", r_strip):
         return True
-    if re.match(r"^(?:continue|break)\s*(?:#.*)?$", r_strip):
-        return True
     return False
+
+
+_STOPWORDS_CHIRURGICHE = frozenset({
+    "qual", "quale", "quali", "cosa", "come", "dove", "quando", "perche", "perché",
+    "del", "della", "delle", "degli", "dello", "dei", "dal", "dalla", "dalle",
+    "nel", "nella", "nelle", "negli", "nello", "nei", "con", "per", "tra", "fra",
+    "questo", "questa", "questi", "queste", "quello", "quella", "che", "chi",
+    "preciso", "precisione", "sfidato", "sfidati", "sfida", "hanno", "dire", "sai",
+    "parte", "parti", "prossimi", "prossimo", "prossima", "prossime", "andamento",
+    "anni", "anno", "mesi", "mese", "giorni", "due", "tre", "puoi", "dimmi", "sapere",
+    "vorrei", "the", "and", "for", "with", "from", "into", "that", "this", "what",
+    "which", "para", "como", "desde", "hasta", "sobre", "entre", "cual", "cuál",
+})
+
+
+def _estrai_termini_chiave_chirurgici(query_testo: str) -> Set[str]:
+    testo_norm = re.sub(r"(?i)\b(?:s&p|sp)\s*500\b", "s&p 500", query_testo.lower())
+    token_lista = re.findall(r"s&p\s+500|\bs&p\b|\b\d+(?:[.,/-]\d+)*\b|[a-z0-9à-ÿ&]{2,}", testo_norm)
+    termini = set()
+    for tok in token_lista:
+        tok_pulito = tok.strip()
+        if tok_pulito in _STOPWORDS_CHIRURGICHE:
+            continue
+        if len(tok_pulito) < 3 and not any(ch.isdigit() for ch in tok_pulito) and tok_pulito not in ("sp", "s&p"):
+            continue
+        termini.add(tok_pulito)
+        if tok_pulito in ("s&p 500", "sp 500"):
+            termini.update(["s&p", "sp", "500"])
+    return termini
+
+
+def _seleziona_frammenti_pertinenti_domanda(
+    problema: str, frammenti: List[dict]
+) -> Tuple[List[dict], List[dict]]:
+    if not frammenti:
+        return [], []
+
+    def _e_blocco_installazione_rumore(testo: str) -> bool:
+        t_low = testo.lower()
+        return any(
+            p in t_low
+            for p in (
+                "sudo apt install",
+                "sudo apt-get install",
+                "gh auth login",
+                "gh repo clone",
+                "git clone",
+                "installare postgresql",
+            )
+        )
+
+    frammenti_utili = [f for f in frammenti if not _e_blocco_installazione_rumore(f.get("testo", ""))]
+    if not frammenti_utili:
+        frammenti_utili = list(frammenti)
+
+    titolo_guida = (frammenti_utili[0].get("titolo", "") or "").strip()
+    slug_guida = _estrai_slug_fonte_da_frammento(frammenti_utili[0].get("testo", "")) if not titolo_guida else ""
+
+    frammenti_primo_doc: List[dict] = []
+    altri_frammenti: List[dict] = []
+    for f in frammenti_utili:
+        f_tit = (f.get("titolo", "") or "").strip()
+        f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
+        if (titolo_guida and f_tit == titolo_guida) or (slug_guida and f_sl == slug_guida):
+            frammenti_primo_doc.append(f)
+        else:
+            altri_frammenti.append(f)
+
+    if not frammenti_primo_doc:
+        frammenti_primo_doc = [frammenti_utili[0]]
+        altri_frammenti = frammenti_utili[1:]
+
+    termini_domanda = _estrai_termini_chiave_chirurgici(problema)
+    testo_primo_doc = " ".join((f.get("titolo", "") + " " + f.get("testo", "")).lower() for f in frammenti_primo_doc)
+    termini_coperti_primo = {t for t in termini_domanda if t in testo_primo_doc}
+    termini_mancanti = termini_domanda - termini_coperti_primo
+
+    frammenti_secondo_doc: List[dict] = []
+    frammenti_scartati: List[dict] = []
+
+    if termini_mancanti and altri_frammenti:
+        titolo_secondo = ""
+        slug_secondo = ""
+        for f in altri_frammenti:
+            f_tit = (f.get("titolo", "") or "").strip()
+            f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
+            f_comb = (f_tit + " " + f.get("testo", "")).lower()
+            match_mancanti = any(t in f_comb for t in termini_mancanti)
+            if match_mancanti:
+                if not titolo_secondo and not slug_secondo:
+                    titolo_secondo = f_tit
+                    slug_secondo = f_sl
+                if (titolo_secondo and f_tit == titolo_secondo) or (slug_secondo and f_sl == slug_secondo):
+                    frammenti_secondo_doc.append(f)
+                else:
+                    frammenti_scartati.append(f)
+            else:
+                frammenti_scartati.append(f)
+    else:
+        frammenti_scartati.extend(altri_frammenti)
+
+    accettati = frammenti_primo_doc[:3] + frammenti_secondo_doc[:2]
+    scartati = frammenti_primo_doc[3:] + frammenti_secondo_doc[2:] + frammenti_scartati
+    return (accettati or frammenti_primo_doc), scartati
 
 
 def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict]) -> str:
@@ -431,21 +536,7 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     if not frammenti:
         return problema.strip()
 
-    titolo_guida = (frammenti[0].get("titolo", "") or "").strip()
-    slug_guida = _estrai_slug_fonte_da_frammento(frammenti[0].get("testo", "")) if not titolo_guida else ""
-    frammenti_stesso_doc = []
-    for f in frammenti:
-        f_tit = (f.get("titolo", "") or "").strip()
-        f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
-        if titolo_guida:
-            if f_tit == titolo_guida:
-                frammenti_stesso_doc.append(f)
-        elif slug_guida:
-            if f_sl == slug_guida:
-                frammenti_stesso_doc.append(f)
-        else:
-            frammenti_stesso_doc.append(f)
-
+    frammenti_stesso_doc, _ = _seleziona_frammenti_pertinenti_domanda(problema, frammenti)
     if not frammenti_stesso_doc:
         frammenti_stesso_doc = frammenti
 
@@ -454,7 +545,7 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     sezioni_trovate: List[str] = []
     codice_trovato: List[str] = []
 
-    for frammento in frammenti_stesso_doc[:4]:
+    for frammento in frammenti_stesso_doc[:5]:
         testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
         if not testo:
             continue
@@ -561,7 +652,11 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
         parti_output.append("### Prescrizioni e Regole Operative Certificate\n" + "\n".join(righe_sintesi))
 
     if codice_trovato:
-        righe_cod_md = [f"- `{c.strip().replace('`', chr(39))}`" for c in codice_trovato if c.strip()]
+        righe_cod_md = [
+            f"- `{' '.join(c.strip().split()).replace('`', chr(39))}`"
+            for c in codice_trovato
+            if " ".join(c.strip().split())
+        ]
         if righe_cod_md:
             parti_output.append("### Esempi di Codice Verificati\n" + "\n".join(righe_cod_md))
 
@@ -580,38 +675,24 @@ def _costruisci_soluzione_deterministica(
 ) -> SoluzioneArtigiano:
     """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
     when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
-    titolo_guida = (frammenti[0].get("titolo", "") or "").strip() if frammenti else ""
-    slug_guida = _estrai_slug_fonte_da_frammento(frammenti[0].get("testo", "")) if frammenti and not titolo_guida else ""
-    frammenti_stesso_doc = []
-    frammenti_scartati_altro_doc = []
-    for f in (frammenti or []):
-        f_tit = (f.get("titolo", "") or "").strip()
-        f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
-        if titolo_guida:
-            if f_tit == titolo_guida:
-                frammenti_stesso_doc.append(f)
-            else:
-                frammenti_scartati_altro_doc.append(f)
-        elif slug_guida:
-            if f_sl == slug_guida:
-                frammenti_stesso_doc.append(f)
-            else:
-                frammenti_scartati_altro_doc.append(f)
-        else:
-            frammenti_stesso_doc.append(f)
+    frammenti_accettati, frammenti_scartati_totali = _seleziona_frammenti_pertinenti_domanda(
+        problema, frammenti or []
+    )
+    if not frammenti_accettati:
+        frammenti_accettati = frammenti or []
 
-    pertinenti_raw = frammenti_stesso_doc[:4] if frammenti_stesso_doc else []
+    pertinenti_raw = frammenti_accettati[:4] if frammenti_accettati else []
     pertinenti_testi = [_ripulisci_prefisso_tecnico_frammento(f["testo"]) for f in pertinenti_raw]
     pertinenti_testi = [t for t in pertinenti_testi if t]
 
-    risposta_finale = _sintetizza_blocchi_in_markdown_pulito(problema, frammenti_stesso_doc)
+    risposta_finale = _sintetizza_blocchi_in_markdown_pulito(problema, frammenti_accettati)
 
     primo_testo = pertinenti_testi[0] if pertinenti_testi else problema.strip()
     principale_breve = _sintetizza_etichetta_frammento(primo_testo, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
     tag_scarto = _ETICHETTE_SCARTATO.get(lingua, _ETICHETTE_SCARTATO["it"])
     tag_fals = _ETICHETTE_FALSIFICATA.get(lingua, _ETICHETTE_FALSIFICATA["it"])
 
-    frammenti_rimanenti = frammenti_stesso_doc[len(pertinenti_raw):] + frammenti_scartati_altro_doc
+    frammenti_rimanenti = frammenti_scartati_totali
     scartati = [
         f"{tag_scarto} {_sintetizza_etichetta_frammento(frammento['testo'], max_len=MAX_CARATTERI_SCARTO_DEFAULT)}"
         for frammento in frammenti_rimanenti
@@ -742,35 +823,6 @@ _SPIE_DATO_ASSENTE_NEI_FRAMMENTI = (
     "no contiene ninguna referencia",
     "imposibilidad de responder",
 )
-
-_STOPWORDS_CHIRURGICHE = frozenset({
-    "qual", "quale", "quali", "cosa", "come", "dove", "quando", "perche", "perché",
-    "del", "della", "delle", "degli", "dello", "dei", "dal", "dalla", "dalle",
-    "nel", "nella", "nelle", "negli", "nello", "nei", "con", "per", "tra", "fra",
-    "questo", "questa", "questi", "queste", "quello", "quella", "che", "chi",
-    "preciso", "precisione", "sfidato", "sfidati", "sfida", "hanno", "dire", "sai",
-    "parte", "parti", "prossimi", "prossimo", "prossima", "prossime", "andamento",
-    "anni", "anno", "mesi", "mese", "giorni", "due", "tre", "puoi", "dimmi", "sapere",
-    "vorrei", "the", "and", "for", "with", "from", "into", "that", "this", "what",
-    "which", "para", "como", "desde", "hasta", "sobre", "entre", "cual", "cuál",
-})
-
-
-def _estrai_termini_chiave_chirurgici(query_testo: str) -> Set[str]:
-    testo_norm = re.sub(r"(?i)\b(?:s&p|sp)\s*500\b", "s&p 500", query_testo.lower())
-    token_lista = re.findall(r"s&p\s+500|\bs&p\b|\b\d+(?:[.,/-]\d+)*\b|[a-z0-9à-ÿ&]{2,}", testo_norm)
-    termini = set()
-    for tok in token_lista:
-        tok_pulito = tok.strip()
-        if tok_pulito in _STOPWORDS_CHIRURGICHE:
-            continue
-        if len(tok_pulito) < 3 and not any(ch.isdigit() for ch in tok_pulito) and tok_pulito not in ("sp", "s&p"):
-            continue
-        termini.add(tok_pulito)
-        if tok_pulito in ("s&p 500", "sp 500"):
-            termini.update(["s&p", "sp", "500"])
-    return termini
-
 
 def _verifica_pertinenza_blocchi_esterni(
     blocchi: List[Tuple[str, str]],

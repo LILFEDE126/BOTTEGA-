@@ -12,6 +12,7 @@ import tokenize
 from types import MappingProxyType
 from pydantic import BaseModel
 import pytest
+import re
 import requests
 
 import config
@@ -1818,6 +1819,54 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     assert "sufficienti = [v for v in voti if v >= 6]" in sintesi_elif
     assert "giro el" not in sintesi_elif
     assert "[vfor" not in sintesi_elif
+
+    assert not risolutore_artigiano._e_riga_codice_python("02 continue salta il resto del giro")
+    assert not risolutore_artigiano._e_riga_codice_python("continue salta il resto del giro")
+    assert not risolutore_artigiano._e_riga_codice_python("break esce dal ciclo")
+    assert risolutore_artigiano._e_riga_codice_python("continue")
+    assert risolutore_artigiano._e_riga_codice_python("continue # salta al prossimo giro")
+    assert risolutore_artigiano._e_riga_codice_python("break")
+    assert risolutore_artigiano._e_riga_codice_python("break # esce dal ciclo")
+
+    frammenti_continue_nl = [
+        {
+            "titolo": "Giorno 02 - Codice pulito.pdf",
+            "testo": (
+                "02\n"
+                "continue salta il resto del giro, break esce dal ciclo\n"
+                "if\nimporto < 0:\n    return punti"
+            ),
+        }
+    ]
+    sintesi_continue_nl = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito("Regole e cicli", frammenti_continue_nl)
+    assert not any(riga.strip() == "- 02" for riga in sintesi_continue_nl.splitlines())
+    assert "continue salta il resto del giro" in sintesi_continue_nl
+    assert "if importo < 0:" in sintesi_continue_nl
+    for riga in sintesi_continue_nl.splitlines():
+        for inline_cod in re.findall(r"`([^`]+)`", riga):
+            assert "\n" not in inline_cod
+
+    frammenti_composti = [
+        {
+            "titolo": "Giorno 02 – Codice pulito.pptx.pdf",
+            "testo": "Regola 1: Nomi che dicono cosa contengono.\ndef calcola_punti(importo):\n    return importo // 10",
+        },
+        {
+            "titolo": "Giorno 01 – Installazione.pptx.pdf",
+            "testo": "Per installare postgresql su linux:\nsudo apt install postgresql\ngh auth login",
+        },
+        {
+            "titolo": "Giorno 05 – Il giallo SQL.pptx.pdf",
+            "testo": "Scrivere query con metodo: clausole in ordine logico SELECT, FROM, WHERE, JOIN.\nSELECT nome, importo FROM acquisti WHERE importo > 100;",
+        },
+    ]
+    domanda_doppia = "mi diresti per piacere come posso scrivere linguaggio python comprensibile e con metodo? e come posso scrivere le query con metodo per i database"
+    sintesi_doppia = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito(domanda_doppia, frammenti_composti)
+    assert "Nomi che dicono cosa contengono" in sintesi_doppia
+    assert "SELECT, FROM, WHERE, JOIN" in sintesi_doppia or "query con metodo" in sintesi_doppia
+    assert "sudo apt install" not in sintesi_doppia
+    assert "gh auth login" not in sintesi_doppia
+
 
 
 

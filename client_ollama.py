@@ -163,6 +163,10 @@ GLOSSARIO_MULTILINGUA_IT = MappingProxyType({
     "impostare": "impostare codice pulito sette regole",
     "imposta": "imposta codice pulito sette regole",
     "fondamentali": "fondamentali sette regole codice pulito",
+    "query": "query sql select from where join order by group by",
+    "database": "database sql tabella tabelle select from where join",
+    "sql": "sql query select from where join group by order by",
+    "comprensibile": "comprensibile codice pulito sette regole leggibile",
 })
 
 PAROLE_SPIA_LINGUA = MappingProxyType({

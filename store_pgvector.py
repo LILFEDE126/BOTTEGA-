@@ -976,6 +976,94 @@ def _naviga_e_espandi_riferimenti_agentici(
     return espansi[:max(top_k, 6)]
 
 
+def _bilancia_frammenti_domanda_composta(
+    ordinati: List[Dict[str, Any]],
+    candidati_tutti: List[Dict[str, Any]],
+    query_bassa: str,
+    limite_k: int,
+) -> List[Dict[str, Any]]:
+    termini_python = ("python", "codice", "funzioni")
+    termini_sql = ("query", "database", "sql", "select", "join", "tabella")
+    query_tokens = set(re.findall(r"\w+", query_bassa))
+    ha_py = bool(set(termini_python) & query_tokens or "linguaggio python" in query_bassa or "codice pulito" in query_bassa)
+    ha_sql = bool(set(termini_sql) & query_tokens or "query sql" in query_bassa or "per i database" in query_bassa)
+    if not (ha_py and ha_sql):
+        return ordinati
+
+    def _e_setup_rumore(testo: str) -> bool:
+        t_low = testo.lower()
+        return any(
+            p in t_low
+            for p in (
+                "installare postgresql",
+                "sudo apt install",
+                "sudo apt-get install",
+                "gh auth login",
+                "gh repo clone",
+                "git clone",
+            )
+        )
+
+    def _e_sql_pertinente(f: Dict[str, Any]) -> bool:
+        tit_low = (f.get("titolo", "") or "").lower()
+        testo_low = (f.get("testo", "") or "").lower()
+        if _e_setup_rumore(testo_low):
+            return False
+        if any(k in tit_low for k in ("sql", "database", "giorno 05")):
+            return True
+        return any(
+            k in testo_low
+            for k in (
+                "select ", "from ", "where ", "join ", "group by", "order by",
+                "create table", "insert into", "query",
+            )
+        )
+
+    def _e_python_pertinente(f: Dict[str, Any]) -> bool:
+        tit_low = (f.get("titolo", "") or "").lower()
+        testo_low = (f.get("testo", "") or "").lower()
+        if any(k in tit_low for k in ("codice pulito", "python", "giorno 02")):
+            return True
+        return any(
+            k in testo_low
+            for k in ("def ", "import ", "codice pulito", "regola ", "sufficienti", "return ")
+        )
+
+    puliti = [f for f in ordinati if not _e_setup_rumore(f.get("testo", ""))]
+    ids_ordinati = {f.get("id") for f in puliti}
+
+    candidati_sql = [
+        f for f in candidati_tutti
+        if _e_sql_pertinente(f) and f.get("id") not in ids_ordinati
+    ]
+    candidati_sql.sort(
+        key=lambda x: (x.get("match_count", 0), x.get("similitudine", 0.0), x.get("rrf", 0.0)),
+        reverse=True,
+    )
+
+    py_in_ord = [f for f in puliti if _e_python_pertinente(f)]
+    sql_in_ord = [f for f in puliti if _e_sql_pertinente(f)]
+
+    scelti_py = py_in_ord[:2]
+    scelti_sql = sql_in_ord[:2] or candidati_sql[:2]
+
+    risultato: List[Dict[str, Any]] = []
+    for f in scelti_py:
+        if f not in risultato:
+            risultato.append(f)
+    for f in scelti_sql:
+        if f not in risultato:
+            risultato.append(f)
+
+    for f in puliti:
+        if len(risultato) >= limite_k:
+            break
+        if f not in risultato:
+            risultato.append(f)
+
+    return risultato if len(risultato) >= 2 else ordinati
+
+
 def _recupera_da_archivio_ram(
     query: str,
     q_vec: List[float],
@@ -1043,6 +1131,7 @@ def _recupera_da_archivio_ram(
     ordinati = fondi_rrf(lista_vett, lista_it, lista_simple, top_k=limite_k)
     if len(candidati) > 2:
         ordinati = _naviga_e_espandi_riferimenti_agentici(ordinati, candidati, top_k=limite_k)
+    ordinati = _bilancia_frammenti_domanda_composta(ordinati, candidati, query_bassa, limite_k)
     ha_match = bool(con_match)
     if ha_match and s_dom < 0.35:
         s_dom = 0.55
