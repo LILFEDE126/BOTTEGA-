@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v12"
+_VERSIONE_MODULI_THE = "2026.11.13.v13"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -159,10 +159,10 @@ _HTML_JS_ZERO_AXIOS = """
 <body>
   <input type="file" id="mob_file_input" accept=".pdf,.txt,.md,.csv,.py,.zip" multiple style="display:none;" />
   <button type="button" class="btn-mob" onclick="document.getElementById('mob_file_input').click();">
-    📱 Scegli PDF / File da Telefono (Zero-Axios)
+    📱 Select PDF or Files from Phone / Tablet
   </button>
   <button type="button" id="btn_copia_appunti" class="btn-copy">
-    📋 Copia testo estratto negli appunti
+    📋 Copy extracted text to clipboard
   </button>
   <div id="mob_status" class="status-box"></div>
 
@@ -178,7 +178,7 @@ _HTML_JS_ZERO_AXIOS = """
     if (!files || files.length === 0) return;
     const stBox = document.getElementById('mob_status');
     const cpBtn = document.getElementById('btn_copia_appunti');
-    stBox.innerHTML = '<span style="color:rgb(13, 110, 253);">⏳ Lettura file in RAM locale dello smartphone...</span>';
+    stBox.innerHTML = '<span style="color:rgb(13, 110, 253);">⏳ Reading file in local device memory...</span>';
 
     try {
       let testiAccumulati = [];
@@ -206,11 +206,12 @@ _HTML_JS_ZERO_AXIOS = """
         }
       }
 
-      testoGlobaleEstratto = testiAccumulati.join('\\n--- [Nuovo Documento] ---\\n');
+      testoGlobaleEstratto = testiAccumulati.join('\\n--- [Next Document] ---\\n');
 
       try {
         const parentDoc = window.parent.document;
-        const ta = parentDoc.querySelector('textarea[aria-label="Testo del documento da salvare in Archivio:"]') ||
+        const ta = parentDoc.querySelector('textarea[aria-label="Document Text to Save in Archive:"]') ||
+                   parentDoc.querySelector('textarea[aria-label="Testo del documento da salvare in Archivio:"]') ||
                    parentDoc.querySelector('textarea[placeholder*="testo estratto"]') ||
                    parentDoc.querySelector('textarea[placeholder*="Paste your document content"]') ||
                    parentDoc.querySelector('textarea[placeholder*="Incolla"]');
@@ -221,8 +222,8 @@ _HTML_JS_ZERO_AXIOS = """
           ta.dispatchEvent(new Event('change', { bubbles: true }));
         }
 
-        const inpTitle = parentDoc.querySelector('input[aria-label="Nome documento (Mobile):"]') ||
-                         parentDoc.querySelector('input[aria-label="Document Title:"]');
+        const inpTitle = parentDoc.querySelector('input[aria-label="Document Title:"]') ||
+                         parentDoc.querySelector('input[aria-label="Nome documento (Mobile):"]');
         if (inpTitle) {
           const setterInp = Object.getOwnPropertyDescriptor(window.parent.HTMLInputElement.prototype, 'value').set;
           setterInp.call(inpTitle, primoNome);
@@ -233,19 +234,19 @@ _HTML_JS_ZERO_AXIOS = """
         testoGlobaleEstratto = testiAccumulati.join('\\n');
       }
 
-      stBox.innerHTML = '<span style="color:rgb(15, 81, 50);font-weight:600;">✅ Letto dal telefono (' + primoNome + ')! Ora premi \\"Salva Documento Mobile in Archivio\\" qui sotto.</span>';
+      stBox.innerHTML = '<span style="color:rgb(15, 81, 50);font-weight:600;">✅ Read successfully (' + primoNome + ')! Now click \\"Save Document to Knowledge Base\\" below.</span>';
       cpBtn.style.display = 'block';
     } catch (errLettura) {
-      stBox.innerHTML = '<span style="color:rgb(176, 42, 55);">❌ Errore lettura file: ' + errLettura.message + '</span>';
+      stBox.innerHTML = '<span style="color:rgb(176, 42, 55);">❌ Error reading file: ' + errLettura.message + '</span>';
     }
   });
 
   document.getElementById('btn_copia_appunti').addEventListener('click', function() {
     if (!testoGlobaleEstratto) return;
     navigator.clipboard.writeText(testoGlobaleEstratto).then(function() {
-      document.getElementById('btn_copia_appunti').innerText = '✅ Testo Copiato negli Appunti!';
+      document.getElementById('btn_copia_appunti').innerText = '✅ Text Copied to Clipboard!';
     }).catch(function() {
-      document.getElementById('btn_copia_appunti').innerText = '❌ Errore copia appunti';
+      document.getElementById('btn_copia_appunti').innerText = '❌ Error copying text';
     });
   });
 </script>
@@ -587,22 +588,22 @@ with st.sidebar:
     )
     clic_salva = st.button("Save to Archive")
 
-    with st.expander("📱 Caricatore PDF Diretto da Telefono (Anti-AxiosError) & Incolla Testo"):
-        st.caption("Legge i PDF direttamente nella memoria del telefono senza passare da Axios o connessioni di rete.")
+    with st.expander("📱 Direct Phone & Tablet File Reader (or Paste Text)"):
+        st.caption("Reads PDF and text files directly in your phone or tablet memory, bypassing mobile browser upload limitations.")
         st.components.v1.html(_HTML_JS_ZERO_AXIOS, height=135)
         titolo_mobile = st.text_input(
-            "Nome documento (Mobile):",
-            value="Documento_Mobile.pdf",
+            "Document Title:",
+            value="Mobile_Document.pdf",
             key="titolo_mobile_doc",
-            help="Nome assegnato al documento letto dal telefono o incollato.",
+            help="Title assigned to the document read from phone or pasted.",
         )
         testo_mobile = st.text_area(
-            "Testo del documento da salvare in Archivio:",
+            "Document Text to Save in Archive:",
             key="testo_mobile_area",
             height=100,
-            placeholder="Il testo estratto dal PDF apparirà qui automaticamente, oppure puoi incollarlo qui a mano...",
+            placeholder="Text extracted from your file will appear here automatically, or you can paste it manually...",
         )
-        if st.button("💾 Salva Documento Mobile in Archivio", type="primary", key="btn_salva_mobile"):
+        if st.button("💾 Save Document to Knowledge Base", type="primary", key="btn_salva_mobile"):
             if _salva_testo_incollato_in_archivio(
                 titolo_mobile,
                 testo_mobile,
@@ -685,73 +686,18 @@ def _cercatore_cascata_ui(query_ricerca: str):
     )
 
 
-tab_codice, tab_artigiano, tab_ponte_web = st.tabs([
-    "1. Python AST Inspection & 3-Layer Cascade (Strato L · A · D)",
-    "2. Automated Diagnostic Solver (EN / ES / IT)",
-    "3. Free Web Bridge (Copy-Paste & Write-Barrier Audit)",
+tab_artigiano, tab_wiki, tab_ponte_web, tab_codice = st.tabs([
+    "🔍 1. Ask Your Documents & Second Brain",
+    "📚 2. Knowledge Wiki & Visual Map",
+    "🛡️ 3. Fact-Check External AI",
+    "⚙️ 4. Python Code Inspector",
 ])
-
-with tab_codice:
-    codice_incollato = st.text_area(
-        "Paste Python code to inspect:",
-        height=ALTEZZA_CODICE_UI,
-        placeholder="def calculate_margin(price, cost):\n    return price - cost",
-    )
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("1A. Deterministic AST Anatomy Only (Instant, Zero LLM)"):
-            if not codice_incollato.strip():
-                st.warning("Please enter Python code first.")
-            else:
-                try:
-                    dati_ast = anatomia_ast.analizza_codice_ast(codice_incollato)
-                    st.success(
-                        f"Functions/Methods: {dati_ast['numero_funzioni']} | "
-                        f"Bare excepts: {dati_ast['totale_except_nudi']} | "
-                        f"Unbounded loops: {dati_ast['cicli_senza_variante']} | "
-                        f"Mutable globals: {dati_ast['usi_global_mutabili']}"
-                    )
-                    st.graphviz_chart(dati_ast["dot_graph"])
-                    st.json(dati_ast["funzioni"])
-                except SyntaxError as err:
-                    st.error(f"Syntax error at line {err.lineno}: {err.msg}")
-
-    with col2:
-        if st.button("1B. Run Full 3-Layer Cascade (AST + RRF RAG + Strato L / A / D)", type="primary"):
-            if not codice_incollato.strip():
-                st.warning("Please enter Python code first.")
-            else:
-                try:
-                    anatomia_ast.analizza_codice_ast(codice_incollato)
-                except SyntaxError as err:
-                    st.error(f"Syntax error at line {err.lineno}: {err.msg}")
-                    st.stop()
-
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tmp_path = Path(tmpdir) / "codice_analizzato.py"
-                    tmp_path.write_text(codice_incollato, encoding="utf-8")
-                    try:
-                        with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade (Strato L -> Strato A -> Strato D)..."):
-                            referto = cascata_strutturata.esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
-                        st.write_stream(_stream_testo_parole(referto))
-                        st.download_button(
-                            "Download Markdown Report",
-                            referto,
-                            file_name="referto_bottega.md",
-                            mime="text/markdown",
-                        )
-                    except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
-                        logging_bottega.log_exception("Errore in esegui_cascata UI", "APP_CAS_001", err)
-                        st.error(f"Error during cascade execution ({provider_ui}): {err}")
 
 with tab_artigiano:
     problema_testo = st.text_area(
-        "Describe an unexpected problem in English, Español, Italiano or any language:",
+        "Ask any question about your uploaded documents (in English, Italiano, Español, or any language):",
         height=ALTEZZA_TEXTAREA_UI,
-        placeholder=(
-            "Write your question or problem here in English, Español, Italiano or any language..."
-        ),
+        placeholder="Ask a question or describe a problem based on your documents...",
     )
     col_dom, col_escl = st.columns([1, 2])
     with col_dom:
@@ -772,21 +718,18 @@ with tab_artigiano:
             help="Any hypothesis entered here is strictly forbidden as the root cause and will be isolated in Point 6 as [Falsified in the field].",
         )
 
-    clic_risolvi = st.button(
-        "Solve with Craftsman Method (Semaphore + wp(S, R) + Zero Clutter)",
-        type="primary",
-    )
+    clic_risolvi = st.button("Get Verified Answer", type="primary")
     fn_ha_continua = getattr(risolutore_artigiano, "ha_pagine_continua_in_sospeso", None)
     ha_continua_attivo = callable(fn_ha_continua) and fn_ha_continua(dominio_scelto)
     clic_continua = False
     if ha_continua_attivo:
         st.info("Long response paginated: click below or type 'continua' to read the next part.")
-        clic_continua = st.button("Continua lettura (Turno successivo)")
+        clic_continua = st.button("Continue reading (Next part)")
 
     if clic_risolvi or clic_continua:
         testo_input_effettivo = "continua" if clic_continua else problema_testo
         if not testo_input_effettivo.strip():
-            st.warning("Please enter a problem description first.")
+            st.warning("Please enter a question or problem description first.")
         else:
             lista_escluse = [
                 riga.strip() for riga in ipotesi_escluse_testo.splitlines() if riga.strip()
@@ -808,36 +751,43 @@ with tab_artigiano:
                 if voce_wiki not in voci_wiki:
                     voci_wiki.append(voce_wiki)
                 risolutore_artigiano.salva_voce_wiki_su_disco(voce_wiki)
+
                 m1, m2, m3 = st.columns(3)
-                m1.metric("RAG Semaphore", f"{esito['semaforo']} (s_max={esito['s_max']})")
-                m2.metric("Mode", esito["modalita"])
-                m3.metric("Write Barrier (Strato D)", f"Node {esito['colore_nodo_ewd496a']}")
+                m1.metric("Document Match", f"{'High' if esito['semaforo'] == 'VERDE' else ('Partial' if esito['semaforo'] == 'AMBAR' else 'Not Found')} ({int(round(float(esito['s_max']) * 100))}%)")
+                m2.metric("Answer Status", "Verified from Your Files" if esito["modalita"] != "RICERCA_PRIMA_DI_AGIRE" else "Honest Stop — Missing Data")
+                m3.metric("Numbers & Facts Check", "100% Verified" if esito["colore_nodo_ewd496a"] == "NERO" else "Unverified Numbers Flagged")
+
                 if esito.get("sintesi_deterministica_attiva"):
-                    st.caption(
-                        "ℹ️ Modalità Sintesi Deterministica Locale attiva "
-                        "(Per attivare la generazione neurale Gemini, inserisci una chiave Google AI Studio 'AIzaSy...' nella sidebar)."
-                    )
+                    st.caption("ℹ️ Local Document Summary Mode active. To enable full neural AI prose generation, enter a free Google AI Studio key ('AIzaSy...') in the left sidebar.")
 
                 testo_leggibile = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(
                     esito["risultato"],
                     esito["modalita"],
                     lingua=esito.get("lingua", "it"),
                 )
-                st.subheader("Diagnostic Response & Operational Plan")
-                st.write_stream(_stream_testo_parole(testo_leggibile))
 
-                if esito.get("frammenti_usati"):
-                    with st.expander("View Grounded Fragments Extracted from Document / Archive"):
+                risposta_mostrata = esito.get("risultato", {}).get("risposta_finale_discorsiva") or testo_leggibile
+                st.markdown("### Answer from Your Documents")
+                st.write_stream(_stream_testo_parole(risposta_mostrata))
+
+                with st.expander("🔬 Technical Audit & Step-by-Step Verification Details (Strato L · A · D)"):
+                    st.markdown("#### Full Step-by-Step Diagnostic Report")
+                    st.markdown(testo_leggibile)
+                    if esito.get("frammenti_usati"):
+                        st.markdown("#### Grounded Fragments from Your Files")
                         for idx_f, testo_f in enumerate(esito["frammenti_usati"], start=1):
                             st.markdown(f"**Fragment {idx_f}:**\n> {testo_f}")
-
-                with st.expander("Technical Details & JSON Audit (Strato L · Strato A · Strato D)"):
+                    st.markdown("#### JSON Audit Data")
                     st.json(esito["risultato"])
-                    if esito["cifre_non_ancorate"]:
+                    if esito.get("cifre_non_ancorate"):
                         st.warning(f"Ungrounded figures flagged by Write Barrier: {esito['cifre_non_ancorate']}")
             except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                 logging_bottega.log_exception("Errore in risolvi_da_artigiano UI", "APP_ART_001", err)
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
+
+with tab_wiki:
+    st.subheader("📚 Second Brain Knowledge Vault (Obsidian & Karpathy Pattern)")
+    st.caption("Multi-file Markdown knowledge vault with bidirectional [[wikilinks]], live graph navigation, Marp presentations and 1-click Obsidian export.")
 
     radice_vault = risolutore_artigiano.inizializza_vault_wiki()
     n_sources = len(list((radice_vault / "wiki" / "sources").glob("*.md")))
@@ -846,93 +796,98 @@ with tab_artigiano:
     n_synthesis = len(list((radice_vault / "wiki" / "synthesis").glob("*.md")))
     n_presentations = len(list((radice_vault / "wiki" / "presentations").glob("*.md")))
 
-    with st.expander("📚 Gen III LLM Wiki (Karpathy / Obsidian Vault) — Explorer, Graph View, Lint & MARP"):
-        m_v1, m_v2, m_v3, m_v4, m_v5 = st.columns(5)
-        m_v1.metric("Sources", n_sources)
-        m_v2.metric("Concepts", n_concepts)
-        m_v3.metric("Entities", n_entities)
-        m_v4.metric("Synthesis", n_synthesis)
-        m_v5.metric("Presentations", n_presentations)
+    m_v1, m_v2, m_v3, m_v4, m_v5 = st.columns(5)
+    m_v1.metric("Sources", n_sources)
+    m_v2.metric("Concepts", n_concepts)
+    m_v3.metric("Entities", n_entities)
+    m_v4.metric("Saved Answers", n_synthesis)
+    m_v5.metric("Slide Decks", n_presentations)
 
-        b1, b2, b3 = st.columns(3)
-        with b1:
-            if st.button("🔍 Run Wiki Lint (Health Check)", key="btn_lint_wiki"):
-                esito_lint = risolutore_artigiano.esegui_lint_wiki(radice_vault)
-                st.success(
-                    f"Health Check: {esito_lint['stato_salute']} | "
-                    f"Pagine: {esito_lint['pagine_totali']} | "
-                    f"Orfani riparati: {esito_lint['orfani_riparati']} | "
-                    f"Link aggiunti: {esito_lint['link_aggiunti']}"
-                )
-                st.rerun()
-        with b2:
-            if st.button("🎞️ Generate MARP Slides", key="btn_marp_slides"):
-                ult_prob = st.session_state.get(
-                    "ultima_domanda_artigiano", "Bottega Executive Presentation"
-                )
-                ult_esito = st.session_state.get("ultimo_esito_artigiano") or {
-                    "semaforo": "VERDE",
-                    "s_max": 1.0,
-                    "colore_nodo_ewd496a": "NERO",
-                    "risultato": {"principio_guida_unico": "Bottega Leonardo LLM Wiki"},
-                    "risposta_discorsiva": "Sintesi esecutiva generata dal Vault.",
-                }
-                testo_marp, path_marp = risolutore_artigiano.genera_presentazione_marp(
-                    ult_prob, ult_esito, radice_vault
-                )
-                st.session_state["ultimo_marp_testo"] = testo_marp
-                st.session_state["ultimo_marp_nome"] = path_marp.name
-                st.success(f"Presentazione MARP creata: {path_marp.name}")
-
-        with b3:
-            dati_zip = risolutore_artigiano.esporta_vault_wiki_zip(radice_vault)
-            st.download_button(
-                "📦 Download Full Obsidian Vault (.zip)",
-                data=dati_zip,
-                file_name="bottega_obsidian_vault.zip",
-                mime="application/zip",
-                key="dl_vault_zip",
+    b1, b2, b3, b4 = st.columns(4)
+    with b1:
+        if st.button("🔍 Run Wiki Health Check (Lint)", key="btn_lint_wiki_tab"):
+            esito_lint = risolutore_artigiano.esegui_lint_wiki(radice_vault)
+            st.success(
+                f"Health Status: {esito_lint['stato_salute']} | "
+                f"Total Pages: {esito_lint['pagine_totali']} | "
+                f"Orphans Repaired: {esito_lint['orfani_riparati']} | "
+                f"Links Added: {esito_lint['link_aggiunti']}"
             )
-
-        if "ultimo_marp_testo" in st.session_state:
-            st.download_button(
-                f"💾 Download Generated Presentation ({st.session_state.get('ultimo_marp_nome', 'slides.md')})",
-                data=st.session_state["ultimo_marp_testo"].encode("utf-8"),
-                file_name=st.session_state.get("ultimo_marp_nome", "slides-marp.md"),
-                mime="text/markdown",
-                key="dl_marp_md",
+            st.rerun()
+    with b2:
+        if st.button("🎞️ Generate 5-Slide Presentation (MARP)", key="btn_marp_slides_tab"):
+            ult_prob = st.session_state.get(
+                "ultima_domanda_artigiano", "Bottega Executive Presentation"
             )
-
-        st.subheader("Interactive Obsidian Graph View (Wikilinks)")
-        dot_code = risolutore_artigiano.costruisci_grafo_dot_wiki(radice_vault)
-        st.graphviz_chart(dot_code)
-
-        st.subheader("Browse Vault Markdown Files")
-        tutti_md = sorted(
-            [p for p in radice_vault.glob("**/*.md") if p.is_file()],
-            key=lambda p: str(p.relative_to(radice_vault)).lower(),
-        )
-        if tutti_md:
-            opzioni_file = {
-                str(p.relative_to(radice_vault)).replace("\\", "/"): p for p in tutti_md
+            ult_esito = st.session_state.get("ultimo_esito_artigiano") or {
+                "semaforo": "VERDE",
+                "s_max": 1.0,
+                "colore_nodo_ewd496a": "NERO",
+                "risultato": {"principio_guida_unico": "Bottega Leonardo LLM Wiki"},
+                "risposta_discorsiva": "Executive summary generated from Knowledge Vault.",
             }
-            scelto = st.selectbox(
-                "Select a file to inspect (index.md, log.md, concepts, entities, sources, synthesis, presentations):",
-                list(opzioni_file.keys()),
-                key="sel_vault_file",
+            testo_marp, path_marp = risolutore_artigiano.genera_presentazione_marp(
+                ult_prob, ult_esito, radice_vault
             )
-            if scelto:
-                path_scelto = opzioni_file[scelto]
-                contenuto_file = path_scelto.read_text(encoding="utf-8", errors="ignore")
-                st.markdown(f"**Viewing: `{scelto}`**")
-                st.code(contenuto_file, language="markdown")
-                st.download_button(
-                    f"💾 Download `{path_scelto.name}`",
-                    data=contenuto_file.encode("utf-8"),
-                    file_name=path_scelto.name,
-                    mime="text/markdown",
-                    key=f"dl_file_{scelto}",
-                )
+            st.session_state["ultimo_marp_testo"] = testo_marp
+            st.session_state["ultimo_marp_nome"] = path_marp.name
+            st.success(f"Marp Presentation created: {path_marp.name}")
+
+    with b3:
+        dati_zip = risolutore_artigiano.esporta_vault_wiki_zip(radice_vault)
+        st.download_button(
+            "📦 Download Full Obsidian Vault (.zip)",
+            data=dati_zip,
+            file_name="bottega_obsidian_vault.zip",
+            mime="application/zip",
+            key="dl_vault_zip_tab",
+        )
+
+    with b4:
+        if st.button("🗑️ Reset Wiki Vault", key="btn_reset_vault"):
+            for sub in ("synthesis", "concepts", "entities", "sources", "presentations", "raw"):
+                sub_dir = radice_vault / ("raw" if sub == "raw" else f"wiki/{sub}")
+                if sub_dir.is_dir():
+                    for f_rm in sub_dir.glob("*"):
+                        try:
+                            if f_rm.is_file():
+                                f_rm.unlink()
+                        except OSError:
+                            pass
+            risolutore_artigiano.inizializza_vault_wiki(radice_vault)
+            st.success("Wiki Vault reset successfully!")
+            st.rerun()
+
+    if "ultimo_marp_testo" in st.session_state:
+        st.download_button(
+            f"💾 Download Generated Presentation ({st.session_state.get('ultimo_marp_nome', 'slides.md')})",
+            data=st.session_state["ultimo_marp_testo"].encode("utf-8"),
+            file_name=st.session_state.get("ultimo_marp_nome", "presentation_marp.md"),
+            mime="text/markdown",
+            key="dl_marp_tab",
+        )
+
+    st.markdown("### Visual Knowledge Map (Wikilinks Graph)")
+    st.graphviz_chart(risolutore_artigiano.costruisci_grafo_dot_wiki(radice_vault))
+
+    st.markdown("### Browse Knowledge Base Pages (.md)")
+    tutti_md = list((radice_vault / "wiki").glob("*/*.md"))
+    if tutti_md:
+        nomi_md = sorted([str(p.relative_to(radice_vault)).replace("\\", "/") for p in tutti_md])
+        scelta_p = st.selectbox("Select Page to View:", nomi_md, key="sel_wiki_page")
+        file_sel = radice_vault / scelta_p
+        if file_sel.is_file():
+            contenuto_file = file_sel.read_text(encoding="utf-8", errors="ignore")
+            st.markdown(contenuto_file)
+            st.download_button(
+                f"Download {file_sel.name}",
+                data=contenuto_file.encode("utf-8"),
+                file_name=file_sel.name,
+                mime="text/markdown",
+                key=f"dl_md_page_{file_sel.stem}",
+            )
+    else:
+        st.info("No pages in the Knowledge Vault yet. Upload documents or ask questions to populate it.")
 
 with tab_ponte_web:
     st.subheader("Zero-API Mode: Generate a Grounded Prompt & Audit External AI Responses")
@@ -1032,6 +987,60 @@ with tab_ponte_web:
                 f"{audit_corrente['orfane']} | Percentages preserved: {audit_corrente['pct_ok']}. "
                 "This response is rejected and CANNOT be saved into session memory."
             )
+
+with tab_codice:
+    codice_incollato = st.text_area(
+        "Paste Python code to inspect:",
+        height=ALTEZZA_CODICE_UI,
+        placeholder="def calculate_margin(price, cost):\n    return price - cost",
+    )
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("4A. Deterministic AST Anatomy Only (Instant, Zero LLM)"):
+            if not codice_incollato.strip():
+                st.warning("Please enter Python code first.")
+            else:
+                try:
+                    dati_ast = anatomia_ast.analizza_codice_ast(codice_incollato)
+                    st.success(
+                        f"Functions/Methods: {dati_ast['numero_funzioni']} | "
+                        f"Bare excepts: {dati_ast['totale_except_nudi']} | "
+                        f"Unbounded loops: {dati_ast['cicli_senza_variante']} | "
+                        f"Mutable globals: {dati_ast['usi_global_mutabili']}"
+                    )
+                    st.graphviz_chart(dati_ast["dot_graph"])
+                    st.json(dati_ast["funzioni"])
+                except SyntaxError as err:
+                    st.error(f"Syntax error at line {err.lineno}: {err.msg}")
+
+    with col2:
+        if st.button("4B. Run Full 3-Layer Cascade (AST + RRF RAG + Strato L / A / D)", type="primary"):
+            if not codice_incollato.strip():
+                st.warning("Please enter Python code first.")
+            else:
+                try:
+                    anatomia_ast.analizza_codice_ast(codice_incollato)
+                except SyntaxError as err:
+                    st.error(f"Syntax error at line {err.lineno}: {err.msg}")
+                    st.stop()
+
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tmp_path = Path(tmpdir) / "codice_analizzato.py"
+                    tmp_path.write_text(codice_incollato, encoding="utf-8")
+                    try:
+                        with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade (Strato L -> Strato A -> Strato D)..."):
+                            referto = cascata_strutturata.esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
+                        st.write_stream(_stream_testo_parole(referto))
+                        st.download_button(
+                            "Download Markdown Report",
+                            referto,
+                            file_name="referto_bottega.md",
+                            mime="text/markdown",
+                        )
+                    except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
+                        logging_bottega.log_exception("Errore in esegui_cascata UI", "APP_CAS_001", err)
+                        st.error(f"Error during cascade execution ({provider_ui}): {err}")
 
 st.divider()
 st.markdown(

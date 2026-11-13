@@ -1,11 +1,11 @@
 {
   "nome_benchmark": "Bottega Vertical B2B Diagnostic & Technical Evaluation Benchmark",
   "versione": "1.0.0",
-  "timestamp_collaudo": "2026-11-13T01:02:10Z",
+  "timestamp_collaudo": "2026-11-13T15:28:40Z",
   "casi_totali": 25,
   "casi_superati": 25,
   "accuratezza_complessiva_pct": 100.0,
-  "latenza_media_query_ms": 140.3,
+  "latenza_media_query_ms": 151.03,
   "metriche_chiave_b2b": {
     "precisione_relazionale_write_barrier_pct": 100.0,
     "accuratezza_calcoli_derivati_pct": 100.0,
@@ -53,7 +53,7 @@
         ],
         "accettazione_corretta_nero": true
       },
-      "latenza_ms": 1.42
+      "latenza_ms": 2.02
     },
     {
       "id": "CASE-02",
@@ -67,7 +67,7 @@
         ],
         "accettazione_corretta_nero": true
       },
-      "latenza_ms": 0.89
+      "latenza_ms": 1.1
     },
     {
       "id": "CASE-03",
@@ -81,7 +81,7 @@
         ],
         "accettazione_corretta_nero": true
       },
-      "latenza_ms": 0.44
+      "latenza_ms": 0.98
     },
     {
       "id": "CASE-04",
@@ -95,7 +95,7 @@
         ],
         "accettazione_corretta_nero": true
       },
-      "latenza_ms": 0.57
+      "latenza_ms": 1.57
     },
     {
       "id": "CASE-05",
@@ -109,7 +109,7 @@
         ],
         "accettazione_corretta_nero": true
       },
-      "latenza_ms": 0.55
+      "latenza_ms": 5.02
     },
     {
       "id": "CASE-06",
@@ -123,7 +123,7 @@
           "150.00"
         ]
       },
-      "latenza_ms": 0.33
+      "latenza_ms": 2.23
     },
     {
       "id": "CASE-07",
@@ -137,7 +137,7 @@
           "1.250.00"
         ]
       },
-      "latenza_ms": 0.25
+      "latenza_ms": 1.12
     },
     {
       "id": "CASE-08",
@@ -151,7 +151,7 @@
           "1.900.00"
         ]
       },
-      "latenza_ms": 0.26
+      "latenza_ms": 0.38
     },
     {
       "id": "CASE-09",
@@ -165,7 +165,7 @@
           "3.000"
         ]
       },
-      "latenza_ms": 0.23
+      "latenza_ms": 0.33
     },
     {
       "id": "CASE-10",
@@ -179,7 +179,7 @@
           "14"
         ]
       },
-      "latenza_ms": 0.29
+      "latenza_ms": 0.33
     },
     {
       "id": "CASE-11",
@@ -190,7 +190,7 @@
         "esclusioni_falsificate_tracciate": true,
         "cause_aperte_preservate": true
       },
-      "latenza_ms": 0.49
+      "latenza_ms": 0.57
     },
     {
       "id": "CASE-12",
@@ -201,7 +201,7 @@
         "esclusioni_falsificate_tracciate": true,
         "cause_aperte_preservate": true
       },
-      "latenza_ms": 0.04
+      "latenza_ms": 0.07
     },
     {
       "id": "CASE-13",
@@ -212,7 +212,7 @@
         "esclusioni_falsificate_tracciate": true,
         "cause_aperte_preservate": true
       },
-      "latenza_ms": 0.03
+      "latenza_ms": 0.05
     },
     {
       "id": "CASE-14",
@@ -223,7 +223,7 @@
         "esclusioni_falsificate_tracciate": true,
         "cause_aperte_preservate": true
       },
-      "latenza_ms": 0.02
+      "latenza_ms": 0.03
     },
     {
       "id": "CASE-15",
@@ -234,7 +234,7 @@
         "esclusioni_falsificate_tracciate": true,
         "cause_aperte_preservate": true
       },
-      "latenza_ms": 0.03
+      "latenza_ms": 0.04
     },
     {
       "id": "CASE-16",
@@ -247,7 +247,7 @@
         "semaforo_rag": "VERDE",
         "frammento_top": "Circolare_Tecnica_Aggiornamento_2025.pdf"
       },
-      "latenza_ms": 557.36
+      "latenza_ms": 555.53
     },
     {
       "id": "CASE-17",
@@ -260,7 +260,7 @@
         "semaforo_rag": "VERDE",
         "frammento_top": "Perizia_Tecnica_Asseverata_Impianto_2024.pdf"
       },
-      "latenza_ms": 416.4
+      "latenza_ms": 448.64
     },
     {
       "id": "CASE-18",
@@ -273,7 +273,7 @@
         "semaforo_rag": "VERDE",
         "frammento_top": "Bollettino_Tecnico_Servizio_Gravoso_2024.pdf"
       },
-      "latenza_ms": 426.69
+      "latenza_ms": 470.08
     },
     {
       "id": "CASE-19",
@@ -286,7 +286,7 @@
         "semaforo_rag": "VERDE",
         "frammento_top": "Circolare_Agenzia_Entrate_Regime_Premiale_ISA_2024.pdf"
       },
-      "latenza_ms": 527.23
+      "latenza_ms": 572.55
     },
     {
       "id": "CASE-20",
@@ -299,7 +299,7 @@
         "semaforo_rag": "VERDE",
         "frammento_top": "Nota_Transizione_Ecologica_F-Gas_2024.pdf"
       },
-      "latenza_ms": 422.36
+      "latenza_ms": 451.29
     },
     {
       "id": "CASE-21",
@@ -311,7 +311,7 @@
         "semaforo_emesso": "ROJO",
         "esito_rispettato": true
       },
-      "latenza_ms": 264.75
+      "latenza_ms": 306.11
     },
     {
       "id": "CASE-22",
@@ -323,7 +323,7 @@
         "semaforo_emesso": "ROJO",
         "esito_rispettato": true
       },
-      "latenza_ms": 183.68
+      "latenza_ms": 194.25
     },
     {
       "id": "CASE-23",
@@ -335,7 +335,7 @@
         "semaforo_emesso": "ROJO",
         "esito_rispettato": true
       },
-      "latenza_ms": 179.62
+      "latenza_ms": 182.32
     },
     {
       "id": "CASE-24",
@@ -347,7 +347,7 @@
         "semaforo_emesso": "VERDE",
         "esito_rispettato": true
       },
-      "latenza_ms": 262.89
+      "latenza_ms": 280.65
     },
     {
       "id": "CASE-25",
@@ -359,7 +359,7 @@
         "semaforo_emesso": "ROJO",
         "esito_rispettato": true
       },
-      "latenza_ms": 260.77
+      "latenza_ms": 298.4
     }
   ]
 }

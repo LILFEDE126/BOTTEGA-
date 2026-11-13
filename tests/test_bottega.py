@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 5 (THE): Complete suite of 44 pure unit tests (zero network, zero DB, zero LLM).
+"""Layer 5 (THE): Complete suite of 45 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
 import ast
@@ -1726,4 +1726,21 @@ def test_architettura_karpathy_llm_wiki_ingest_query_lint_marp_e_zip(monkeypatch
         assert n_imp >= 3
         assert (radice_import / "SCHEMA_WIKI.md").is_file()
         assert (radice_import / "wiki" / "index.md").is_file()
+
+
+def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
+    testo_ligature = store_pgvector.normalizza_spazi_testo_pdf(
+        "ru\ue007 format e voti su\ue007icienti con ValueError in FastAPI e PostgreSQL"
+    )
+    assert testo_ligature == "ruff format e voti sufficienti con ValueError in FastAPI e PostgreSQL"
+
+    testo_operatore = store_pgvector.normalizza_spazi_testo_pdf("punti = int(importo -/ 10)")
+    assert testo_operatore == "punti = int (importo // 10)"
+
+    slug_fonte = risolutore_artigiano._estrai_slug_fonte_da_frammento(
+        {"titolo": "Giorno 02 – Codice pulito.pptx.pdf", "testo": "EURO_PER_PUNTO = 10. if importo > 100"}
+    )
+    assert slug_fonte == "giorno-02-codice-pulito-pptx"
+    assert slug_fonte != "10-if-importo-100"
+
 

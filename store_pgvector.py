@@ -292,14 +292,48 @@ def conta_frammenti_archivio_ram(titolo: Optional[str] = None) -> int:
     return sum(1 for item in _ARCHIVIO_MEMORIA_RAM if item.get("titolo") == titolo)
 
 
+_TERMINI_CAMELCASE_PROTETTI = (
+    ("Value Error", "ValueError"),
+    ("Key Error", "KeyError"),
+    ("Type Error", "TypeError"),
+    ("Index Error", "IndexError"),
+    ("Name Error", "NameError"),
+    ("Attribute Error", "AttributeError"),
+    ("Syntax Error", "SyntaxError"),
+    ("Indentation Error", "IndentationError"),
+    ("Runtime Error", "RuntimeError"),
+    ("Assertion Error", "AssertionError"),
+    ("Fast API", "FastAPI"),
+    ("Postgre SQL", "PostgreSQL"),
+    ("Git Hub", "GitHub"),
+    ("Java Script", "JavaScript"),
+    ("Type Script", "TypeScript"),
+    ("Power Shell", "PowerShell"),
+    ("Aha Slides", "AhaSlides"),
+    ("Git Kraken", "GitKraken"),
+    ("Git Lens", "GitLens"),
+    ("Live Share", "LiveShare"),
+    ("One Drive", "OneDrive"),
+    ("Deep Seek", "DeepSeek"),
+    ("Open Router", "OpenRouter"),
+    ("Chat GPT", "ChatGPT"),
+    ("Notebook LM", "NotebookLM"),
+    ("Open Claw", "OpenClaw"),
+    ("Bit Keeper", "BitKeeper"),
+    ("Mac Book", "MacBook"),
+    ("Intelli Sense", "IntelliSense"),
+)
+
+
 def normalizza_spazi_testo_pdf(testo: str) -> str:
-    """Repairs PUA font ligatures, strips repetitive slide footers, and restores missing spaces in PDFs."""
+    """Repairs PUA font ligatures, strips repetitive slide footers, restores missing spaces,
+    and preserves technical CamelCase identifiers and Python operators."""
     if not testo:
         return ""
     mappa_ligature = (
         ("\ue009", "tt"),
         ("\ue008", "ff"),
-        ("\ue007", "fi"),
+        ("\ue007", "ff"),
         ("\ue006", "fl"),
         ("\ufb00", "ff"),
         ("\ufb01", "fi"),
@@ -308,6 +342,8 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
         ("\ufb04", "ffl"),
         ("\r\n", "\n"),
         ("\r", "\n"),
+        (" -/ ", " // "),
+        ("--.", "..."),
     )
     testo_lavorato = testo
     for glifo, sostituto in mappa_ligature:
@@ -327,6 +363,9 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     testo_lavorato = re.sub(r"([,:;])([a-zA-Zàèéìòùáéíóúñ€])", r"\1 \2", testo_lavorato)
     testo_lavorato = re.sub(r"([a-zA-Z0-9àèéìòùáéíóúñ])\(", r"\1 (", testo_lavorato)
     testo_lavorato = re.sub(r"\)([a-zA-Z0-9àèéìòùáéíóúñ])", r") \1", testo_lavorato)
+    for spezzato, unito in _TERMINI_CAMELCASE_PROTETTI:
+        if spezzato in testo_lavorato:
+            testo_lavorato = testo_lavorato.replace(spezzato, unito)
     testo_lavorato = re.sub(r"\n{3,}", "\n\n", testo_lavorato)
     return testo_lavorato.strip()
 
@@ -366,6 +405,14 @@ _MARCATORI_SLIDE_RUMORE = (
     "ping-pong: il validatore",
     "dalla ruota:",
     "spiegazioni a sorte",
+    "lo sapevi?",
+    "sondaggio anonimo",
+    "sondaggio scelta multipla",
+    "indovina cosa fa",
+    "misterioso.py",
+    "storie dell'orrore",
+    "il codice peggiore che ho visto",
+    "dai biglietti di uscita",
 )
 
 
