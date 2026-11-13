@@ -558,19 +558,34 @@ def _seleziona_frammenti_pertinenti_domanda(
     if not frammenti:
         return [], []
 
+    prob_low = (problema or "").lower()
+
     def _e_blocco_installazione_rumore(testo: str) -> bool:
         t_low = testo.lower()
-        return any(
-            p in t_low
-            for p in (
-                "sudo apt install",
-                "sudo apt-get install",
-                "gh auth login",
-                "gh repo clone",
-                "git clone",
-                "installare postgresql",
-            )
+        marcatori_setup = (
+            "sudo apt install",
+            "sudo apt-get install",
+            "gh auth login",
+            "gh repo clone",
+            "git clone",
+            "installare postgresql",
+            "pg_isready",
+            "createdb negozio",
+            "add connection",
+            "visualize schema",
+            "learn git branching",
+            "git golf",
+            "vs code live share",
+            "wsl -l -v",
         )
+        for p in marcatori_setup:
+            if p in t_low and p not in prob_low:
+                if not any(
+                    k in t_low
+                    for k in ("left join", "inner join", "group by", "having", "pytest.raises", "red · green")
+                ):
+                    return True
+        return False
 
     frammenti_utili = [f for f in frammenti if not _e_blocco_installazione_rumore(f.get("testo", ""))]
     if not frammenti_utili:
@@ -642,6 +657,92 @@ _MARCATORI_AHASLIDES_RUMORE = (
 )
 
 
+_TERMINI_GENERICI_CORSO_SLIDE = frozenset({
+    "giorno", "slide", "corso", "python", "sql", "git", "database", "codice", "test",
+    "tabella", "tabelle", "negozio", "linea", "menta", "funzione", "funzioni",
+    "esempio", "esempi", "viste", "visto", "vista", "differenza", "comporta",
+    "rispetto", "usare", "usa", "sfortunata", "ciclo", "lavoro", "flusso", "quotidiano",
+})
+
+
+def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_basso: str) -> str:
+    if "### [Page " not in testo or not termini_prob:
+        return testo
+    slides_singole = [
+        s.strip()
+        for s in re.split(r"(?=^### \[Page \d+\])", testo, flags=re.MULTILINE)
+        if s.strip()
+    ]
+    if len(slides_singole) <= 1:
+        return testo
+
+    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
+    slides_candidate: List[str] = []
+    for s in slides_singole:
+        s_low = s.lower()
+        if not any(t in s_low for t in termini_prob):
+            continue
+        if (
+            ("pytest.approx" in s_low or "numeri con la virgola" in s_low)
+            and "approx" not in prob_basso
+            and "virgola" not in prob_basso
+        ):
+            continue
+        if (
+            any(
+                extra in s_low
+                for extra in (
+                    "banca del tempo",
+                    "fantacalcio tra amici",
+                    "diario del caffè",
+                    "il tuo progetto nasce oggi",
+                    "head staccata",
+                    "git exercises",
+                    "learn git branching",
+                    "git golf",
+                    "vs code live share",
+                    "wsl è pronto",
+                    "wsl -l -v",
+                    "add connection",
+                    "visualize schema",
+                    "pg_isready",
+                )
+            )
+            and not any(
+                extra in prob_basso
+                for extra in (
+                    "banca del tempo",
+                    "fantacalcio",
+                    "progetto",
+                    "head staccata",
+                    "git exercises",
+                    "learn git branching",
+                    "git golf",
+                    "live share",
+                    "wsl",
+                    "add connection",
+                    "visualize schema",
+                    "pg_isready",
+                )
+            )
+        ):
+            continue
+        slides_candidate.append(s)
+
+    if not slides_candidate:
+        return testo
+
+    if termini_spec:
+        slides_specifiche = [
+            s for s in slides_candidate
+            if any(t in s.lower() for t in termini_spec)
+        ]
+        if slides_specifiche:
+            return "\n\n".join(slides_specifiche)
+
+    return "\n\n".join(slides_candidate)
+
+
 def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -> str:
     """Sintetizza una lista omogenea di frammenti di un singolo documento in blocchi Markdown puliti."""
     righe_sintesi: List[str] = []
@@ -656,42 +757,7 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
         if not testo:
             continue
 
-        if "### [Page " in testo and termini_prob:
-            slides_singole = [
-                s.strip()
-                for s in re.split(r"(?=^### \[Page \d+\])", testo, flags=re.MULTILINE)
-                if s.strip()
-            ]
-            if len(slides_singole) > 1:
-                slides_filtrate = [
-                    s for s in slides_singole
-                    if any(t in s.lower() for t in termini_prob)
-                    and not (
-                        any(
-                            extra in s.lower()
-                            for extra in (
-                                "banca del tempo",
-                                "fantacalcio tra amici",
-                                "diario del caffè",
-                                "il tuo progetto nasce oggi",
-                                "head staccata",
-                                "git exercises",
-                            )
-                        )
-                        and not any(
-                            extra in prob_basso
-                            for extra in (
-                                "banca del tempo",
-                                "fantacalcio",
-                                "progetto",
-                                "head staccata",
-                                "git exercises",
-                            )
-                        )
-                    )
-                ]
-                if slides_filtrate:
-                    testo = "\n\n".join(slides_filtrate)
+        testo = _filtra_slides_pertinenti_testo(testo, termini_prob, prob_basso)
 
         testo = re.sub(r"([a-zA-Z0-9_])(import\s+)", r"\1\n\2", testo)
         testo = re.sub(r"([a-zA-Z0-9_])(def\s+)", r"\1\n\2", testo)
@@ -818,6 +884,59 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
     return "\n\n".join(parti_output)
 
 
+def _costruisci_paragrafo_sintesi_logica(problema: str, frammenti_scelti: List[dict]) -> str:
+    if not problema or not frammenti_scelti:
+        return ""
+    testo_unito_check = "\n".join(f.get("testo", "") for f in frammenti_scelti)
+    if "### [Page " not in testo_unito_check and len(frammenti_scelti) < 2:
+        return ""
+
+    termini_prob = _estrai_termini_chiave_chirurgici(problema)
+    if not termini_prob:
+        return ""
+    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
+    prob_basso = problema.lower()
+
+    candidati_frasi: List[Tuple[int, int, str]] = []
+    viste_frasi: Set[str] = set()
+    idx_ordine = 0
+
+    for f in frammenti_scelti[:4]:
+        testo_f = _ripulisci_prefisso_tecnico_frammento(f.get("testo", "")).strip()
+        if not testo_f:
+            continue
+        testo_f = _filtra_slides_pertinenti_testo(testo_f, termini_prob, prob_basso)
+        for r in testo_f.splitlines():
+            r_str = r.strip()
+            if not r_str or r_str.startswith("#"):
+                continue
+            r_low = r_str.lower()
+            if r_low in _ETICHETTE_DIDATTICHE_RUMORE or any(m in r_low for m in _MARCATORI_AHASLIDES_RUMORE):
+                continue
+            if _e_riga_codice_python(r_str):
+                continue
+            r_pulita = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", r_str).strip()
+            if len(r_pulita) < 25:
+                continue
+            chiave_f = " ".join(r_pulita.lower().split())
+            if chiave_f in viste_frasi:
+                continue
+            viste_frasi.add(chiave_f)
+            punti_spec = sum(3 for t in termini_spec if t in r_low)
+            punti_gen = sum(1 for t in termini_prob if t in r_low)
+            punti_tot = punti_spec + punti_gen
+            if punti_tot > 0:
+                candidati_frasi.append((punti_tot, -idx_ordine, r_pulita))
+                idx_ordine += 1
+
+    if not candidati_frasi:
+        return ""
+
+    candidati_frasi.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    scelte = [f"- {voce[2]}" for voce in candidati_frasi[:4]]
+    return "### 🧭 Sintesi Logica e Metodica (Zero Mucchio)\n" + "\n".join(scelte)
+
+
 def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict]) -> str:
     """Synthesizes key operational points, rules, headings, and numerical constraints
     from retrieved RAG fragments into clean, structured Markdown, eliminating raw repetition and noise."""
@@ -827,6 +946,8 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     frammenti_stesso_doc, _ = _seleziona_frammenti_pertinenti_domanda(problema, frammenti)
     if not frammenti_stesso_doc:
         frammenti_stesso_doc = frammenti
+
+    cappello_logico = _costruisci_paragrafo_sintesi_logica(problema, frammenti_stesso_doc)
 
     docs_distinti: Dict[str, List[dict]] = {}
     for f in frammenti_stesso_doc:
@@ -842,10 +963,85 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             if sintesi_sub.strip():
                 sezioni_doc.append(f"#### 📄 Fonte: {tit_doc}\n\n{sintesi_sub}")
         if sezioni_doc:
-            return "\n\n---\n\n".join(sezioni_doc)
+            corpo_multi = "\n\n---\n\n".join(sezioni_doc)
+            return f"{cappello_logico}\n\n{corpo_multi}" if cappello_logico else corpo_multi
 
     sintesi_totale = _sintetizza_frammenti_lista(frammenti_stesso_doc, problema=problema)
-    return sintesi_totale if sintesi_totale.strip() else problema.strip()
+    if not sintesi_totale.strip():
+        return problema.strip()
+    return f"{cappello_logico}\n\n{sintesi_totale}" if cappello_logico else sintesi_totale
+
+
+def _estrai_campi_audit_da_testi(
+    problema: str, pertinenti_testi: List[str], principale_breve: str
+) -> Tuple[str, str, str, str]:
+    termini_prob = _estrai_termini_chiave_chirurgici(problema) if problema else set()
+    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
+    prob_basso = (problema or "").lower()
+
+    titoli_slide: List[str] = []
+    frasi_regola: List[str] = []
+    frasi_azione: List[str] = []
+    comandi_verifica: List[str] = []
+
+    for t_raw in pertinenti_testi[:3]:
+        t_filtrato = _filtra_slides_pertinenti_testo(t_raw, termini_prob, prob_basso)
+        for r in t_filtrato.splitlines():
+            r_s = r.strip()
+            if not r_s:
+                continue
+            if r_s.startswith("### [Page "):
+                tit_pulito = re.sub(r"^###\s*\[Page\s*\d+\]\s*", "", r_s).strip()
+                if tit_pulito and tit_pulito not in titoli_slide:
+                    titoli_slide.append(tit_pulito)
+                continue
+            r_low = r_s.lower()
+            if any(
+                cmd in r_low
+                for cmd in (
+                    "pytest",
+                    "assert ",
+                    "select ",
+                    "left join",
+                    "inner join",
+                    "group by",
+                    "having ",
+                    "git status",
+                    "git diff",
+                    "git switch",
+                    "git log",
+                )
+            ):
+                if len(r_s) <= 120 and r_s not in comandi_verifica:
+                    comandi_verifica.append(r_s)
+            if len(r_s) >= 25 and not r_s.startswith("#"):
+                if any(t in r_low for t in (termini_spec or termini_prob)):
+                    if any(v in r_low for v in ("filtra", "mostra", "restituisce", "verifica", "separa", "evita", "perché", "quando")):
+                        frasi_regola.append(r_s)
+                    else:
+                        frasi_azione.append(r_s)
+
+    principio_dinamico = (
+        f"{' · '.join(titoli_slide[:2])} — {principale_breve}"
+        if titoli_slide
+        else principale_breve
+    )
+    ipotesi_dinamica = (
+        f"Regola documentale individuata: {frasi_regola[0]}"
+        if frasi_regola
+        else f"Estratto documentale prioritario: {principale_breve}"
+    )
+    azione_dinamica = (
+        f"Applicare la prescrizione certificata: {frasi_azione[0]}"
+        if frasi_azione
+        else "Applicare fedelmente le prescrizioni, le formule e i passaggi operativi documentati nella fonte certificata."
+    )
+    verifica_dinamica = (
+        f"Eseguire e verificare sul campo: `{'` / `'.join(comandi_verifica[:2])}`"
+        if comandi_verifica
+        else "Controllare la corrispondenza puntuale di ciascun parametro, valore numerico e specifica con la documentazione d'origine."
+    )
+    return principio_dinamico, ipotesi_dinamica, azione_dinamica, verifica_dinamica
 
 
 def _costruisci_soluzione_deterministica(
@@ -870,6 +1066,9 @@ def _costruisci_soluzione_deterministica(
 
     primo_testo = pertinenti_testi[0] if pertinenti_testi else problema.strip()
     principale_breve = _sintetizza_etichetta_frammento(primo_testo, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
+    principio_it, ipotesi_it, azione_it, verifica_it = _estrai_campi_audit_da_testi(
+        problema, pertinenti_testi, principale_breve
+    )
     tag_scarto = _ETICHETTE_SCARTATO.get(lingua, _ETICHETTE_SCARTATO["it"])
     tag_fals = _ETICHETTE_FALSIFICATA.get(lingua, _ETICHETTE_FALSIFICATA["it"])
 
@@ -884,7 +1083,7 @@ def _costruisci_soluzione_deterministica(
     if lingua == "en":
         return SoluzioneArtigiano(
             risposta_finale_discorsiva=risposta_finale,
-            principio_guida_unico=principale_breve,
+            principio_guida_unico=principio_it,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
                 "Verification and direct matching against certified technical archive references and constraints."
@@ -903,7 +1102,7 @@ def _costruisci_soluzione_deterministica(
     if lingua == "es":
         return SoluzioneArtigiano(
             risposta_finale_discorsiva=risposta_finale,
-            principio_guida_unico=principale_breve,
+            principio_guida_unico=principio_it,
             elementi_scartati_per_non_fare_mucchio=scartati,
             precondizione_wp_richiesta=(
                 "Verificación y contraste directo con las referencias y límites del archivo técnico certificado."
@@ -921,7 +1120,7 @@ def _costruisci_soluzione_deterministica(
         )
     return SoluzioneArtigiano(
         risposta_finale_discorsiva=risposta_finale,
-        principio_guida_unico=principale_breve,
+        principio_guida_unico=principio_it,
         elementi_scartati_per_non_fare_mucchio=scartati,
         precondizione_wp_richiesta=(
             "Verifica e riscontro documentale sui riferimenti e sui vincoli dell'archivio tecnico certificato."
@@ -929,13 +1128,9 @@ def _costruisci_soluzione_deterministica(
         invariante_violato=(
             "Mantenere piena aderenza ai parametri, alle specifiche e alle regole stabilite nel testo d'archivio."
         ),
-        ipotesi_causale_unica=f"Estratto documentale prioritario: {principale_breve}",
-        azione_correttiva_singola=(
-            "Applicare fedelmente le prescrizioni, le formule e i passaggi operativi documentati nella fonte certificata."
-        ),
-        esperimento_di_verifica_pratica=(
-            "Controllare la corrispondenza puntuale di ciascun parametro, valore numerico e specifica con la documentazione d'origine."
-        ),
+        ipotesi_causale_unica=ipotesi_it,
+        azione_correttiva_singola=azione_it,
+        esperimento_di_verifica_pratica=verifica_it,
     )
 
 

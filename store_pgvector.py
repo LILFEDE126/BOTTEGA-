@@ -390,6 +390,7 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     for spezzato, unito in _TERMINI_CAMELCASE_PROTETTI:
         if spezzato in testo_lavorato:
             testo_lavorato = testo_lavorato.replace(spezzato, unito)
+    testo_lavorato = re.sub(r"\b(assert\s+[^=\n]+?)\s*-=\s*", r"\1 == ", testo_lavorato)
     testo_lavorato = re.sub(r"\b([a-zA-Z_]\w*)\s*-=\s*0\b", r"\1 <= 0", testo_lavorato)
     testo_lavorato = re.sub(r"COUNT\s*\(\s*\*\s*\)\s*-=\s*(\d+)", r"COUNT(*) >= \1", testo_lavorato)
     testo_lavorato = re.sub(r"(\b\w+\.\w+)\s*→\s*'([^']+)'", r"\1 != '\2'", testo_lavorato)
@@ -415,6 +416,23 @@ _MARCATORI_SLIDE_RUMORE = (
     "hello@davidelista.com",
     "domani alle 9:00",
     "prossima lezione: dal canvas alle tabelle",
+    "tocca a voi: learn git branching",
+    "git golf: vince la squadra",
+    "le regole della sfida",
+    "prima di pranzo · solo windows",
+    "wsl è pronto?",
+    "strumento · vs code live share",
+    "attivare liveshare in quattro passi",
+    "attivare live share in quattro passi",
+    "prepariamo · i controlli",
+    "sql · il database in vs code",
+    "l'elefante → add connection",
+    "add connection: cosa scrivere",
+    "l'albero del database",
+    "visualize schema: le linee sono le chiavi",
+    "il giallo · la mappa in vs code",
+    "il giallo · gli aiuti",
+    "tre aiuti, dal più leggero",
     "il metodo · a ogni tappa",
     "il metodo a ogni tappa",
     "le squadre · tappa per tappa",
@@ -930,6 +948,53 @@ def _calcola_centroide_candidati(candidati: List[Dict[str, Any]]) -> List[float]
     return normalizza_l2(somma_vettoriale)
 
 
+_TERMINI_CORSO_FREQUENTI = frozenset({
+    "database", "sql", "python", "codice", "git", "giorno", "tabella", "tabelle",
+    "negozio", "slide", "pagina", "page", "pages", "tecnico", "file", "riga", "righe",
+})
+
+_TERMINI_TECNICI_SPECIFICI = frozenset({
+    "having", "group", "left", "inner", "join", "where", "raises", "approx", "tdd",
+    "rebase", "merge", "sha", "assert", "elif", "comprehension", "valueerror",
+    "keyerror", "typeerror", "pg_rewind", "raft", "quorum",
+})
+
+
+def _calcola_pesi_idf_candidati(
+    parole_chiave: List[str],
+    candidati: List[Dict[str, Any]],
+) -> Dict[str, int]:
+    """Calcola il peso di specificita' IDF (6 raro/tecnico, 3 medio, 1 frequente) per ciascuna parola della query."""
+    n_cand = len(candidati)
+    ha_termini_tecnici = any(p in _TERMINI_TECNICI_SPECIFICI for p in parole_chiave)
+    if n_cand <= 2 and not ha_termini_tecnici:
+        return {p: (3 if any(c.isdigit() for c in p) else 2) for p in parole_chiave}
+
+    token_per_cand = [
+        set(re.findall(r"\d+(?:[.,]\d+)+|\w+", (c.get("corpo") or c.get("testo", "")).lower()))
+        for c in candidati
+    ]
+    pesi: Dict[str, int] = {}
+    soglia_rara = max(1, n_cand // 6)
+    soglia_media = max(2, n_cand // 3)
+    for p in parole_chiave:
+        bonus_num = 2 if any(c.isdigit() for c in p) else 0
+        if p in _TERMINI_TECNICI_SPECIFICI:
+            pesi[p] = 6 + bonus_num
+            continue
+        if p in _TERMINI_CORSO_FREQUENTI:
+            pesi[p] = 1
+            continue
+        df = sum(1 for toks in token_per_cand if p in toks)
+        if df <= soglia_rara:
+            pesi[p] = 6 + bonus_num
+        elif df <= soglia_media:
+            pesi[p] = 3 + bonus_num
+        else:
+            pesi[p] = 1 + bonus_num
+    return pesi
+
+
 def _valuta_singolo_frammento_ram(
     item: Dict[str, Any],
     query: str,
@@ -939,23 +1004,37 @@ def _valuta_singolo_frammento_ram(
     cerca_costi: bool,
     denominatore_copertura: int,
     numero_candidati: int,
+    pesi_parole: Optional[Dict[str, int]] = None,
 ) -> Dict[str, Any]:
-    """Valuta similitudine vettoriale e copertura lessicale del singolo frammento con barriere semantiche."""
+    """Valuta similitudine vettoriale e copertura lessicale pesata per IDF del singolo frammento."""
     sim_raw = max(0.0, similitudine_coseno(q_vec, item["embedding"]))
     testo_valutato = item["testo"]
     if str(item.get("titolo", "")).startswith("Ricerca:") and item.get("corpo"):
         testo_valutato = item["corpo"]
     testo_low = testo_valutato.lower()
     token_set_low = set(re.findall(r"\d+(?:[.,]\d+)+|\w+", testo_low))
+    titoli_slide_low = " ".join(re.findall(r"(?m)^### \[page \d+\][^\n]*", testo_low))
     match_count = 0
     for parola in parole_chiave:
         if parola in token_set_low:
-            match_count += 3 if any(c.isdigit() for c in parola) else 2
+            if pesi_parole is not None and parola in pesi_parole:
+                peso_base = pesi_parole[parola]
+            else:
+                peso_base = 3 if any(c.isdigit() for c in parola) else 2
+            match_count += peso_base
+            if (
+                titoli_slide_low
+                and parola not in _TERMINI_CORSO_FREQUENTI
+                and len(parola) >= 3
+                and re.search(rf"\b{re.escape(parola)}\b", titoli_slide_low)
+            ):
+                match_count += 4
     if cerca_costi and numero_candidati <= MAX_DOCUMENTI_SESSIONE_CONCORRENTI:
         bonus_economico = min(2, sum(1 for termine in TERMINI_ECONOMICI_AFFINI if termine in testo_low))
         match_count += bonus_economico
-    copertura = (match_count / (denominatore_copertura * 2)) if parole_chiave else 0.0
-    sim_effettiva = max(sim_raw, min(0.95, 0.52 + 0.43 * min(1.0, copertura))) if match_count > 0 else sim_raw
+    denom_eff = max(1, denominatore_copertura)
+    copertura = (match_count / denom_eff) if parole_chiave else 0.0
+    sim_effettiva = max(sim_raw, min(0.95, 0.55 + 0.40 * min(1.0, copertura))) if match_count > 0 else sim_raw
 
     n_spec, ratio_spec = _copertura_termini_specifici(query, query_bassa, testo_low)
     min_richiesti = 1 if len(query.split()) <= 5 else 2
@@ -1163,12 +1242,13 @@ def _recupera_da_archivio_ram(
     s_dom = max(0.0, similitudine_coseno(q_vec, centroide))
 
     cerca_costi = bool(set(parole_chiave) & TERMINI_ECONOMICI_AFFINI)
-    denominatore_copertura = max(1, min(len(parole_chiave), 6))
+    pesi_parole = _calcola_pesi_idf_candidati(parole_chiave, candidati)
+    denominatore_copertura = max(1, sum(pesi_parole.values()))
     numero_candidati = len(candidati)
 
     valutati = [
         _valuta_singolo_frammento_ram(
-            item, query, query_bassa, q_vec, parole_chiave, cerca_costi, denominatore_copertura, numero_candidati
+            item, query, query_bassa, q_vec, parole_chiave, cerca_costi, denominatore_copertura, numero_candidati, pesi_parole
         )
         for item in candidati
     ]

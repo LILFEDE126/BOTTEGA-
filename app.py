@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.14.v21"
+_VERSIONE_MODULI_THE = "2026.11.14.v22"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200

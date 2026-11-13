@@ -1936,6 +1936,10 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert risolutore_artigiano._e_riga_codice_python("def dividi(totale, persone):") is True
     assert store_pgvector.normalizza_spazi_testo_pdf("if persone -= 0: HAVING COUNT(*) -= 3") == "if persone <= 0: HAVING COUNT(*) >= 3"
     assert store_pgvector.normalizza_spazi_testo_pdf("WHERE o.stato → 'annullato'") == "WHERE o.stato != 'annullato'"
+    assert (
+        store_pgvector.normalizza_spazi_testo_pdf("assert media -= 6.67\nassert punti -= 30")
+        == "assert media == 6.67\nassert punti == 30"
+    )
 
     esito_pag = risolutore_artigiano.risolvi_da_artigiano(domanda, dominio="tecnico", max_caratteri_turno=180)
     assert esito_pag.get("in_sospeso") is True
@@ -1953,6 +1957,45 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert res_obj.get("stato") == "NESSUNA_CONTINUAZIONE"
     assert "Nessuna continuazione in sospeso" in res_obj.get("risposta_finale_discorsiva", "")
     assert "Giorno 01" not in esito_cont.get("risposta_discorsiva", "")
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    store_pgvector.incasella_e_salva(
+        "tecnico",
+        "Giorno 05 – Il giallo SQL.pptx.pdf",
+        [
+            (
+                "Blocco 1 Setup",
+                "### [Page 5] PREPARIAMO · I CONTROLLI\n"
+                "pg_isready deve rispondere: accepting connections\n"
+                "### [Page 6] CREIAMO IL DATABASE · IL NEGOZIO APRE\n"
+                "createdb negozio\n"
+                "psql -d negozio -f schema.sql\n"
+                "### [Page 9] SQL · IL DATABASE IN VS CODE · 1 DI 2\n"
+                "L'elefante → Add Connection (localhost, 5432, negozio)",
+            ),
+            (
+                "Blocco 5 Query Relazionali",
+                "### [Page 20] DUE TIPI DI JOIN · QUALE USARE E QUANDO\n"
+                "INNER JOIN mostra solo chi ha corrispondenza in entrambe le tabelle.\n"
+                "LEFT JOIN mostra tutte le righe della tabella a sinistra, con NULL a destra se non c'è corrispondenza.\n"
+                "### [Page 21] LEFT JOIN · CHI È A ZERO\n"
+                "SELECT p.nome, p.categoria FROM prodotti p LEFT JOIN ordini_prodotti op ON p.id = op.prodotto_id WHERE op.id IS NULL;\n"
+                "Tutti e 4 della Linea Menta non sono mai stati ordinati.\n"
+                "### [Page 23] RAGGRUPPAMENTI · GROUP BY\n"
+                "### [Page 24] FILTRARE I GRUPPI · WHERE O HAVING?\n"
+                "WHERE filtra le singole righe PRIMA del GROUP BY, HAVING filtra i gruppi DOPO il GROUP BY.",
+            ),
+        ],
+    )
+    domanda_sql_v22 = (
+        "Nelle query SQL viste al Giorno 5 con il database del negozio e della sfortunata Linea Menta, "
+        "qual è la differenza tra WHERE e HAVING con GROUP BY e come si comporta una LEFT JOIN rispetto a INNER JOIN?"
+    )
+    rag_sql_v22 = store_pgvector.recupera_con_semaforo(domanda_sql_v22, dominio="tecnico", top_k=5)
+    assert rag_sql_v22["frammenti"], "Nessun frammento recuperato per query SQL v22"
+    primo_testo_sql = rag_sql_v22["frammenti"][0]["testo"]
+    assert "LEFT JOIN" in primo_testo_sql and "HAVING" in primo_testo_sql
+    assert "pg_isready" not in primo_testo_sql
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
