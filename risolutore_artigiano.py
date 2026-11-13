@@ -58,6 +58,16 @@ _PREFISSI_CODICE_PYTHON = (
     "raise ", "import ", "from ", "class ", "assert ", "@", "with ",
 )
 
+_FRASI_DISCORSIVE_SCARTO_CODICE = (
+    "il codice ha uno",
+    "da quale file",
+    "trasforma un bug",
+    "lo gestisco o lo segnalo",
+    "non gestisce niente",
+    "il codice peggiore",
+    "storie dell'orrore",
+)
+
 _TITOLI_ORGANIZZATIVI_IGNORATI = frozenset({
     "parte 0", "giorno 0", "rompighiaccio", "quiz", "pausa", "mural",
     "ahaslides", "biglietti di uscita", "chi sono", "il corso", "gli strumenti",
@@ -324,6 +334,13 @@ def ha_pagine_continua_in_sospeso(dominio: str = "generale") -> bool:
         return bool(coda)
 
 
+def conta_pagine_continua_rimanenti(dominio: str = "generale") -> int:
+    """Returns number of remaining continuation pages in queue."""
+    with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
+        coda = _REGISTRO_CONTINUAZIONI_MEMORIA.get(dominio) or _REGISTRO_CONTINUAZIONI_MEMORIA.get("__ultimo__")
+        return len(coda) if coda else 0
+
+
 def svuota_pagine_continua(dominio: Optional[str] = None) -> None:
     """Clears pending continuation pages from memory."""
     with SEGRETARIO_THE.sezione_sacra(dominio or "generale"):
@@ -344,9 +361,24 @@ def _ripulisci_prefisso_tecnico_frammento(testo: str) -> str:
 
 def _e_riga_codice_python(riga: str) -> bool:
     r_strip = riga.strip()
+    r_lower = r_strip.lower()
+    if any(frase in r_lower for frase in _FRASI_DISCORSIVE_SCARTO_CODICE):
+        return False
+    if r_strip.startswith("from ") or r_strip.startswith("import "):
+        if ":" in r_strip:
+            return False
+        if re.match(r"^from\s+[a-z_][a-z0-9_.]*\s+import\s+[a-zA-Z_*]", r_strip):
+            return True
+        if re.match(r"^import\s+[a-z_][a-z0-9_.,\s]*$", r_strip):
+            return True
+        return False
+    if not (any(c in r_strip for c in ("=", "(", ":")) or r_strip.startswith(("return ", "yield ", "raise ", "pass"))):
+        return False
     if any(r_strip.startswith(p) for p in _PREFISSI_CODICE_PYTHON):
         return True
     if r_strip in ("else:", "try:", "finally:", "except:"):
+        return True
+    if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+$", r_strip):
         return True
     return False
 
@@ -356,6 +388,24 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     from retrieved RAG fragments into clean, structured Markdown, eliminating raw repetition and noise."""
     if not frammenti:
         return problema.strip()
+
+    titolo_guida = (frammenti[0].get("titolo", "") or "").strip()
+    slug_guida = _estrai_slug_fonte_da_frammento(frammenti[0].get("testo", "")) if not titolo_guida else ""
+    frammenti_stesso_doc = []
+    for f in frammenti:
+        f_tit = (f.get("titolo", "") or "").strip()
+        f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
+        if titolo_guida:
+            if f_tit == titolo_guida:
+                frammenti_stesso_doc.append(f)
+        elif slug_guida:
+            if f_sl == slug_guida:
+                frammenti_stesso_doc.append(f)
+        else:
+            frammenti_stesso_doc.append(f)
+
+    if not frammenti_stesso_doc:
+        frammenti_stesso_doc = frammenti
 
     righe_sintesi: List[str] = []
     viste: Set[str] = set()
@@ -370,7 +420,7 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             blocchi_codice.append(codice_md)
             righe_codice_attuali = []
 
-    for frammento in frammenti[:4]:
+    for frammento in frammenti_stesso_doc[:4]:
         testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
         if not testo:
             continue
@@ -465,18 +515,38 @@ def _costruisci_soluzione_deterministica(
 ) -> SoluzioneArtigiano:
     """Synthesizes a strictly grounded SoluzioneArtigiano directly from retrieved RAG fragments
     when the external LLM provider is offline or rate-limited, preserving all exact source numbers."""
-    pertinenti_raw = frammenti[:4] if frammenti else []
+    titolo_guida = (frammenti[0].get("titolo", "") or "").strip() if frammenti else ""
+    slug_guida = _estrai_slug_fonte_da_frammento(frammenti[0].get("testo", "")) if frammenti and not titolo_guida else ""
+    frammenti_stesso_doc = []
+    frammenti_scartati_altro_doc = []
+    for f in (frammenti or []):
+        f_tit = (f.get("titolo", "") or "").strip()
+        f_sl = _estrai_slug_fonte_da_frammento(f.get("testo", "")) if not f_tit else ""
+        if titolo_guida:
+            if f_tit == titolo_guida:
+                frammenti_stesso_doc.append(f)
+            else:
+                frammenti_scartati_altro_doc.append(f)
+        elif slug_guida:
+            if f_sl == slug_guida:
+                frammenti_stesso_doc.append(f)
+            else:
+                frammenti_scartati_altro_doc.append(f)
+        else:
+            frammenti_stesso_doc.append(f)
+
+    pertinenti_raw = frammenti_stesso_doc[:4] if frammenti_stesso_doc else []
     pertinenti_testi = [_ripulisci_prefisso_tecnico_frammento(f["testo"]) for f in pertinenti_raw]
     pertinenti_testi = [t for t in pertinenti_testi if t]
 
-    risposta_finale = _sintetizza_blocchi_in_markdown_pulito(problema, frammenti)
+    risposta_finale = _sintetizza_blocchi_in_markdown_pulito(problema, frammenti_stesso_doc)
 
     primo_testo = pertinenti_testi[0] if pertinenti_testi else problema.strip()
     principale_breve = _sintetizza_etichetta_frammento(primo_testo, max_len=MAX_CARATTERI_SINTESI_FALLBACK)
     tag_scarto = _ETICHETTE_SCARTATO.get(lingua, _ETICHETTE_SCARTATO["it"])
     tag_fals = _ETICHETTE_FALSIFICATA.get(lingua, _ETICHETTE_FALSIFICATA["it"])
 
-    frammenti_rimanenti = frammenti[len(pertinenti_raw):] if frammenti else []
+    frammenti_rimanenti = frammenti_stesso_doc[len(pertinenti_raw):] + frammenti_scartati_altro_doc
     scartati = [
         f"{tag_scarto} {_sintetizza_etichetta_frammento(frammento['testo'], max_len=MAX_CARATTERI_SCARTO_DEFAULT)}"
         for frammento in frammenti_rimanenti
@@ -669,6 +739,38 @@ def _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione: SoluzioneArtigiano) 
     return any(spia in testo_check for spia in _SPIE_DATO_ASSENTE_NEI_FRAMMENTI)
 
 
+_INDICE_ULTIMO_BLOCCO_LETTO_RAM: Dict[str, int] = {}
+
+
+def approfondisci_sezioni_successive_documento(dominio: str = "generale") -> Optional[str]:
+    """Extracts and synthesizes subsequent unread blocks from the active document in RAM archive."""
+    if not _ARCHIVIO_MEMORIA_RAM:
+        return None
+    frammenti_dominio = [
+        item for item in _ARCHIVIO_MEMORIA_RAM
+        if item.get("dominio") == dominio and not str(item.get("titolo", "")).startswith("Ricerca:")
+    ]
+    if not frammenti_dominio:
+        frammenti_dominio = [
+            item for item in _ARCHIVIO_MEMORIA_RAM
+            if not str(item.get("titolo", "")).startswith("Ricerca:")
+        ]
+    if not frammenti_dominio:
+        return None
+    titolo_attivo = frammenti_dominio[0].get("titolo", "")
+    blocchi_doc = [item for item in frammenti_dominio if item.get("titolo") == titolo_attivo]
+    if not blocchi_doc:
+        return None
+    indice_corrente = _INDICE_ULTIMO_BLOCCO_LETTO_RAM.get(dominio, 4)
+    if indice_corrente >= len(blocchi_doc):
+        return None
+    blocchi_succ = blocchi_doc[indice_corrente : indice_corrente + 4]
+    _INDICE_ULTIMO_BLOCCO_LETTO_RAM[dominio] = indice_corrente + 4
+    if not blocchi_succ:
+        return None
+    return _sintetizza_blocchi_in_markdown_pulito("Approfondimento sezioni successive", blocchi_succ)
+
+
 def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: str) -> Optional[dict]:
     """Se la richiesta e' un comando di continuazione, eroga la pagina successiva o notifica di esaurimento."""
     if not e_richiesta_continua(problema):
@@ -676,6 +778,7 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
     prossima_pagina = estrai_prossima_pagina_continua(dominio)
     if prossima_pagina is not None:
         ancora_in_sospeso = ha_pagine_continua_in_sospeso(dominio)
+        pagine_rim = conta_pagine_continua_rimanenti(dominio)
         testo_erogato = ripara_parola_troncata(prossima_pagina)
         return {
             "semaforo": "VERDE",
@@ -686,9 +789,12 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
             "ipotesi_escluse_applicate": [],
             "colore_nodo_ewd496a": "NERO",
             "percentuali_conservate": True,
+            "in_sospeso": ancora_in_sospeso,
+            "pagine_rimanenti": pagine_rim,
             "risultato": {
                 "stato": "CONTINUAZIONE",
                 "testo": testo_erogato,
+                "risposta_finale_discorsiva": testo_erogato,
                 "in_sospeso": ancora_in_sospeso,
             },
             "risposta_discorsiva": testo_erogato,
@@ -696,6 +802,41 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
             "cifre_non_ancorate": [],
             "sintesi_deterministica_attiva": False,
         }
+    if _ARCHIVIO_MEMORIA_RAM:
+        approfondimento = approfondisci_sezioni_successive_documento(dominio)
+        if approfondimento:
+            pagine_nuove = suddividi_in_pagine_con_continua(
+                approfondimento, max_caratteri_pagina=MAX_CARATTERI_TURNO_DEFAULT
+            )
+            if len(pagine_nuove) > 1:
+                imposta_pagine_continua(dominio, pagine_nuove[1:])
+                testo_erogato = pagine_nuove[0]
+            else:
+                testo_erogato = pagine_nuove[0]
+            ancora_in_sospeso = ha_pagine_continua_in_sospeso(dominio)
+            pagine_rim = conta_pagine_continua_rimanenti(dominio)
+            return {
+                "semaforo": "VERDE",
+                "s_max": 1.0,
+                "modalita": "CONTINUAZIONE_TESTO",
+                "lingua": lingua_rilevata,
+                "ricerca_esterna_eseguita": False,
+                "ipotesi_escluse_applicate": [],
+                "colore_nodo_ewd496a": "NERO",
+                "percentuali_conservate": True,
+                "in_sospeso": ancora_in_sospeso,
+                "pagine_rimanenti": pagine_rim,
+                "risultato": {
+                    "stato": "CONTINUAZIONE",
+                    "testo": testo_erogato,
+                    "risposta_finale_discorsiva": testo_erogato,
+                    "in_sospeso": ancora_in_sospeso,
+                },
+                "risposta_discorsiva": testo_erogato,
+                "frammenti_usati": [],
+                "cifre_non_ancorate": [],
+                "sintesi_deterministica_attiva": False,
+            }
     msg_vuoto = {
         "it": "Nessuna continuazione in sospeso. Tutte le informazioni sono state erogate oppure inserisci una nuova domanda.",
         "es": "No hay continuación pendiente. Toda la información ha sido entregada o introduce una nueva pregunta.",
@@ -710,7 +851,12 @@ def _intercetta_e_eroga_continua(problema: str, dominio: str, lingua_rilevata: s
         "ipotesi_escluse_applicate": [],
         "colore_nodo_ewd496a": "NERO",
         "percentuali_conservate": True,
-        "risultato": {"stato": "NESSUNA_CONTINUAZIONE"},
+        "in_sospeso": False,
+        "pagine_rimanenti": 0,
+        "risultato": {
+            "stato": "NESSUNA_CONTINUAZIONE",
+            "risposta_finale_discorsiva": msg_vuoto,
+        },
         "risposta_discorsiva": msg_vuoto,
         "frammenti_usati": [],
         "cifre_non_ancorate": [],
@@ -910,6 +1056,8 @@ def risolvi_da_artigiano(
     if risultato_continua is not None:
         return risultato_continua
 
+    _INDICE_ULTIMO_BLOCCO_LETTO_RAM[dominio] = 4
+
     blocco_lingua = _istruzione_lingua_tassativa(lingua_rilevata)
     query_multilingua = traduci_query_per_ricerca(problema)
     if cercatore_esterno_fn is None and _ARCHIVIO_MEMORIA_RAM:
@@ -1102,6 +1250,8 @@ def risolvi_da_artigiano(
     )
     risposta_completa_vault = risposta_discorsiva_piena
     limite_turno = max_caratteri_turno if max_caratteri_turno is not None else MAX_CARATTERI_TURNO_DEFAULT
+    in_sospeso = False
+    pagine_rimanenti = 0
     if len(risposta_discorsiva_piena) > limite_turno:
         pagine = suddividi_in_pagine_con_continua(
             risposta_discorsiva_piena,
@@ -1110,6 +1260,10 @@ def risolvi_da_artigiano(
         if len(pagine) > 1:
             imposta_pagine_continua(dominio, pagine[1:])
             risposta_discorsiva_piena = pagine[0]
+            in_sospeso = True
+            pagine_rimanenti = len(pagine) - 1
+            if isinstance(sol_dict, dict) and "risposta_finale_discorsiva" in sol_dict:
+                sol_dict["risposta_finale_discorsiva"] = pagine[0]
     else:
         svuota_pagine_continua(dominio)
 
@@ -1155,6 +1309,8 @@ def risolvi_da_artigiano(
         "ipotesi_escluse_applicate": escluse_pulite,
         "colore_nodo_ewd496a": colore_nodo,
         "percentuali_conservate": pct_ok,
+        "in_sospeso": in_sospeso,
+        "pagine_rimanenti": pagine_rimanenti,
         "risultato": sol_dict,
         "risposta_discorsiva": risposta_discorsiva_piena,
         "frammenti_usati": [framm.get("testo", "") for framm in rag.get("frammenti", [])],

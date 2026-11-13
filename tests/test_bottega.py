@@ -1737,10 +1737,27 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     testo_operatore = store_pgvector.normalizza_spazi_testo_pdf("punti = int(importo -/ 10)")
     assert testo_operatore == "punti = int (importo // 10)"
 
+    testo_slide_d = store_pgvector.normalizza_spazi_testo_pdf(
+        "voti sufiicienti con if v -= 6 e if importo -= 0 a cura di Davide Lista"
+    )
+    assert testo_slide_d == "voti sufficienti con if v >= 6 e if importo <= 0 a cura di D."
+
     slug_fonte = risolutore_artigiano._estrai_slug_fonte_da_frammento(
         {"titolo": "Giorno 02 – Codice pulito.pptx.pdf", "testo": "EURO_PER_PUNTO = 10. if importo > 100"}
     )
     assert slug_fonte == "giorno-02-codice-pulito-pptx"
     assert slug_fonte != "10-if-importo-100"
+
+    frammenti_misti = [
+        {"titolo": "Giorno 02 - Codice pulito.pdf", "testo": "Regola 1: Nomi che dicono cosa contengono.\ndef calcola(x):\n    return x * 2"},
+        {"titolo": "Giorno 02 - Codice pulito.pdf", "testo": "Regola 2: Una funzione un solo compito.\nimport math"},
+        {"titolo": "Giorno 03 - Un anno a Hogwarts.pdf", "testo": "Slide introduttiva a cura di D. su Hogwarts e incantesimi.\nimport magic"},
+    ]
+    sintesi_pulita = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito("Sette regole del codice pulito", frammenti_misti)
+    assert "Giorno 03" not in sintesi_pulita
+    assert "Hogwarts" not in sintesi_pulita
+    assert "incantesimi" not in sintesi_pulita
+    assert "magic" not in sintesi_pulita
+    assert "Nomi che dicono cosa contengono" in sintesi_pulita
 
 

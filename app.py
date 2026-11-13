@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v13"
+_VERSIONE_MODULI_THE = "2026.11.13.v14"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -719,71 +719,104 @@ with tab_artigiano:
         )
 
     clic_risolvi = st.button("Get Verified Answer", type="primary")
-    fn_ha_continua = getattr(risolutore_artigiano, "ha_pagine_continua_in_sospeso", None)
-    ha_continua_attivo = callable(fn_ha_continua) and fn_ha_continua(dominio_scelto)
-    clic_continua = False
-    if ha_continua_attivo:
-        st.info("Long response paginated: click below or type 'continua' to read the next part.")
-        clic_continua = st.button("Continue reading (Next part)")
 
-    if clic_risolvi or clic_continua:
-        testo_input_effettivo = "continua" if clic_continua else problema_testo
-        if not testo_input_effettivo.strip():
+    if clic_risolvi:
+        testo_input_effettivo = problema_testo.strip()
+        if not testo_input_effettivo:
             st.warning("Please enter a question or problem description first.")
         else:
             lista_escluse = [
                 riga.strip() for riga in ipotesi_escluse_testo.splitlines() if riga.strip()
             ]
             cercatore_fn = _cercatore_cascata_ui if cerca_fuori else None
+            e_continua = risolutore_artigiano.e_richiesta_continua(testo_input_effettivo)
             try:
                 with st.spinner("Evaluating Guarded Semaphore, RRF Retrieval and Write Barrier (Strato L · A · D)..."):
-                    esito = risolutore_artigiano.risolvi_da_artigiano(
-                        testo_input_effettivo,
-                        dominio=dominio_scelto,
-                        cercatore_esterno_fn=cercatore_fn,
-                        ipotesi_gia_escluse=lista_escluse,
-                        llm_fn=llm_selezionato_fn,
-                    )
+                    if e_continua:
+                        esito = risolutore_artigiano.risolvi_da_artigiano(
+                            "continua",
+                            dominio=dominio_scelto,
+                            cercatore_esterno_fn=cercatore_fn,
+                            ipotesi_gia_escluse=lista_escluse,
+                            llm_fn=llm_selezionato_fn,
+                        )
+                    else:
+                        esito = risolutore_artigiano.risolvi_da_artigiano(
+                            testo_input_effettivo,
+                            dominio=dominio_scelto,
+                            cercatore_esterno_fn=cercatore_fn,
+                            ipotesi_gia_escluse=lista_escluse,
+                            llm_fn=llm_selezionato_fn,
+                            max_caratteri_turno=1800,
+                        )
                 st.session_state["ultimo_esito_artigiano"] = esito
                 st.session_state["ultima_domanda_artigiano"] = testo_input_effettivo
+                nuovo_testo = esito.get("risposta_discorsiva") or ""
+                if e_continua:
+                    parti = st.session_state.setdefault("parti_discorso_accumulate", [])
+                    if parti:
+                        parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                    parti.append(nuovo_testo)
+                else:
+                    st.session_state["parti_discorso_accumulate"] = [nuovo_testo]
+
                 voce_wiki = risolutore_artigiano.compila_voce_wiki_markdown(testo_input_effettivo, esito)
                 voci_wiki = st.session_state.setdefault("llm_wiki_voci", [])
                 if voce_wiki not in voci_wiki:
                     voci_wiki.append(voce_wiki)
                 risolutore_artigiano.salva_voce_wiki_su_disco(voce_wiki)
-
-                m1, m2, m3 = st.columns(3)
-                m1.metric("Document Match", f"{'High' if esito['semaforo'] == 'VERDE' else ('Partial' if esito['semaforo'] == 'AMBAR' else 'Not Found')} ({int(round(float(esito['s_max']) * 100))}%)")
-                m2.metric("Answer Status", "Verified from Your Files" if esito["modalita"] != "RICERCA_PRIMA_DI_AGIRE" else "Honest Stop — Missing Data")
-                m3.metric("Numbers & Facts Check", "100% Verified" if esito["colore_nodo_ewd496a"] == "NERO" else "Unverified Numbers Flagged")
-
-                if esito.get("sintesi_deterministica_attiva"):
-                    st.caption("ℹ️ Local Document Summary Mode active. To enable full neural AI prose generation, enter a free Google AI Studio key ('AIzaSy...') in the left sidebar.")
-
-                testo_leggibile = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(
-                    esito["risultato"],
-                    esito["modalita"],
-                    lingua=esito.get("lingua", "it"),
-                )
-
-                risposta_mostrata = esito.get("risultato", {}).get("risposta_finale_discorsiva") or testo_leggibile
-                st.markdown("### Answer from Your Documents")
-                st.write_stream(_stream_testo_parole(risposta_mostrata))
-
-                with st.expander("🔬 Technical Audit & Step-by-Step Verification Details (Strato L · A · D)"):
-                    st.markdown("#### Full Step-by-Step Diagnostic Report")
-                    st.markdown(testo_leggibile)
-                    if esito.get("frammenti_usati"):
-                        st.markdown("#### Grounded Fragments from Your Files")
-                        for idx_f, testo_f in enumerate(esito["frammenti_usati"], start=1):
-                            st.markdown(f"**Fragment {idx_f}:**\n> {testo_f}")
-                    st.markdown("#### JSON Audit Data")
-                    st.json(esito["risultato"])
-                    if esito.get("cifre_non_ancorate"):
-                        st.warning(f"Ungrounded figures flagged by Write Barrier: {esito['cifre_non_ancorate']}")
             except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                 logging_bottega.log_exception("Errore in risolvi_da_artigiano UI", "APP_ART_001", err)
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
+
+    esito = st.session_state.get("ultimo_esito_artigiano")
+    if esito:
+        m1, m2, m3 = st.columns(3)
+        m1.metric("Document Match", f"{'High' if esito['semaforo'] == 'VERDE' else ('Partial' if esito['semaforo'] == 'AMBAR' else 'Not Found')} ({int(round(float(esito['s_max']) * 100))}%)")
+        m2.metric("Answer Status", "Verified from Your Files" if esito["modalita"] != "RICERCA_PRIMA_DI_AGIRE" else "Honest Stop — Missing Data")
+        m3.metric("Numbers & Facts Check", "100% Verified" if esito["colore_nodo_ewd496a"] == "NERO" else "Unverified Numbers Flagged")
+
+        if esito.get("sintesi_deterministica_attiva"):
+            st.caption("ℹ️ Local Document Summary Mode active. To enable full neural AI prose generation, enter a free Google AI Studio key ('AIzaSy...') in the left sidebar.")
+
+        parti_acc = st.session_state.get("parti_discorso_accumulate", [])
+        if parti_acc:
+            discorso_completo = "\n\n".join(parti_acc)
+        else:
+            discorso_completo = esito.get("risposta_discorsiva") or esito.get("risultato", {}).get("risposta_finale_discorsiva") or ""
+
+        st.markdown("### Answer from Your Documents")
+        st.markdown(discorso_completo)
+
+        if risolutore_artigiano.ha_pagine_continua_in_sospeso(dominio_scelto):
+            st.info("📖 More content available for this topic: click the button below (or type 'continua') to continue the explanation.")
+            if st.button("➡️ Continue Reading — Next Part ('continua')", type="primary", key="btn_continua_sotto"):
+                with st.spinner("Retrieving next part..."):
+                    esito_cont = risolutore_artigiano.risolvi_da_artigiano("continua", dominio=dominio_scelto)
+                    nuova_p = esito_cont.get("risposta_discorsiva", "")
+                    parti = st.session_state.setdefault("parti_discorso_accumulate", [])
+                    if parti:
+                        parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                    parti.append(nuova_p)
+                    st.session_state["ultimo_esito_artigiano"] = esito_cont
+                    st.rerun()
+
+        with st.expander("🔬 Technical Audit & Step-by-Step Verification Details (Strato L · A · D)"):
+            testo_completo_diagnostica = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(
+                esito["risultato"],
+                esito["modalita"],
+                lingua=esito.get("lingua", "it"),
+            )
+            st.markdown("#### Full Step-by-Step Diagnostic Report")
+            st.markdown(testo_completo_diagnostica)
+            if esito.get("frammenti_usati"):
+                st.markdown("#### Grounded Fragments from Your Files")
+                for idx_f, testo_f in enumerate(esito["frammenti_usati"], start=1):
+                    st.markdown(f"**Fragment {idx_f}:**\n> {testo_f}")
+            st.markdown("#### JSON Audit Data")
+            st.json(esito["risultato"])
+            if esito.get("cifre_non_ancorate"):
+                st.warning(f"Ungrounded figures flagged by Write Barrier: {esito['cifre_non_ancorate']}")
 
 with tab_wiki:
     st.subheader("📚 Second Brain Knowledge Vault (Obsidian & K. Pattern)")
