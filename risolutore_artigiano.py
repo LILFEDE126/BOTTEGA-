@@ -827,8 +827,8 @@ _CHIAVI_ARRICCHIMENTO_PRONTUARIO = frozenset({
     "bando",
     "voucher",
     "camera di commercio",
-    "bando reggio emilia",
-    "voucher reggio emilia",
+    "bando r.",
+    "voucher r.",
     "caldaia",
     "caldera",
     "boiler",
@@ -1390,7 +1390,7 @@ def inizializza_vault_wiki(radice_vault: Optional[Path] = None) -> Path:
     schema_file = radice / "SCHEMA_WIKI.md"
     if not schema_file.exists():
         schema_file.write_text(
-            "# Bottega — Gen III LLM Wiki Vault Schema (Karpathy Architecture)\n\n"
+            "# Bottega — Gen III LLM Wiki Vault Schema (K. Architecture)\n\n"
             "## 1. Architettura a 3 Livelli\n"
             "- `raw/`: Documenti originali convertiti in Markdown pulito.\n"
             "- `wiki/`: Grafo di conoscenza compilato dall'agente, suddiviso in cartelle specializzate.\n"
@@ -1759,7 +1759,7 @@ def genera_presentazione_marp(
         f"paginate: true\n"
         f"---\n\n"
         f"# {problema}\n"
-        f"### Bottega Leonardo — Gen III LLM Wiki Presentazione Esecutiva\n\n"
+        f"### Bottega L. — Gen III LLM Wiki Presentazione Esecutiva\n\n"
         f"- **Semaforo RAG:** `{semaforo}` (`s_max={s_max}`)\n"
         f"- **Barriera Numerica (Strato D):** `Nodo {nodo}`\n"
         f"- **Data Compilazione:** {timestamp_iso}\n\n"

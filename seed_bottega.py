@@ -274,8 +274,8 @@ PRONTUARIO_ESTERNO_SOCCORSO = [
         "e' 4,70% e l'IVA spagnola e' 21,0%.",
     ),
     (
-        "Bando Voucher Digitali I4.0 (Camera di Commercio di Reggio Emilia) e Spese Ammissibili",
-        "Il Bando Voucher digitali I4.0 della Camera di Commercio di Reggio Emilia (dotazione 1.150.000,00 euro) "
+        "Bando Voucher Digitali I4.0 (Camera di Commercio di R.) e Spese Ammissibili",
+        "Il Bando Voucher digitali I4.0 della Camera di Commercio di R. (dotazione 1.150.000,00 euro) "
         "prevede un contributo a fondo perduto pari al 50% dei costi ammissibili al netto di IVA, fino all'importo "
         "massimo di 10.000,00 euro (oltre premialita' di 250,00 euro per rating di legalita'). "
         "Sono ammissibili servizi di consulenza, formazione e acquisto di tecnologie digitali I4.0, inclusa "

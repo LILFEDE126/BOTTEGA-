@@ -839,7 +839,7 @@ def test_nodo_nero_ewd496a_con_frammenti_scartati_risposta_monolingua_en_es_e_30
             risposta_finale_discorsiva=(
                 "El Bando Voucher digitali I4.0 cubre el 50% hasta 10.000,00 euro, mientras que el precio es 40 euro."
             ),
-            principio_guida_unico="Bando Voucher digitali I4.0 (Reggio Emilia)",
+            principio_guida_unico="Bando Voucher digitali I4.0 (R.)",
             elementi_scartati_per_non_fare_mucchio=["Modelo de negocio 1.9a: 40 euro"],
             precondizione_wp_richiesta="wp(S, R) exige separar costos digitales (50%) de folletos impresos.",
             invariante_violato="Elegibilidad de gastos digitales frente a tipografía.",
@@ -909,7 +909,7 @@ def test_normalizzazione_spazi_pdf_incollati_e_barriera_numerica_su_contesto_rea
                 "Il contributo copre il 50% dei costi sostenuti fino a un massimo di 40.000 euro per le micro e piccole imprese."
             ),
             principio_guida_unico="Bando Nazionale Innovation Manager 2023 (Frammento 2 e 5)",
-            elementi_scartati_per_non_fare_mucchio=["Bando Voucher digitali I4.0 - Reggio Emilia"],
+            elementi_scartati_per_non_fare_mucchio=["Bando Voucher digitali I4.0 - R."],
             precondizione_wp_richiesta="Contratto di consulenza non inferiore a nove mesi",
             invariante_violato="Equilibrio tra qualificazione del consulente e ammissibilita' spesa",
             ipotesi_causale_unica="Necessita' di iscrizione nell'elenco ministeriale",
@@ -993,21 +993,21 @@ def test_strati_l_a_d_senza_nomi_propri_e_rilevamento_globali_mutabili_ast(monke
     )
 
     def finto_llm_cascata(sys_p, usr_p, schema):
-        if schema is cascata_strutturata.OutputLeonardo:
-            return cascata_strutturata.OutputLeonardo(
+        if schema is cascata_strutturata.OutputL:
+            return cascata_strutturata.OutputL(
                 osservazione_architetturale="Struttura semplice a 1 funzione.",
                 scomposizione_moduli=["Modulo puro"],
-                complessita_inutile_rilevata=["Lista mutabile globale"],
+                complessita_inutile_rilevata=["Collezione mutabile globale"],
                 proposta_semplificata="Eliminare stato mutabile.",
             )
-        if schema is cascata_strutturata.OutputAntirez:
-            return cascata_strutturata.OutputAntirez(
-                criticita_sicurezza_e_limiti=["Race condition su lista globale"],
+        if schema is cascata_strutturata.OutputA:
+            return cascata_strutturata.OutputA(
+                criticita_sicurezza_e_limiti=["Race condition su collezione globale"],
                 guardrail_mancanti=["Validazione input"],
                 valutazione_originalita="Codice minimale.",
                 test_consigliati=["Test concorrenza"],
             )
-        return cascata_strutturata.OutputDijkstra(
+        return cascata_strutturata.OutputD(
             dominio_e_codominio="int -> int",
             invarianti=["Nessuna mutazione globale"],
             complessita_big_o="O(1)",
@@ -1250,8 +1250,8 @@ def test_articolo_45_costituzione_non_fa_falso_verde_su_gamma_spa_45000_e_auto_g
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
-def test_domanda_meteo_reggio_emilia_non_aggancia_bando_voucher_camera_commercio():
-    query_meteo = "Che tempo fa a Reggio Emilia domani 10 novembre"
+def test_domanda_meteo_r_non_aggancia_bando_voucher_camera_commercio():
+    query_meteo = "Che tempo fa a R. domani 10 novembre"
     trovati_prontuario = seed_bottega.cerca_nel_prontuario_locale(query_meteo)
     assert trovati_prontuario == []
 
@@ -1276,7 +1276,7 @@ def test_domanda_meteo_reggio_emilia_non_aggancia_bando_voucher_camera_commercio
     assert esito_stop["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
     assert esito_stop["colore_nodo_ewd496a"] == "GRIGIO"
 
-    query_vera_bando = "Quali spese sono ammissibili per il bando voucher digitali I4.0 della Camera di Commercio di Reggio Emilia?"
+    query_vera_bando = "Quali spese sono ammissibili per il bando voucher digitali I4.0 della Camera di Commercio di R.?"
     trovati_bando = seed_bottega.cerca_nel_prontuario_locale(query_vera_bando)
     assert len(trovati_bando) == 1
     assert "Bando Voucher" in trovati_bando[0][0]
@@ -1454,13 +1454,13 @@ def test_senior_engineering_20_principi_integrita_architetturale():
                         )
 
 
-def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_stop_onesto_rojo(monkeypatch):
+def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_o_f_e_forza_stop_onesto_rojo(monkeypatch):
     domanda_sfida = "Si preciso che ti hanno sfidato : mi sai dire l'andamento dei prossimi due anni dell'S&P 500?"
 
     def cercatore_spuri(query: str):
         return [
-            ("API Wikipedia: Oriana Fallaci", "Oriana Fallaci è stata una scrittrice e giornalista italiana."),
-            ("API Wikipedia: Metamorfosi (Ovidio)", "Le metamorfosi sono un poema epico-mitologico di Ovidio."),
+            ("API Wikipedia: O. F.", "O. F. è stata una scrittrice e giornalista italiana."),
+            ("API Wikipedia: Metamorfosi (O.)", "Le metamorfosi sono un poema epico-mitologico di O."),
         ]
 
     def mock_piano(sistema, utente, schema):
@@ -1478,7 +1478,7 @@ def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_sto
         cercatore_esterno_fn=cercatore_spuri,
         llm_fn=mock_piano,
     )
-    assert esito_a1["semaforo"] == "ROJO", f"Atteso ROJO su frammenti spuri Fallaci/Ovidio, ottenuto {esito_a1['semaforo']}"
+    assert esito_a1["semaforo"] == "ROJO", f"Atteso ROJO su frammenti spuri O./O., ottenuto {esito_a1['semaforo']}"
     assert esito_a1["modalita"] == "RICERCA_PRIMA_DI_AGIRE"
     assert esito_a1["s_max"] != 0.90, "Il punteggio s_max non deve essere forzato a 0.90 su frammenti spuri"
     assert esito_a1["frammenti_usati"] == []
@@ -1539,7 +1539,7 @@ def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_sto
             return {
                 "query": {
                     "search": [
-                        {"title": "Oriana Fallaci", "snippet": "Scrittrice e giornalista italiana."},
+                        {"title": "O. F.", "snippet": "Scrittrice e giornalista italiana."},
                         {"title": "S&P 500", "snippet": "Indice azionario composto da 500 titoli USA."},
                     ]
                 }
@@ -1552,7 +1552,7 @@ def test_sfida_sp500_blocca_frammenti_wikipedia_spuri_oriana_fallaci_e_forza_sto
     risultati_wiki = seed_bottega._cerca_tramite_wikipedia_api(domanda_sfida, query_compatta)
     assert len(risultati_wiki) == 1
     assert "S&P 500" in risultati_wiki[0][0]
-    assert "Oriana Fallaci" not in [item[0] for item in risultati_wiki]
+    assert "O. F." not in [item[0] for item in risultati_wiki]
 
 
 def test_benchmark_verticale_25_casi_b2b_qualita_e_sicurezza():
@@ -1678,7 +1678,7 @@ def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
     assert "Nomi che dicono" in esito_offline["risposta_discorsiva"]
 
 
-def test_architettura_karpathy_llm_wiki_ingest_query_lint_marp_e_zip(monkeypatch):
+def test_architettura_k_llm_wiki_ingest_query_lint_marp_e_zip(monkeypatch):
     with tempfile.TemporaryDirectory() as cartella_tmp:
         radice = Path(cartella_tmp) / "wiki_vault"
         radice_creata = risolutore_artigiano.inizializza_vault_wiki(radice)

@@ -22,7 +22,7 @@ from store_pgvector import recupera_con_semaforo
 from client_ollama import chiama_ollama_json
 
 
-class OutputLeonardo(BaseModel):
+class OutputL(BaseModel):
     osservazione_architetturale: str = Field(
         description="Empirical analysis of what the code does and its structure"
     )
@@ -37,7 +37,7 @@ class OutputLeonardo(BaseModel):
     )
 
 
-class OutputAntirez(BaseModel):
+class OutputA(BaseModel):
     criticita_sicurezza_e_limiti: List[str] = Field(
         description="Breaking points under load, race conditions, locks or memory leaks"
     )
@@ -56,7 +56,7 @@ VOTO_MINIMO_INGEGNERISTICO: int = 1
 VOTO_MASSIMO_INGEGNERISTICO: int = 10
 
 
-class OutputDijkstra(BaseModel):
+class OutputD(BaseModel):
     dominio_e_codominio: str = Field(
         description="Formal specification of input types, output types and error states"
     )
@@ -74,6 +74,11 @@ class OutputDijkstra(BaseModel):
         le=VOTO_MASSIMO_INGEGNERISTICO,
         description="Strict engineering score from 1 to 10 for the original code",
     )
+
+
+OutputLeonardo = OutputL
+OutputAntirez = OutputA
+OutputDijkstra = OutputD
 
 
 def _formatta_frammenti_rag(risultato_rag: dict) -> str:
@@ -120,7 +125,7 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
         "usa esclusivamente i termini Strato L, Strato A, Strato D. Rispondi in italiano.",
         f"PRINCIPI STRATO L:\n{ctx_leo}\n\nANATOMIA AST:\n{anatomia_json}\n\n"
         f"CODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
-        OutputLeonardo,
+        OutputL,
     )
     t_leo = arrotonda_esatto_el_x8(time.perf_counter() - t0, 2)
 
@@ -132,7 +137,7 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
         "usa esclusivamente Strato L, Strato A, Strato D. Rispondi in italiano.",
         f"PRINCIPI STRATO A:\n{ctx_ant}\n\nANALISI STRATO L:\n{out_leo.model_dump_json(indent=2)}\n\n"
         f"ANATOMIA AST:\n{anatomia_json}\n\nCODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
-        OutputAntirez,
+        OutputA,
     )
     t_anti = arrotonda_esatto_el_x8(time.perf_counter() - t0, 2)
 
@@ -145,7 +150,7 @@ def esegui_cascata(file_path: str, llm_fn: Callable = chiama_ollama_json) -> str
         f"PRINCIPI STRATO D:\n{ctx_dij}\n\nANALISI STRATO L:\n{out_leo.model_dump_json(indent=2)}\n\n"
         f"ANALISI STRATO A:\n{out_anti.model_dump_json(indent=2)}\n\n"
         f"CODICE SORGENTE:\n```python\n{codice_sorgente}\n```",
-        OutputDijkstra,
+        OutputD,
     )
     t_dijk = arrotonda_esatto_el_x8(time.perf_counter() - t0, 2)
 

@@ -16,7 +16,7 @@ Large Language Models fail in production for two structural reasons:
 1. **Hallucination on empty memory:** when the context lacks the required datum, a standard LLM guesses by statistical plausibility instead of stopping to request or fetch the missing fact.
 2. **Spurious fusion ("clutter effect" / *effetto mucchio*):** when a traditional RAG retrieves multiple heterogeneous chunks, the model blends steps from incompatible procedures and invents numbers absent from the official source.
 
-**Bottega Leonardesca & THE Engine** eliminates both failure modes by replacing opaque frameworks (LangChain / LlamaIndex) with a strictly stratified **13-module Python architecture** across **5 acyclic rings (`Layers 0..4`)**, inspired by Edsger W. Dijkstra's `THE` multiprogramming system (`EWD196`, `EWD310`), Leonardo's empirical method, and the production guardrails proven on the **Assistant** customs system.
+**Bottega Leonardesca & THE Engine** eliminates both failure modes by replacing opaque frameworks (LangChain / LlamaIndex) with a strictly stratified **13-module Python architecture** across **5 acyclic rings (`Layers 0..4`)**, inspired by E. W. D.'s `THE` multiprogramming system (`EWD196`, `EWD310`), L.'s empirical method, and the production guardrails proven on the **Assistant** customs system.
 
 ---
 

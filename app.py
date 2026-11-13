@@ -786,7 +786,7 @@ with tab_artigiano:
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
 
 with tab_wiki:
-    st.subheader("📚 Second Brain Knowledge Vault (Obsidian & Karpathy Pattern)")
+    st.subheader("📚 Second Brain Knowledge Vault (Obsidian & K. Pattern)")
     st.caption("Multi-file Markdown knowledge vault with bidirectional [[wikilinks]], live graph navigation, Marp presentations and 1-click Obsidian export.")
 
     radice_vault = risolutore_artigiano.inizializza_vault_wiki()
@@ -823,7 +823,7 @@ with tab_wiki:
                 "semaforo": "VERDE",
                 "s_max": 1.0,
                 "colore_nodo_ewd496a": "NERO",
-                "risultato": {"principio_guida_unico": "Bottega Leonardo LLM Wiki"},
+                "risultato": {"principio_guida_unico": "Bottega L. LLM Wiki"},
                 "risposta_discorsiva": "Executive summary generated from Knowledge Vault.",
             }
             testo_marp, path_marp = risolutore_artigiano.genera_presentazione_marp(

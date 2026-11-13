@@ -22,6 +22,7 @@ except ImportError:
 
 from config import (
     EMBED_DIM,
+    LIMITE_ITERAZIONI_D,
     LIMITE_ITERAZIONI_DIJKSTRA,
     MAX_CARATTERI_PARAGRAFO_PDF,
     OLLAMA_EMBED_MODEL,
@@ -467,7 +468,7 @@ def _suddividi_testo_in_blocchi(
                 buffer_corrente = paragrafo
             else:
                 residuo_paragrafo = paragrafo
-                passi_residui = LIMITE_ITERAZIONI_DIJKSTRA
+                passi_residui = LIMITE_ITERAZIONI_D
                 while residuo_paragrafo and passi_residui > 0:
                     passi_residui -= 1
                     if len(residuo_paragrafo) <= max_caratteri:
