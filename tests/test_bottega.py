@@ -1779,4 +1779,16 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     radice_repo = _trova_radice_progetto()
     assert (radice_repo / "AGENTS.md").is_file()
 
+    taglio_audit = risolutore_artigiano.rimuovi_coda_audit_6_punti(
+        "Testo principale pulito\n\n---\n\n**1. Risposta e Diagnosi Principale:**\nDettaglio tecnico"
+    )
+    assert taglio_audit == "Testo principale pulito"
+
+    frammenti_codice_attaccato = [
+        {"titolo": "Giorno 02 - Codice pulito.pdf", "testo": "def calc (d):res = {}for i in d:p = int (i[1] / 10)\nEURO_PER_PUNTO = 10SOGLIA_BONUS = 100MOLTIPLICATORE_BONUS = 2\nreturn puntipunti = punti_acquisto (importo)"}
+    ]
+    sintesi_codice = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito("Codice pulito", frammenti_codice_attaccato)
+    assert "EURO_PER_PUNTO = 10\nSOGLIA_BONUS = 100" in sintesi_codice
+    assert "return punti\npunti = punti_acquisto" in sintesi_codice
+
 

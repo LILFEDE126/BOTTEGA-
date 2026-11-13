@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v15"
+_VERSIONE_MODULI_THE = "2026.11.13.v16"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -740,6 +740,21 @@ with tab_artigiano:
                             ipotesi_gia_escluse=lista_escluse,
                             llm_fn=llm_selezionato_fn,
                         )
+                        testo_cont = esito.get("risposta_discorsiva", "")
+                        parte_pulita = risolutore_artigiano.rimuovi_coda_audit_6_punti(testo_cont)
+                        parti = st.session_state.setdefault("parti_discorso_accumulate", [])
+                        if parte_pulita:
+                            if parti:
+                                parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                            parti.append(parte_pulita)
+                        else:
+                            approf = risolutore_artigiano.approfondisci_sezioni_successive_documento(dominio_scelto)
+                            if approf:
+                                if parti:
+                                    parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                                parti.append(approf)
+                        esito_orig = st.session_state.get("esito_principale_originale")
+                        st.session_state["ultimo_esito_artigiano"] = esito_orig if esito_orig is not None else esito
                     else:
                         esito = risolutore_artigiano.risolvi_da_artigiano(
                             testo_input_effettivo,
@@ -747,18 +762,18 @@ with tab_artigiano:
                             cercatore_esterno_fn=cercatore_fn,
                             ipotesi_gia_escluse=lista_escluse,
                             llm_fn=llm_selezionato_fn,
-                            max_caratteri_turno=1800,
+                            max_caratteri_turno=2200,
                         )
-                st.session_state["ultimo_esito_artigiano"] = esito
-                st.session_state["ultima_domanda_artigiano"] = testo_input_effettivo
-                nuovo_testo = esito.get("risposta_discorsiva") or ""
-                if e_continua:
-                    parti = st.session_state.setdefault("parti_discorso_accumulate", [])
-                    if parti:
-                        parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
-                    parti.append(nuovo_testo)
-                else:
-                    st.session_state["parti_discorso_accumulate"] = [nuovo_testo]
+                        st.session_state["esito_principale_originale"] = esito
+                        st.session_state["ultimo_esito_artigiano"] = esito
+                        st.session_state["ultima_domanda_artigiano"] = testo_input_effettivo
+                        testo_grezzo = (
+                            esito.get("risultato", {}).get("risposta_finale_discorsiva")
+                            or esito.get("risposta_discorsiva")
+                            or ""
+                        )
+                        parte_pulita = risolutore_artigiano.rimuovi_coda_audit_6_punti(testo_grezzo)
+                        st.session_state["parti_discorso_accumulate"] = [parte_pulita if parte_pulita else testo_grezzo]
 
                 voce_wiki = risolutore_artigiano.compila_voce_wiki_markdown(testo_input_effettivo, esito)
                 voci_wiki = st.session_state.setdefault("llm_wiki_voci", [])
@@ -783,7 +798,12 @@ with tab_artigiano:
         if parti_acc:
             discorso_completo = "\n\n".join(parti_acc)
         else:
-            discorso_completo = esito.get("risposta_discorsiva") or esito.get("risultato", {}).get("risposta_finale_discorsiva") or ""
+            testo_base = (
+                esito.get("risultato", {}).get("risposta_finale_discorsiva")
+                or esito.get("risposta_discorsiva")
+                or ""
+            )
+            discorso_completo = risolutore_artigiano.rimuovi_coda_audit_6_punti(testo_base) or testo_base
 
         st.markdown("### Answer from Your Documents")
         st.markdown(discorso_completo)
@@ -793,12 +813,21 @@ with tab_artigiano:
             if st.button("➡️ Continue Reading — Next Part ('continua')", type="primary", key="btn_continua_sotto"):
                 with st.spinner("Retrieving next part..."):
                     esito_cont = risolutore_artigiano.risolvi_da_artigiano("continua", dominio=dominio_scelto)
-                    nuova_p = esito_cont.get("risposta_discorsiva", "")
+                    testo_cont = esito_cont.get("risposta_discorsiva", "")
+                    parte_pulita = risolutore_artigiano.rimuovi_coda_audit_6_punti(testo_cont)
                     parti = st.session_state.setdefault("parti_discorso_accumulate", [])
-                    if parti:
-                        parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
-                    parti.append(nuova_p)
-                    st.session_state["ultimo_esito_artigiano"] = esito_cont
+                    if parte_pulita:
+                        if parti:
+                            parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                        parti.append(parte_pulita)
+                    else:
+                        approf = risolutore_artigiano.approfondisci_sezioni_successive_documento(dominio_scelto)
+                        if approf:
+                            if parti:
+                                parti[-1] = re.sub(r"(?:\n\s*)*continua\s*$", "", parti[-1], flags=re.IGNORECASE).rstrip()
+                            parti.append(approf)
+                    esito_orig = st.session_state.get("esito_principale_originale")
+                    st.session_state["ultimo_esito_artigiano"] = esito_orig if esito_orig is not None else esito_cont
                     st.rerun()
 
         st.markdown("#### 🗺️ Visual Step-by-Step Summary")
@@ -1072,7 +1101,10 @@ with tab_codice:
                     try:
                         with st.spinner("Running AST, Hybrid RRF RAG and 3-Layer Cascade (Strato L -> Strato A -> Strato D)..."):
                             referto = cascata_strutturata.esegui_cascata(str(tmp_path), llm_fn=llm_selezionato_fn)
-                        st.write_stream(_stream_testo_parole(referto))
+                        if "```" in referto:
+                            st.markdown(referto)
+                        else:
+                            st.write_stream(_stream_testo_parole(referto))
                         st.download_button(
                             "Download Markdown Report",
                             referto,

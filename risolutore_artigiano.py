@@ -247,6 +247,34 @@ def formatta_risposta_artigiano_leggibile(
     )
 
 
+def rimuovi_coda_audit_6_punti(testo: str) -> str:
+    """Removes the 6-point technical audit boilerplate from user-facing main answer pages,
+    keeping only the clean documentary explanation and verified code blocks."""
+    if not testo:
+        return ""
+    marcatori_taglio = (
+        "\n---\n\n**1. Risposta e Diagnosi Principale:**",
+        "\n**1. Risposta e Diagnosi Principale:**",
+        "1. Risposta e Diagnosi Principale:",
+        "\n---\n\n**1. Main Answer & Root Diagnosis:**",
+        "\n**1. Main Answer & Root Diagnosis:**",
+        "1. Main Answer & Root Diagnosis:",
+        "\n---\n\n**1. Respuesta y Diagnóstico Principal:**",
+        "\n**1. Respuesta y Diagnóstico Principal:**",
+        "1. Respuesta y Diagnóstico Principal:",
+    )
+    risultato = testo
+    for m in marcatori_taglio:
+        if m in risultato:
+            risultato = risultato.split(m, 1)[0].strip()
+    if re.match(
+        r"^\s*\**[1-6]\.\s+(?:Verifica Pratica|Condizione di Partenza|Voci o Ipotesi|Practical Verification|Starting Precondition|Excluded Items|Risposta e Diagnosi|Main Answer|Respuesta)",
+        risultato,
+    ):
+        return ""
+    return risultato.strip()
+
+
 def _costruisci_piano_deterministico(problema: str, lingua: str = "it") -> PianoRicercaArtigiano:
     """Builds a deterministic research plan when the external LLM is unreachable on ROJO semaphore."""
     testo_pulito = problema.strip()
@@ -411,15 +439,7 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     righe_sintesi: List[str] = []
     viste: Set[str] = set()
     sezioni_trovate: List[str] = []
-    blocchi_codice: List[str] = []
-    righe_codice_attuali: List[str] = []
-
-    def _scarica_codice() -> None:
-        nonlocal righe_codice_attuali
-        if righe_codice_attuali:
-            codice_md = "```python\n" + "\n".join(righe_codice_attuali) + "\n```"
-            blocchi_codice.append(codice_md)
-            righe_codice_attuali = []
+    codice_trovato: List[str] = []
 
     for frammento in frammenti_stesso_doc[:4]:
         testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
@@ -462,9 +482,17 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             viste.add(chiave_normalizzata)
 
             if _e_riga_codice_python(riga):
-                righe_codice_attuali.append(riga)
+                riga_cod = riga
+                riga_cod = re.sub(r"(\d)([A-Z_]{3,}\s*=)", r"\1\n\2", riga_cod)
+                riga_cod = re.sub(r"(\b[a-zA-Z_]{3,})(\1\s*=)", r"\1\n\2", riga_cod)
+                riga_cod = re.sub(r"(\breturn\s+[a-zA-Z_]\w*?)([a-zA-Z_]\w*\s*=)", r"\1\n\2", riga_cod)
+                riga_cod = re.sub(r":\s*(?=(?:def |for |if |elif |else:|try:|except|return |raise |[a-zA-Z_]\w*\s*=))", ":\n    ", riga_cod)
+                riga_cod = re.sub(r"(?<=[}\])\w])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", riga_cod)
+                for sub_r in riga_cod.splitlines():
+                    sub_pulita = sub_r.rstrip()
+                    if sub_pulita.strip() and sub_pulita not in codice_trovato:
+                        codice_trovato.append(sub_pulita)
             else:
-                _scarica_codice()
                 if riga_strip.startswith("#"):
                     sezioni_trovate.append(riga_strip)
                 elif len(riga_strip) <= 80 and re.match(
@@ -489,8 +517,6 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
                 else:
                     righe_sintesi.append(f"- {riga_strip}")
 
-    _scarica_codice()
-
     parti_output: List[str] = []
     if sezioni_trovate:
         parti_output.append("\n\n".join(sezioni_trovate[:3]))
@@ -498,8 +524,8 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
     if righe_sintesi:
         parti_output.append("### Prescrizioni e Regole Operative Certificate\n" + "\n".join(righe_sintesi))
 
-    if blocchi_codice:
-        parti_output.append("### Esempi di Codice Verificati\n" + "\n\n".join(blocchi_codice))
+    if codice_trovato:
+        parti_output.append("### Esempi di Codice Verificati\n```python\n" + "\n".join(codice_trovato) + "\n```")
 
     if not parti_output:
         testi_base = [_ripulisci_prefisso_tecnico_frammento(f.get("testo", "")) for f in frammenti[:3]]
@@ -2114,6 +2140,19 @@ def costruisci_diagramma_flusso_risposta_dot(
         regola_raw = str(dati_esito["frammenti_usati"][0])
     if not regola_raw:
         regola_raw = "Documental Rule / Principle"
+
+    if "###" in regola_raw or "[page" in regola_raw.lower() or "\n" in regola_raw:
+        for r_cand in regola_raw.splitlines():
+            r_c = r_cand.strip().lstrip("#").strip()
+            if r_c and not _e_riga_codice_python(r_c):
+                r_c = re.sub(r"\[(?:page|pagina|slide)\s*\d+\]\s*", "", r_c, flags=re.IGNORECASE).strip()
+                if r_c:
+                    regola_raw = r_c
+                    break
+        else:
+            regola_raw = re.sub(r"^###\s*", "", regola_raw)
+            regola_raw = re.sub(r"\[(?:page|pagina|slide)\s*\d+\]\s*", "", regola_raw, flags=re.IGNORECASE).strip()
+
     rule_txt = tronca_senza_spezzare_parola(_sanifica(regola_raw), 70, suffisso="...")
 
     if semaforo == "ROJO":
@@ -2134,6 +2173,20 @@ def costruisci_diagramma_flusso_risposta_dot(
         azione_raw = str(dati_esito["risposta_discorsiva"])
     if not azione_raw:
         azione_raw = "Execute validated procedure"
+
+    if "###" in azione_raw or "[page" in azione_raw.lower() or "\n" in azione_raw:
+        for a_cand in azione_raw.splitlines():
+            a_c = a_cand.strip().lstrip("-* ").strip()
+            if a_c and not _e_riga_codice_python(a_c):
+                a_c = re.sub(r"^###\s*", "", a_c)
+                a_c = re.sub(r"\[(?:page|pagina|slide)\s*\d+\]\s*", "", a_c, flags=re.IGNORECASE).strip()
+                if a_c:
+                    azione_raw = a_c
+                    break
+        else:
+            azione_raw = re.sub(r"^###\s*", "", azione_raw)
+            azione_raw = re.sub(r"\[(?:page|pagina|slide)\s*\d+\]\s*", "", azione_raw, flags=re.IGNORECASE).strip()
+
     act_txt = tronca_senza_spezzare_parola(_sanifica(azione_raw), 80, suffisso="...")
 
     stato_memoria = str(dati_esito.get("stato_memoria") or res.get("stato_memoria") or "")
