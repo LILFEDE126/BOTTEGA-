@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v17"
+_VERSIONE_MODULI_THE = "2026.11.13.v18"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -837,9 +837,9 @@ with tab_artigiano:
         )
 
         with st.expander("🔬 Technical Audit & Step-by-Step Verification Details (Strato L · A · D)"):
-            testo_completo_diagnostica = esito.get("risposta_discorsiva") or risolutore_artigiano.formatta_risposta_artigiano_leggibile(
-                esito["risultato"],
-                esito["modalita"],
+            testo_completo_diagnostica = risolutore_artigiano.formatta_risposta_artigiano_leggibile(
+                esito.get("risultato", {}),
+                esito.get("modalita", "AZIONE_SINGOLA_VERIFICABILE"),
                 lingua=esito.get("lingua", "it"),
             )
             st.markdown("#### Full Step-by-Step Diagnostic Report")

@@ -1803,4 +1803,21 @@ def test_riparazione_ligature_ruff_camelcase_e_slug_wiki_puliti():
     assert "csvdef" not in sintesi_codice
     assert "\n" in sintesi_codice
 
+    frammenti_elif_comp = [
+        {
+            "titolo": "Giorno 02 - Codice pulito.pdf",
+            "testo": (
+                "continue # salta al prossimo giro\n"
+                "elif importo > 100:\n"
+                "sufficienti = [v for v in voti if v >= 6]"
+            ),
+        }
+    ]
+    sintesi_elif = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito("Elif check", frammenti_elif_comp)
+    assert "elif importo > 100:" in sintesi_elif
+    assert "sufficienti = [v for v in voti if v >= 6]" in sintesi_elif
+    assert "giro el" not in sintesi_elif
+    assert "[vfor" not in sintesi_elif
+
+
 

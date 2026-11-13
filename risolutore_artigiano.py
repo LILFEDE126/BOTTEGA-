@@ -57,6 +57,7 @@ _ETICHETTE_DIDATTICHE_RUMORE = frozenset({
 _PREFISSI_CODICE_PYTHON = (
     "def ", "return ", "for ", "if ", "elif ", "else:", "try:", "except",
     "raise ", "import ", "from ", "class ", "assert ", "@", "with ",
+    "continue", "break",
 )
 
 _FRASI_DISCORSIVE_SCARTO_CODICE = (
@@ -401,13 +402,25 @@ def _e_riga_codice_python(riga: str) -> bool:
         if re.match(r"^import\s+[a-z_][a-z0-9_.,\s]*$", r_strip):
             return True
         return False
-    if not (any(c in r_strip for c in ("=", "(", ":")) or r_strip.startswith(("return ", "yield ", "raise ", "pass"))):
+    if "#" in r_strip:
+        parte_codice = r_strip.split("#", 1)[0].strip()
+        if parte_codice and (
+            any(c in parte_codice for c in ("=", "(", "[", "{", ":"))
+            or parte_codice.startswith(("continue", "break", "return", "pass", "raise"))
+        ):
+            return True
+    if not (
+        any(c in r_strip for c in ("=", "(", ":"))
+        or r_strip.startswith(("return ", "yield ", "raise ", "pass", "continue", "break"))
+    ):
         return False
     if any(r_strip.startswith(p) for p in _PREFISSI_CODICE_PYTHON):
         return True
     if r_strip in ("else:", "try:", "finally:", "except:"):
         return True
     if re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*\s*=\s*.+$", r_strip):
+        return True
+    if re.match(r"^(?:continue|break)\s*(?:#.*)?$", r_strip):
         return True
     return False
 
@@ -446,8 +459,10 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
         if not testo:
             continue
 
+        testo = re.sub(r"([a-zA-Z0-9_])(import\s+)", r"\1\n\2", testo)
+        testo = re.sub(r"([a-zA-Z0-9_])(def\s+)", r"\1\n\2", testo)
         testo = re.sub(
-            r"(?<=\S)(?=(?:def |for |if |elif |else:|try:|except|return |raise |import |from ))",
+            r"""(?<=[0-9)":'])\s*(?=(?:def |elif |if |else:|try:|except|return |raise |from |import ))""",
             "\n",
             testo,
         )
@@ -459,6 +474,7 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             ":\n    ",
             testo,
         )
+        testo = re.sub(r"(?<=[}\]:])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", testo)
 
         righe_grezze = [r.rstrip() for r in testo.splitlines() if r.strip()]
         righe_ricongiunte: List[str] = []
@@ -496,16 +512,18 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
             viste.add(chiave_normalizzata)
 
             if _e_riga_codice_python(riga):
+                riga_cod = re.sub(r"([a-zA-Z0-9_])(import\s+)", r"\1\n\2", riga)
+                riga_cod = re.sub(r"([a-zA-Z0-9_])(def\s+)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(
-                    r"(?<=\S)(?=(?:def |for |if |elif |else:|try:|except|return |raise |import |from ))",
+                    r"""(?<=[0-9)":'])\s*(?=(?:def |elif |if |else:|try:|except|return |raise |from |import ))""",
                     "\n",
-                    riga,
+                    riga_cod,
                 )
                 riga_cod = re.sub(r"(\d)([A-Z_]{3,}\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r"(\b[a-zA-Z_]{3,})(\1\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r"(\breturn\s+[a-zA-Z_]\w*?)([a-zA-Z_]\w*\s*=)", r"\1\n\2", riga_cod)
                 riga_cod = re.sub(r":\s*(?=(?:def |for |if |elif |else:|try:|except|return |raise |[a-zA-Z_]\w*\s*=))", ":\n    ", riga_cod)
-                riga_cod = re.sub(r"(?<=[}\])\w])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", riga_cod)
+                riga_cod = re.sub(r"(?<=[}\]:])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", riga_cod)
                 for sub_r in riga_cod.splitlines():
                     sub_pulita = sub_r.strip()
                     if sub_pulita and sub_pulita not in codice_trovato:
@@ -543,8 +561,9 @@ def _sintetizza_blocchi_in_markdown_pulito(problema: str, frammenti: List[dict])
         parti_output.append("### Prescrizioni e Regole Operative Certificate\n" + "\n".join(righe_sintesi))
 
     if codice_trovato:
-        codice_pulito_str = "\n\n".join(c.strip() for c in codice_trovato if c.strip())
-        parti_output.append(f"### Esempi di Codice Verificati\n```python\n{codice_pulito_str}\n```")
+        righe_cod_md = [f"- `{c.strip().replace('`', chr(39))}`" for c in codice_trovato if c.strip()]
+        if righe_cod_md:
+            parti_output.append("### Esempi di Codice Verificati\n" + "\n".join(righe_cod_md))
 
     if not parti_output:
         testi_base = [_ripulisci_prefisso_tecnico_frammento(f.get("testo", "")) for f in frammenti[:3]]
