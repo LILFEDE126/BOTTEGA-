@@ -3,10 +3,13 @@
 Supports any input language (EN, ES, IT, etc.) with automatic search translation,
 natural-language final response synthesis and deterministic RAG fallback."""
 
+import datetime
+import io
 import re
+import zipfile
 from pathlib import Path
 from types import MappingProxyType
-from typing import Callable, List, Literal, Optional, Set, Tuple
+from typing import Callable, Dict, List, Literal, Optional, Set, Tuple
 import psycopg2
 import requests
 from pydantic import BaseModel, Field
@@ -33,8 +36,15 @@ from store_pgvector import _ARCHIVIO_MEMORIA_RAM, incasella_e_salva, recupera_co
 from client_ollama import chiama_ollama_json, rileva_lingua_testo, traduci_query_per_ricerca
 
 
+RADICE_VAULT_DEFAULT = Path(__file__).resolve().parent / "wiki_vault"
 PERCORSO_WIKI_DEFAULT = Path(__file__).resolve().parent / "wiki" / "bottega_llm_wiki.md"
 INTESTAZIONE_WIKI_DEFAULT = "# Bottega — Gen III Personal LLM Wiki\n\n"
+
+ENTITA_TECNICHE_NOTE = frozenset({
+    "python", "pytest", "git", "github", "vscode", "vs code", "postgresql", "sql", "ast",
+    "docker", "fastapi", "streamlit", "pandas", "numpy", "ollama", "gemini",
+    "oic 19", "oic 34", "ifrs 16", "imu", "inail", "s&p 500", "wikipedia", "clean code",
+})
 
 
 class PianoRicercaArtigiano(BaseModel):
@@ -873,6 +883,15 @@ def risolvi_da_artigiano(
     contesto_rag = "\n".join(
         f"[Frammento {i}] {f['testo']}" for i, f in enumerate(rag["frammenti"], start=1)
     )
+    try:
+        pagine_vault = esplora_wiki_per_query(problema)
+        if pagine_vault:
+            blocco_vault = "\n".join(
+                f"[WIKI VAULT - [[{t_v}]]] {c_v[:350]}" for t_v, c_v in pagine_vault[:2]
+            )
+            contesto_rag = f"{contesto_rag}\n\nCONTESTO WIKI VAULT (1-HOP GRAFO):\n{blocco_vault}"
+    except (OSError, RuntimeError) as err_pv:
+        log.warning("Lettura wiki vault in fase query non riuscita: %s", err_pv)
     escluse_pulite = [ip.strip() for ip in (ipotesi_gia_escluse or []) if ip and ip.strip()]
     vincolo_esclusioni = ""
     if escluse_pulite:
@@ -1028,6 +1047,38 @@ def risolvi_da_artigiano(
     else:
         svuota_pagine_continua(dominio)
 
+    try:
+        radice_vault = inizializza_vault_wiki()
+        slug_q = _slugifica(problema)
+        data_agg = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        fonti_citate_wiki = [
+            f"[[{_slugifica(Path(f_item.get('testo', '')).stem if '>' in f_item.get('testo', '') else f_item.get('testo', '')[:30])}]]"
+            for f_item in (rag.get("frammenti", []) or [])
+            if f_item and f_item.get("testo")
+        ]
+        testo_sintesi_md = (
+            f"---\n"
+            f"title: \"{problema[:60]}\"\n"
+            f"type: \"synthesis\"\n"
+            f"domain: \"{dominio}\"\n"
+            f"updated: \"{data_agg}\"\n"
+            f"---\n\n"
+            f"# Diagnosi e Risoluzione: {problema}\n\n"
+            f"- **Semaforo RAG:** `{semaforo}` (`s_max={rag.get('s_max', 0.0):.4f}`) | "
+            f"**Barriera Numerica (Strato D):** `Nodo {colore_nodo}`\n"
+            f"- **Principio Guida:** {soluzione.principio_guida_unico}\n\n"
+            f"## Sintesi Operativa\n"
+            f"{risposta_discorsiva_piena}\n\n"
+            f"## Riferimenti e Wikilinks\n"
+            f"{', '.join(fonti_citate_wiki) if fonti_citate_wiki else '- Nessuna fonte collegata.'}\n"
+        )
+        file_sintesi = radice_vault / "wiki" / "synthesis" / f"{slug_q}.md"
+        file_sintesi.write_text(testo_sintesi_md, encoding="utf-8")
+        _aggiorna_indice_wiki(radice_vault)
+        _scrivi_voce_log_wiki("QUERY", slug_q, f"Semaforo {semaforo} - Nodo {colore_nodo}", radice_vault)
+    except (OSError, RuntimeError) as err_synth:
+        log.warning("Impossibile salvare sintesi in wiki vault: %s", err_synth)
+
     return {
         "semaforo": semaforo,
         "s_max": float(arrotonda_esatto_el_x8(rag["s_max"], 4)),
@@ -1164,3 +1215,598 @@ def svuota_wiki_su_disco(percorso_wiki: Optional[Path] = None) -> None:
         target.write_text(INTESTAZIONE_WIKI_DEFAULT, encoding="utf-8")
     except OSError as err:
         log.warning("Impossibile svuotare wiki su disco (%s): %s", target, err)
+
+
+def _slugifica(testo: str) -> str:
+    """Converts a title, concept or entity into a clean, URL- and filename-safe slug."""
+    if not testo:
+        return "senza-titolo"
+    t = testo.lower().strip()
+    t = re.sub(r"[^\w\s-]", " ", t)
+    t = re.sub(r"[\s_]+", "-", t)
+    t = re.sub(r"-+", "-", t).strip("-")
+    return t[:64] if t else "senza-titolo"
+
+
+def _scrivi_voce_log_wiki(
+    operazione: str, risorsa: str, dettagli: str, radice_vault: Path
+) -> None:
+    """Appends an immutable audit log row to wiki/log.md with UTC ISO-8601 timestamp."""
+    log_file = radice_vault / "wiki" / "log.md"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    if not log_file.exists():
+        log_file.write_text(
+            "# Registro Operazioni — LLM Wiki Vault\n\n"
+            "| Timestamp UTC | Operazione | Risorsa | Dettagli |\n"
+            "| :--- | :--- | :--- | :--- |\n",
+            encoding="utf-8",
+        )
+    timestamp_utc = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    riga = f"| {timestamp_utc} | `{operazione}` | `{risorsa}` | {dettagli} |\n"
+    try:
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(riga)
+    except OSError as err:
+        log.warning("Impossibile aggiornare wiki/log.md (%s): %s", log_file, err)
+
+
+def _aggiorna_indice_wiki(radice_vault: Path) -> None:
+    """Regenerates wiki/index.md by cataloging all Markdown files across the vault sections."""
+    sezioni = (
+        ("1. Sources", radice_vault / "wiki" / "sources"),
+        ("2. Concepts", radice_vault / "wiki" / "concepts"),
+        ("3. Entities", radice_vault / "wiki" / "entities"),
+        ("4. Synthesis & Queries", radice_vault / "wiki" / "synthesis"),
+        ("5. MARP Presentations", radice_vault / "wiki" / "presentations"),
+    )
+    blocchi_sezioni: List[str] = ["# Indice Generale — LLM Wiki Vault\n"]
+    for nome_sez, cartella in sezioni:
+        blocchi_sezioni.append(f"## {nome_sez}")
+        if cartella.exists():
+            files_md = sorted(cartella.glob("*.md"), key=lambda p: p.stem.lower())
+            if files_md:
+                righe = []
+                for f_md in files_md:
+                    slug = f_md.stem
+                    titolo = slug.replace("-", " ").title()
+                    try:
+                        primo_testo = f_md.read_text(encoding="utf-8")
+                        m_titolo = re.search(
+                            r"^title:\s*[\"']?([^\"'\n]+)[\"']?", primo_testo, re.MULTILINE
+                        )
+                        if m_titolo:
+                            titolo = m_titolo.group(1).strip()
+                        elif primo_testo.startswith("# "):
+                            titolo = primo_testo.splitlines()[0].lstrip("# ").strip()
+                    except OSError:
+                        pass
+                    righe.append(f"- [[{slug}]]: {titolo}")
+                blocchi_sezioni.append("\n".join(righe) + "\n")
+            else:
+                blocchi_sezioni.append("*(Nessun elemento registrato)*\n")
+        else:
+            blocchi_sezioni.append("*(Cartella non ancora popolata)*\n")
+
+    index_file = radice_vault / "wiki" / "index.md"
+    try:
+        index_file.write_text("\n".join(blocchi_sezioni), encoding="utf-8")
+    except OSError as err:
+        log.warning("Impossibile aggiornare wiki/index.md (%s): %s", index_file, err)
+
+
+def inizializza_vault_wiki(radice_vault: Optional[Path] = None) -> Path:
+    """Initializes the multi-file Obsidian-compatible LLM Wiki Vault directory tree,
+    creating SCHEMA_WIKI.md, wiki/index.md, and wiki/log.md if not present."""
+    radice = Path(radice_vault) if radice_vault is not None else RADICE_VAULT_DEFAULT
+    (radice / "raw").mkdir(parents=True, exist_ok=True)
+    (radice / "wiki" / "sources").mkdir(parents=True, exist_ok=True)
+    (radice / "wiki" / "concepts").mkdir(parents=True, exist_ok=True)
+    (radice / "wiki" / "entities").mkdir(parents=True, exist_ok=True)
+    (radice / "wiki" / "synthesis").mkdir(parents=True, exist_ok=True)
+    (radice / "wiki" / "presentations").mkdir(parents=True, exist_ok=True)
+
+    schema_file = radice / "SCHEMA_WIKI.md"
+    if not schema_file.exists():
+        schema_file.write_text(
+            "# Bottega — Gen III LLM Wiki Vault Schema (Karpathy Architecture)\n\n"
+            "## 1. Architettura a 3 Livelli\n"
+            "- `raw/`: Documenti originali convertiti in Markdown pulito.\n"
+            "- `wiki/`: Grafo di conoscenza compilato dall'agente, suddiviso in cartelle specializzate.\n"
+            "  - `sources/`: Schede riassuntive per ciascun documento originale con metadati e wikilinks.\n"
+            "  - `concepts/`: Schede dedicate per ciascun concetto teorico/metodologico con backlink e collegamenti orizzontali.\n"
+            "  - `entities/`: Schede per strumenti software, librerie, normative, standard e protocolli.\n"
+            "  - `synthesis/`: Risposte strutturate alle interrogazioni (query) con tracciamento del semaforo e dello Strato D.\n"
+            "  - `presentations/`: Presentazioni slide in formato MARP (`marp: true`).\n"
+            "  - `index.md`: Indice generale con catalogo di tutte le risorse collegate via wikilink `[[...]]`.\n"
+            "  - `log.md`: Registro immutabile delle transazioni con timestamp UTC ISO-8601.\n\n"
+            "## 2. Convenzioni di Sintassi Wikilink\n"
+            "- Collegamenti bidirezionali: `[[nome-pagina]]` oppure `[[nome-pagina|Etichetta Personalizzata]]`.\n"
+            "- Frontmatter YAML obbligatorio per ogni scheda: `title`, `type`, `domain`, `updated`.\n\n"
+            "## 3. Le 4 Operazioni Ufficiali\n"
+            "1. `INGEST`: Estrazione concetti/entità dai documenti e popolazione automatica del grafo.\n"
+            "2. `QUERY`: Navigazione a 1-hop lungo i wikilinks e sintesi della risposta.\n"
+            "3. `LINT`: Health check, rilevamento e riparazione automatica di link orfani e nodi isolati.\n"
+            "4. `MARP`: Generazione presentazioni slide Markdown conformi allo standard MARP.\n",
+            encoding="utf-8",
+        )
+
+    index_file = radice / "wiki" / "index.md"
+    if not index_file.exists():
+        index_file.write_text(
+            "# Indice Generale — LLM Wiki Vault\n\n"
+            "## 1. Sources\n*(Nessun documento ingerito)*\n\n"
+            "## 2. Concepts\n*(Nessun concetto registrato)*\n\n"
+            "## 3. Entities\n*(Nessuna entità registrata)*\n\n"
+            "## 4. Synthesis & Queries\n*(Nessuna sintesi registrata)*\n\n"
+            "## 5. MARP Presentations\n*(Nessuna presentazione registrata)*\n",
+            encoding="utf-8",
+        )
+
+    log_file = radice / "wiki" / "log.md"
+    if not log_file.exists():
+        log_file.write_text(
+            "# Registro Operazioni — LLM Wiki Vault\n\n"
+            "| Timestamp UTC | Operazione | Risorsa | Dettagli |\n"
+            "| :--- | :--- | :--- | :--- |\n",
+            encoding="utf-8",
+        )
+
+    return radice
+
+
+def esegui_ingest_documento_in_wiki(
+    titolo_doc: str,
+    dominio: str,
+    blocchi: List[Tuple[str, str]],
+    radice_vault: Optional[Path] = None,
+) -> dict:
+    """Phase 1 (INGEST): converts raw document blocks into raw/<slug>.md and extracts
+    atomic concepts and recognized entities into wiki/sources/, wiki/concepts/, wiki/entities/
+    with bidirectional wikilinks [[...]], updating index.md and logging the ingest event."""
+    radice = inizializza_vault_wiki(radice_vault)
+    slug_doc = _slugifica(titolo_doc)
+    timestamp_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    raw_testo = "\n\n---\n\n".join(
+        f"### {sez}\n{txt}" for sez, txt in blocchi if txt.strip()
+    )
+    raw_path = radice / "raw" / f"{slug_doc}.md"
+    try:
+        raw_path.write_text(raw_testo, encoding="utf-8")
+    except OSError as err:
+        log.warning("Impossibile salvare documento raw in wiki vault: %s", err)
+
+    concetti_estratti: List[Tuple[str, str]] = []
+    visti_c: Set[str] = set()
+
+    for sez, txt in blocchi:
+        for riga in txt.splitlines():
+            riga_strip = riga.strip()
+            if not riga_strip:
+                continue
+            m_reg = re.match(
+                r"^(?:###\s*|(?:\d{1,2}[.)\-:]|\*|\-)\s+|regola\s*\d+[:\- ]+|tappa\s*\d+[:\- ]+)(.+)$",
+                riga_strip,
+                re.IGNORECASE,
+            )
+            candidato = m_reg.group(1).strip() if m_reg else ""
+            if (
+                candidato
+                and 5 <= len(candidato) <= 70
+                and not any(candidato.lower().startswith(p) for p in ("cp ", "touch ", "rm ", "git "))
+            ):
+                slug_c = _slugifica(candidato)
+                if slug_c and slug_c not in visti_c and len(concetti_estratti) < 12:
+                    visti_c.add(slug_c)
+                    concetti_estratti.append((candidato, txt.strip()[:600]))
+
+    if not concetti_estratti and blocchi:
+        prima_sez = blocchi[0][0]
+        slug_p = _slugifica(prima_sez)
+        concetti_estratti.append((prima_sez, blocchi[0][1][:600]))
+        visti_c.add(slug_p)
+
+    for nome_c, testo_c in concetti_estratti:
+        slug_c = _slugifica(nome_c)
+        f_concetto = radice / "wiki" / "concepts" / f"{slug_c}.md"
+        contenuto_c = (
+            f"---\n"
+            f"title: \"{nome_c}\"\n"
+            f"type: \"concept\"\n"
+            f"domain: \"{dominio}\"\n"
+            f"updated: \"{timestamp_iso}\"\n"
+            f"---\n\n"
+            f"# {nome_c}\n\n"
+            f"{testo_c}\n\n"
+            f"## Fonti (Backlinks)\n"
+            f"- [[{slug_doc}]]\n"
+        )
+        try:
+            f_concetto.write_text(contenuto_c, encoding="utf-8")
+        except OSError:
+            pass
+
+    testo_globale = " ".join(txt.lower() for _, txt in blocchi)
+    entita_rilevate: List[str] = []
+    for ent in sorted(ENTITA_TECNICHE_NOTE):
+        if re.search(rf"\b{re.escape(ent)}\b", testo_globale):
+            slug_e = _slugifica(ent)
+            entita_rilevate.append(slug_e)
+            f_entita = radice / "wiki" / "entities" / f"{slug_e}.md"
+            if not f_entita.exists():
+                contenuto_e = (
+                    f"---\n"
+                    f"title: \"{ent.title()}\"\n"
+                    f"type: \"entity\"\n"
+                    f"domain: \"{dominio}\"\n"
+                    f"updated: \"{timestamp_iso}\"\n"
+                    f"---\n\n"
+                    f"# {ent.title()}\n\n"
+                    f"Strumento, tecnologia o standard normativo certificato impiegato nei processi diagnostici.\n\n"
+                    f"## Fonti (Backlinks)\n"
+                    f"- [[{slug_doc}]]\n"
+                )
+                try:
+                    f_entita.write_text(contenuto_e, encoding="utf-8")
+                except OSError:
+                    pass
+
+    wikilinks_c = "\n".join(
+        f"- [[{_slugifica(nc)}]]: {nc}" for nc, _ in concetti_estratti
+    ) or "- *(Nessun concetto estratto)*"
+    wikilinks_e = "\n".join(
+        f"- [[{se}]]: {se.replace('-', ' ').title()}" for se in entita_rilevate
+    ) or "- *(Nessuna entità specifica)*"
+
+    source_path = radice / "wiki" / "sources" / f"{slug_doc}.md"
+    contenuto_source = (
+        f"---\n"
+        f"title: \"{titolo_doc}\"\n"
+        f"type: \"source\"\n"
+        f"domain: \"{dominio}\"\n"
+        f"updated: \"{timestamp_iso}\"\n"
+        f"---\n\n"
+        f"# {titolo_doc}\n\n"
+        f"## Riassunto Documentale\n"
+        f"Documento tecnico certificato del dominio `{dominio}` ({len(blocchi)} blocchi indicizzati nel Vault).\n\n"
+        f"## Concetti ed Entità Collegate\n\n"
+        f"### Concetti Chiave\n"
+        f"{wikilinks_c}\n\n"
+        f"### Entità Tecniche e Standard\n"
+        f"{wikilinks_e}\n"
+    )
+    try:
+        source_path.write_text(contenuto_source, encoding="utf-8")
+    except OSError as err:
+        log.warning("Impossibile salvare source in wiki vault: %s", err)
+
+    _aggiorna_indice_wiki(radice)
+    _scrivi_voce_log_wiki(
+        "INGEST",
+        slug_doc,
+        f"Estratti {len(concetti_estratti)} concetti e {len(entita_rilevate)} entita",
+        radice,
+    )
+
+    return {
+        "slug_fonte": slug_doc,
+        "concetti_creati": [nc for nc, _ in concetti_estratti],
+        "entita_create": entita_rilevate,
+        "percorso_raw": str(raw_path),
+    }
+
+
+def esplora_wiki_per_query(
+    problema: str, radice_vault: Optional[Path] = None
+) -> List[Tuple[str, str]]:
+    """Phase 2 (QUERY Navigation): queries the multi-file LLM Wiki index and graph,
+    following 1-hop [[wikilinks]] across concepts, entities, and sources to assemble
+    a strongly connected context for diagnostic synthesis."""
+    radice = inizializza_vault_wiki(radice_vault)
+    parole_q = [
+        p.lower().strip()
+        for p in re.findall(r"\w+", problema)
+        if len(p) >= 4 and p.lower() not in ("della", "delle", "degli", "sono", "come", "quale", "quali", "cosa")
+    ]
+    if not parole_q:
+        return []
+
+    tutti_files: List[Path] = []
+    for sottocartella in ("concepts", "entities", "sources"):
+        dir_s = radice / "wiki" / sottocartella
+        if dir_s.is_dir():
+            tutti_files.extend(dir_s.glob("*.md"))
+    punteggi: List[Tuple[int, Path]] = []
+
+    for f_p in tutti_files:
+        if f_p.name in ("index.md", "log.md"):
+            continue
+        try:
+            txt = f_p.read_text(encoding="utf-8", errors="ignore").lower()
+            score = sum(3 for w in parole_q if w in f_p.stem.lower())
+            score += sum(1 for w in parole_q if w in txt)
+            if score > 0:
+                punteggi.append((score, f_p))
+        except OSError:
+            pass
+
+    punteggi.sort(key=lambda x: x[0], reverse=True)
+    selezionati: List[Path] = [p for _, p in punteggi[:3]]
+    hop_aggiunti: List[Path] = []
+
+    for p_sel in selezionati:
+        try:
+            testo_sel = p_sel.read_text(encoding="utf-8", errors="ignore")
+            wikilinks = re.findall(r"\[\[([^\[\]|]+)(?:\|[^\[\]]+)?\]\]", testo_sel)
+            for wl in wikilinks:
+                slug_wl = _slugifica(wl)
+                for cand in tutti_files:
+                    if cand.stem.lower() == slug_wl and cand not in selezionati and cand not in hop_aggiunti:
+                        hop_aggiunti.append(cand)
+                        break
+        except OSError:
+            pass
+
+    risultati: List[Tuple[str, str]] = []
+    for path_fin in (selezionati + hop_aggiunti)[:5]:
+        try:
+            risultati.append((path_fin.stem, path_fin.read_text(encoding="utf-8", errors="ignore")))
+        except OSError:
+            pass
+    return risultati
+
+
+def esegui_lint_wiki(radice_vault: Optional[Path] = None) -> dict:
+    """Phase 3 (LINT / Health Check): scans all vault Markdown files for broken or orphan
+    [[wikilinks]], auto-heals orphan pages by creating missing concept files with backlink
+    context, updates index.md, and records an audit log entry."""
+    radice = inizializza_vault_wiki(radice_vault)
+    tutti_files = {
+        f_p.stem.lower(): f_p
+        for f_p in (radice / "wiki").glob("*/*.md")
+        if f_p.name not in ("index.md", "log.md")
+    }
+
+    orfani_riparati = 0
+    link_aggiunti = 0
+    timestamp_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    for stem_sorgente, path_sorgente in list(tutti_files.items()):
+        try:
+            testo = path_sorgente.read_text(encoding="utf-8", errors="ignore")
+            wikilinks = re.findall(r"\[\[([^\[\]|]+)(?:\|[^\[\]]+)?\]\]", testo)
+            for wl in wikilinks:
+                slug_wl = _slugifica(wl)
+                if slug_wl not in tutti_files:
+                    f_orfano = radice / "wiki" / "concepts" / f"{slug_wl}.md"
+                    nome_bello = wl.replace("-", " ").title()
+                    contenuto_orfano = (
+                        f"---\n"
+                        f"title: \"{nome_bello}\"\n"
+                        f"type: \"concept\"\n"
+                        f"domain: \"auto-lint\"\n"
+                        f"updated: \"{timestamp_iso}\"\n"
+                        f"---\n\n"
+                        f"# {nome_bello}\n\n"
+                        f"Concetto rilevato e autogenerato dal controllo di integrita (LLM Wiki Lint) "
+                        f"a partire dal collegamento trovato in `[[{stem_sorgente}]]`.\n\n"
+                        f"## Fonti (Backlinks)\n"
+                        f"- [[{stem_sorgente}]]\n"
+                    )
+                    f_orfano.write_text(contenuto_orfano, encoding="utf-8")
+                    tutti_files[slug_wl] = f_orfano
+                    orfani_riparati += 1
+        except OSError as err:
+            log.warning("Errore durante lint file %s: %s", path_sorgente, err)
+
+    _aggiorna_indice_wiki(radice)
+    _scrivi_voce_log_wiki(
+        "LINT",
+        "vault-health",
+        f"Riparati {orfani_riparati} orfani su {len(tutti_files)} pagine totali",
+        radice,
+    )
+
+    return {
+        "pagine_totali": len(tutti_files),
+        "orfani_riparati": orfani_riparati,
+        "link_aggiunti": link_aggiunti,
+        "stato_salute": "OTTIMO" if orfani_riparati == 0 else "RIPARATO",
+    }
+
+
+def genera_presentazione_marp(
+    problema: str, esito: dict, radice_vault: Optional[Path] = None
+) -> Tuple[str, Path]:
+    """Phase 4 (MARP Presentation): converts a verified diagnostic result into a
+    5-slide Markdown presentation conforming to MARP syntax (marp: true), saving to
+    wiki/presentations/<slug>-marp.md and updating the vault index and log."""
+    radice = inizializza_vault_wiki(radice_vault)
+    slug_p = _slugifica(problema)
+    timestamp_iso = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    risultato = esito.get("risultato") or {}
+    semaforo = esito.get("semaforo", "VERDE")
+    s_max = esito.get("s_max", 0.0)
+    nodo = esito.get("colore_nodo_ewd496a", "NERO")
+    principio = risultato.get("principio_guida_unico", "Prescrizione Tecnica Certificata")
+    azione = risultato.get("azione_correttiva_singola", "Applicare le prescrizioni della fonte.")
+    verifica = risultato.get("esperimento_di_verifica_pratica", "Verificare corrispondenza numerica.")
+    scartati = risultato.get("elementi_scartati_per_non_fare_mucchio") or []
+    scartati_md = "\n".join(f"- {s}" for s in scartati[:3]) or "- Nessuna ipotesi alternativa rilevata."
+    sintesi_pulita = (esito.get("risposta_discorsiva") or "").strip()
+
+    frammenti = esito.get("frammenti_usati") or []
+    wikilinks_fonti = "\n".join(
+        f"- [[{_slugifica(Path(f).stem if '>' in f else f[:30])}]]: {_sintetizza_etichetta_frammento(f, max_len=100)}"
+        for f in frammenti[:4]
+    ) or "- [[archivio-tecnico]]: Documento d'archivio certificato"
+
+    testo_marp = (
+        f"---\n"
+        f"marp: true\n"
+        f"theme: default\n"
+        f"paginate: true\n"
+        f"---\n\n"
+        f"# {problema}\n"
+        f"### Bottega Leonardo — Gen III LLM Wiki Presentazione Esecutiva\n\n"
+        f"- **Semaforo RAG:** `{semaforo}` (`s_max={s_max}`)\n"
+        f"- **Barriera Numerica (Strato D):** `Nodo {nodo}`\n"
+        f"- **Data Compilazione:** {timestamp_iso}\n\n"
+        f"---\n\n"
+        f"# 1. Principio Guida e Diagnosi\n"
+        f"### Principio di Necessita (Strato L) & Zero Mucchio\n\n"
+        f"- **Principio Selezionato:** {principio}\n\n"
+        f"**Ipotesi Falsificate / Scartate:**\n"
+        f"{scartati_md}\n\n"
+        f"---\n\n"
+        f"# 2. Prescrizioni e Regole Didattiche\n"
+        f"### Evidenze Estratte dalla Fonte Certificata\n\n"
+        f"{sintesi_pulita[:700]}\n\n"
+        f"---\n\n"
+        f"# 3. Azione Correttiva e Verifica\n"
+        f"### Strato D — Weakest Preconditions wp(S, R)\n\n"
+        f"- **Azione Operativa:** {azione}\n"
+        f"- **Controllo Pratico:** {verifica}\n\n"
+        f"---\n\n"
+        f"# 4. Riferimenti Documentali e Grafo\n"
+        f"### Wikilinks e Fonti del Vault\n\n"
+        f"{wikilinks_fonti}\n"
+    )
+
+    file_marp = radice / "wiki" / "presentations" / f"{slug_p}-marp.md"
+    try:
+        file_marp.write_text(testo_marp, encoding="utf-8")
+    except OSError as err:
+        log.warning("Impossibile salvare presentazione MARP: %s", err)
+
+    _aggiorna_indice_wiki(radice)
+    _scrivi_voce_log_wiki("MARP", f"{slug_p}-marp", "Generata presentazione a 5 slide", radice)
+
+    return testo_marp, file_marp
+
+
+def costruisci_grafo_dot_wiki(radice_vault: Optional[Path] = None) -> str:
+    """Builds a Graphviz DOT representation of the Obsidian Wiki graph, coloring nodes
+    by section (sources=blue, concepts=green, entities=gold, synthesis=purple, presentations=pink)
+    with directed edges along all [[wikilinks]]."""
+    radice = inizializza_vault_wiki(radice_vault)
+    righe_dot = [
+        "digraph ObsidianWikiGraph {",
+        "  rankdir=LR;",
+        "  bgcolor=\"transparent\";",
+        "  node [shape=box, style=\"filled,rounded\", fontname=\"Helvetica\", fontsize=10, penwidth=1.5];",
+        "  edge [color=\"#888888\", arrowsize=0.7];",
+    ]
+
+    colori = {
+        "sources": ("#D0E8FF", "#3B82F6"),
+        "concepts": ("#D4EDDA", "#10B981"),
+        "entities": ("#FFE8B6", "#F59E0B"),
+        "synthesis": ("#E2D9F3", "#8B5CF6"),
+        "presentations": ("#FADBD8", "#EF4444"),
+    }
+
+    nodi_aggiunti: Set[str] = set()
+    archi_aggiunti: Set[Tuple[str, str]] = set()
+
+    for tipo, (fill_col, border_col) in colori.items():
+        cartella = radice / "wiki" / tipo
+        if not cartella.exists():
+            continue
+        for f_p in cartella.glob("*.md"):
+            slug = f_p.stem
+            titolo = slug.replace("-", " ")
+            try:
+                txt = f_p.read_text(encoding="utf-8", errors="ignore")
+                m_tit = re.search(r"^title:\s*[\"']?([^\"'\n]+)[\"']?", txt, re.MULTILINE)
+                if m_tit:
+                    titolo = m_tit.group(1).strip()
+            except OSError:
+                txt = ""
+            label_breve = titolo[:24] + ("..." if len(titolo) > 24 else "")
+            righe_dot.append(
+                f'  "{slug}" [label="{label_breve}", fillcolor="{fill_col}", color="{border_col}"];'
+            )
+            nodi_aggiunti.add(slug)
+
+            wikilinks = re.findall(r"\[\[([^\[\]|]+)(?:\|[^\[\]]+)?\]\]", txt)
+            for wl in wikilinks:
+                target_slug = _slugifica(wl)
+                if target_slug and (slug, target_slug) not in archi_aggiunti:
+                    archi_aggiunti.add((slug, target_slug))
+
+    for sorg, dest in archi_aggiunti:
+        if dest not in nodi_aggiunti:
+            righe_dot.append(
+                f'  "{dest}" [label="{dest.replace("-", " ")[:20]}", fillcolor="#F3F4F6", color="#9CA3AF", style="dashed,filled,rounded"];'
+            )
+            nodi_aggiunti.add(dest)
+        righe_dot.append(f'  "{sorg}" -> "{dest}";')
+
+    if not nodi_aggiunti:
+        righe_dot.append(
+            '  "vault_inizializzato" [label="Bottega Wiki Vault\\n(Carica un documento per generare il Grafo)", fillcolor="#D0E8FF", color="#3B82F6"];'
+        )
+
+    righe_dot.append("}")
+    return "\n".join(righe_dot)
+
+
+def esporta_vault_wiki_zip(radice_vault: Optional[Path] = None) -> bytes:
+    """Exports the entire Obsidian-compatible LLM Wiki Vault as a standalone .zip archive."""
+    radice = inizializza_vault_wiki(radice_vault)
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as zf:
+        for elemento in sorted(radice.rglob("*")):
+            if elemento.is_file():
+                relativo = elemento.relative_to(radice)
+                zf.write(elemento, arcname=str(relativo).replace("\\", "/"))
+    return buffer.getvalue()
+
+
+def importa_vault_wiki_zip(
+    zip_bytes: bytes, radice_vault: Optional[Path] = None
+) -> int:
+    """Safely extracts an exported bottega_obsidian_vault.zip archive into the local
+    wiki_vault directory, re-indexing its documents into memory and running wiki lint."""
+    radice = inizializza_vault_wiki(radice_vault)
+    buffer = io.BytesIO(zip_bytes)
+    n_importati = 0
+    radice_risolta = radice.resolve()
+
+    with zipfile.ZipFile(buffer, "r") as zf:
+        for info in zf.infolist():
+            if info.is_dir():
+                continue
+            percorso_rel = Path(info.filename)
+            destinazione = (radice / percorso_rel).resolve()
+            if not str(destinazione).startswith(str(radice_risolta)):
+                continue
+
+            destinazione.parent.mkdir(parents=True, exist_ok=True)
+            dati = zf.read(info.filename)
+            destinazione.write_bytes(dati)
+            if destinazione.suffix.lower() == ".md":
+                n_importati += 1
+                if "sources" in str(destinazione) or "concepts" in str(destinazione):
+                    try:
+                        testo = dati.decode("utf-8", errors="ignore")
+                        titolo_doc = destinazione.stem
+                        titoli_ram = {
+                            v.get("titolo")
+                            for v in _ARCHIVIO_MEMORIA_RAM
+                        }
+                        if titolo_doc not in titoli_ram and testo.strip():
+                            incasella_e_salva(
+                                "tecnico", titolo_doc, [(destinazione.stem, testo)]
+                            )
+                    except (UnicodeDecodeError, OSError):
+                        pass
+
+    esegui_lint_wiki(radice)
+    _aggiorna_indice_wiki(radice)
+    _scrivi_voce_log_wiki(
+        "IMPORT_ZIP", "vault", f"Importati {n_importati} file Markdown", radice
+    )
+    return n_importati

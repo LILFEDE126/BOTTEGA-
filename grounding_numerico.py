@@ -27,6 +27,13 @@ PATRON_INTERI_TECNICI = re.compile(
 MAX_CARATTERI_PAGINA_DEFAULT: int = 2400
 LIMITE_PASSI_PAGINAZIONE: int = 10000
 LUNGHEZZA_MINIMA_TAGLIO_PAGINA: int = 100
+_STOPWORDS_MODELLI_INVALIDI = frozenset({
+    "a", "di", "da", "in", "con", "su", "per", "tra", "fra", "resta", "ha", "va", "si", "non",
+    "e", "ed", "o", "che", "un", "una", "uno", "il", "la", "lo", "i", "gli", "le",
+    "del", "della", "dello", "dei", "degli", "delle", "al", "alla", "allo", "ai", "agli", "alle",
+    "dal", "dalla", "dallo", "dai", "dagli", "dalle", "nel", "nella", "nello", "nei", "negli", "nelle",
+    "sul", "sulla", "sullo", "sui", "sugli", "sulle",
+})
 
 
 def _normalizza_separatore_decimale(cifra: str) -> str:
@@ -228,7 +235,11 @@ def _rileva_coppie_entita_contesto(contesto: str, domanda: str) -> List[Tuple[st
     trovati = pat_pref.findall(contesto)
     gruppi: Dict[str, Set[str]] = {}
     for tipo, nome in trovati:
-        gruppi.setdefault(tipo.lower(), set()).add(nome.strip())
+        nome_pulito = nome.strip()
+        primo_token = nome_pulito.split()[0].lower() if nome_pulito else ""
+        if primo_token in _STOPWORDS_MODELLI_INVALIDI or len(nome_pulito) < 2:
+            continue
+        gruppi.setdefault(tipo.lower(), set()).add(nome_pulito)
     for tipo, nomi in gruppi.items():
         if len(nomi) >= 2:
             nomi_list = list(nomi)

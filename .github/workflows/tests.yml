@@ -8,7 +8,7 @@ on:
 
 jobs:
   pytest:
-    name: 43 Pure Unit Tests (Zero DB, Zero Network)
+    name: 44 Pure Unit Tests (Zero DB, Zero Network)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -25,6 +25,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run 43 pure unit tests
+      - name: Run 44 pure unit tests
         run: |
           python -m pytest -v

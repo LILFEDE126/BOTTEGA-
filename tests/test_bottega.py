@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Layer 5 (THE): Complete suite of 43 pure unit tests (zero network, zero DB, zero LLM).
+"""Layer 5 (THE): Complete suite of 44 pure unit tests (zero network, zero DB, zero LLM).
 Includes AST check for zero '#' comments in source modules and multilingual EN/ES -> IT search tests."""
 
 import ast
@@ -1676,3 +1676,54 @@ def test_gen2_agentic_search_pulizia_markdown_slide_e_gen3_wiki(monkeypatch):
     assert esito_offline["semaforo"] == "VERDE"
     assert esito_offline["sintesi_deterministica_attiva"] is True
     assert "Nomi che dicono" in esito_offline["risposta_discorsiva"]
+
+
+def test_architettura_karpathy_llm_wiki_ingest_query_lint_marp_e_zip(monkeypatch):
+    with tempfile.TemporaryDirectory() as cartella_tmp:
+        radice = Path(cartella_tmp) / "wiki_vault"
+        radice_creata = risolutore_artigiano.inizializza_vault_wiki(radice)
+        assert (radice / "SCHEMA_WIKI.md").is_file()
+        assert (radice / "wiki" / "index.md").is_file()
+        assert (radice / "wiki" / "log.md").is_file()
+
+        blocchi = [
+            ("Page 57", "CODICE PULITO — Sette regole per chi legge:\n01 Nomi che dicono cosa contengono\n02 Una funzione, un compito"),
+            ("Page 58", "Regola 1: Nomi che dicono cosa contengono.\nScrivi codice python leggibile e chiaro con pytest e git."),
+        ]
+        res_ingest = risolutore_artigiano.esegui_ingest_documento_in_wiki("Giorno 02 - Codice pulito.pdf", "tecnico", blocchi, radice)
+        assert res_ingest["slug_fonte"] == "giorno-02-codice-pulito-pdf"
+        assert len(res_ingest["concetti_creati"]) >= 1
+
+        pagine_q = risolutore_artigiano.esplora_wiki_per_query("come si scrive codice pulito in python?", radice)
+        assert len(pagine_q) >= 1
+
+        file_test = radice / "wiki" / "concepts" / "test-concetto.md"
+        file_test.write_text("# Test\nContiene [[concetto-orfano-test]].\n", encoding="utf-8")
+        res_lint = risolutore_artigiano.esegui_lint_wiki(radice)
+        assert res_lint["orfani_riparati"] >= 1
+        assert (radice / "wiki" / "concepts" / "concetto-orfano-test.md").is_file()
+
+        esito_finto = {
+            "semaforo": "VERDE",
+            "s_max": 0.95,
+            "colore_nodo_ewd496a": "NERO",
+            "risultato": {"principio_guida_unico": "Regole del codice pulito"},
+            "risposta_discorsiva": "Regole fondamentali del codice pulito.",
+            "frammenti_usati": ["[TECNICO] Page 57: Sette regole per chi legge"],
+        }
+        testo_marp, path_marp = risolutore_artigiano.genera_presentazione_marp("Sintesi Codice Pulito", esito_finto, radice)
+        assert "marp: true" in testo_marp
+        assert path_marp.is_file()
+
+        dot = risolutore_artigiano.costruisci_grafo_dot_wiki(radice)
+        assert "digraph ObsidianWikiGraph" in dot
+
+        dati_zip = risolutore_artigiano.esporta_vault_wiki_zip(radice)
+        assert len(dati_zip) > 0
+
+        radice_import = Path(cartella_tmp) / "wiki_vault_import"
+        n_imp = risolutore_artigiano.importa_vault_wiki_zip(dati_zip, radice_import)
+        assert n_imp >= 3
+        assert (radice_import / "SCHEMA_WIKI.md").is_file()
+        assert (radice_import / "wiki" / "index.md").is_file()
+

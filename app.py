@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.13.v11"
+_VERSIONE_MODULI_THE = "2026.11.13.v12"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -43,6 +43,7 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(risolutore_artigiano, "formatta_risposta_artigiano_leggibile")
         or not hasattr(risolutore_artigiano, "compila_voce_wiki_markdown")
         or not hasattr(risolutore_artigiano, "carica_voci_wiki_da_disco")
+        or not hasattr(risolutore_artigiano, "esegui_ingest_documento_in_wiki")
         or not hasattr(config, "ha_chiave_dedicata_provider")
     )
     if necessita_reload:
@@ -104,7 +105,7 @@ PROMPT_TASCHINO_UNIVERSALE = (
 )
 
 DOMINI_DISPONIBILI = ("generale", "tecnico", "normativo")
-ESTENSIONI_SUPPORTATE = frozenset({".pdf", ".txt", ".md", ".csv", ".py"})
+ESTENSIONI_SUPPORTATE = frozenset({".pdf", ".txt", ".md", ".csv", ".py", ".zip"})
 PROVIDERS_DISPONIBILI = ("gemini", "groq", "openrouter", "ollama", "deepseek", "openai")
 
 _STILE_EDITORIALE_SOBRIO = """
@@ -156,7 +157,7 @@ _HTML_JS_ZERO_AXIOS = """
 </style>
 </head>
 <body>
-  <input type="file" id="mob_file_input" accept=".pdf,.txt,.md,.csv,.py" multiple style="display:none;" />
+  <input type="file" id="mob_file_input" accept=".pdf,.txt,.md,.csv,.py,.zip" multiple style="display:none;" />
   <button type="button" class="btn-mob" onclick="document.getElementById('mob_file_input').click();">
     📱 Scegli PDF / File da Telefono (Zero-Axios)
   </button>
@@ -306,12 +307,20 @@ def _elabora_file_caricati(
         if estensione not in ESTENSIONI_SUPPORTATE:
             st.warning(
                 f"Unsupported file format for '{singolo_file.name}': "
-                f"only .pdf, .txt, .md, .csv, .py are accepted."
+                f"only .pdf, .txt, .md, .csv, .py, .zip are accepted."
             )
             continue
 
         raw_bytes = singolo_file.getvalue()
         dim_file = len(raw_bytes)
+
+        if estensione == ".zip":
+            n_zip = risolutore_artigiano.importa_vault_wiki_zip(raw_bytes)
+            st.success(f"Obsidian Vault successfully restored: {n_zip} Markdown files imported!")
+            st.toast(f"Vault ripristinato con successo: {n_zip} file .md!")
+            nuovi_elaborati_ora += 1
+            continue
+
         testo_file_wiki = raw_bytes.decode("utf-8", errors="ignore")
         if "## 📚 Voce Wiki:" in testo_file_wiki:
             voci_ripristinate = risolutore_artigiano.estrai_voci_wiki_da_testo_markdown(testo_file_wiki)
@@ -363,6 +372,14 @@ def _elabora_file_caricati(
                         )
                     n_ins = store_pgvector.incasella_e_salva(dominio_scelto, singolo_file.name, blocchi_doc)
                     ram_globale = _conta_frammenti_ram_sicuro()
+                    try:
+                        risolutore_artigiano.esegui_ingest_documento_in_wiki(
+                            singolo_file.name, dominio_scelto, blocchi_doc
+                        )
+                    except (OSError, RuntimeError) as err_ing:
+                        logging_bottega.log.warning(
+                            "Wiki Vault Ingest errore (%s): %s", singolo_file.name, err_ing
+                        )
                 archivio_sess[singolo_file.name] = {
                     "chiave": chiave_doc,
                     "dominio": dominio_scelto,
@@ -456,6 +473,14 @@ def _salva_testo_incollato_in_archivio(
                 extra={"code": "APP_INIT_002"},
             )
         n_ins = store_pgvector.incasella_e_salva(dominio_scelto, titolo_pulito, blocchi_doc)
+        try:
+            risolutore_artigiano.esegui_ingest_documento_in_wiki(
+                titolo_pulito, dominio_scelto, blocchi_doc
+            )
+        except (OSError, RuntimeError) as err_ing_p:
+            logging_bottega.log.warning(
+                "Wiki Vault Ingest errore (%s): %s", titolo_pulito, err_ing_p
+            )
         archivio_sess[titolo_pulito] = {
             "chiave": chiave_doc,
             "dominio": dominio_scelto,
@@ -814,25 +839,100 @@ with tab_artigiano:
                 logging_bottega.log_exception("Errore in risolvi_da_artigiano UI", "APP_ART_001", err)
                 st.error(f"Error during diagnostic execution ({provider_ui}): {err}")
 
-    voci_accumulate = st.session_state.get("llm_wiki_voci", [])
-    if voci_accumulate:
-        testo_wiki_completo = "# Bottega — Gen III Personal LLM Wiki\n\n" + "\n\n".join(voci_accumulate)
-        with st.expander(f"📚 Gen III LLM Wiki — Cumulative Markdown Knowledge Base ({len(voci_accumulate)} entries)"):
-            st.markdown(testo_wiki_completo)
-            col_dl, col_clr = st.columns([2, 1])
-            with col_dl:
-                st.download_button(
-                    "💾 Download Personal LLM Wiki (.md)",
-                    data=testo_wiki_completo.encode("utf-8"),
-                    file_name="bottega_llm_wiki.md",
-                    mime="text/markdown",
-                    key="dl_wiki_md",
+    radice_vault = risolutore_artigiano.inizializza_vault_wiki()
+    n_sources = len(list((radice_vault / "wiki" / "sources").glob("*.md")))
+    n_concepts = len(list((radice_vault / "wiki" / "concepts").glob("*.md")))
+    n_entities = len(list((radice_vault / "wiki" / "entities").glob("*.md")))
+    n_synthesis = len(list((radice_vault / "wiki" / "synthesis").glob("*.md")))
+    n_presentations = len(list((radice_vault / "wiki" / "presentations").glob("*.md")))
+
+    with st.expander("📚 Gen III LLM Wiki (Karpathy / Obsidian Vault) — Explorer, Graph View, Lint & MARP"):
+        m_v1, m_v2, m_v3, m_v4, m_v5 = st.columns(5)
+        m_v1.metric("Sources", n_sources)
+        m_v2.metric("Concepts", n_concepts)
+        m_v3.metric("Entities", n_entities)
+        m_v4.metric("Synthesis", n_synthesis)
+        m_v5.metric("Presentations", n_presentations)
+
+        b1, b2, b3 = st.columns(3)
+        with b1:
+            if st.button("🔍 Run Wiki Lint (Health Check)", key="btn_lint_wiki"):
+                esito_lint = risolutore_artigiano.esegui_lint_wiki(radice_vault)
+                st.success(
+                    f"Health Check: {esito_lint['stato_salute']} | "
+                    f"Pagine: {esito_lint['pagine_totali']} | "
+                    f"Orfani riparati: {esito_lint['orfani_riparati']} | "
+                    f"Link aggiunti: {esito_lint['link_aggiunti']}"
                 )
-            with col_clr:
-                if st.button("🗑️ Clear Wiki", key="clear_wiki_btn"):
-                    risolutore_artigiano.svuota_wiki_su_disco()
-                    st.session_state["llm_wiki_voci"] = []
-                    st.rerun()
+                st.rerun()
+        with b2:
+            if st.button("🎞️ Generate MARP Slides", key="btn_marp_slides"):
+                ult_prob = st.session_state.get(
+                    "ultima_domanda_artigiano", "Bottega Executive Presentation"
+                )
+                ult_esito = st.session_state.get("ultimo_esito_artigiano") or {
+                    "semaforo": "VERDE",
+                    "s_max": 1.0,
+                    "colore_nodo_ewd496a": "NERO",
+                    "risultato": {"principio_guida_unico": "Bottega Leonardo LLM Wiki"},
+                    "risposta_discorsiva": "Sintesi esecutiva generata dal Vault.",
+                }
+                testo_marp, path_marp = risolutore_artigiano.genera_presentazione_marp(
+                    ult_prob, ult_esito, radice_vault
+                )
+                st.session_state["ultimo_marp_testo"] = testo_marp
+                st.session_state["ultimo_marp_nome"] = path_marp.name
+                st.success(f"Presentazione MARP creata: {path_marp.name}")
+
+        with b3:
+            dati_zip = risolutore_artigiano.esporta_vault_wiki_zip(radice_vault)
+            st.download_button(
+                "📦 Download Full Obsidian Vault (.zip)",
+                data=dati_zip,
+                file_name="bottega_obsidian_vault.zip",
+                mime="application/zip",
+                key="dl_vault_zip",
+            )
+
+        if "ultimo_marp_testo" in st.session_state:
+            st.download_button(
+                f"💾 Download Generated Presentation ({st.session_state.get('ultimo_marp_nome', 'slides.md')})",
+                data=st.session_state["ultimo_marp_testo"].encode("utf-8"),
+                file_name=st.session_state.get("ultimo_marp_nome", "slides-marp.md"),
+                mime="text/markdown",
+                key="dl_marp_md",
+            )
+
+        st.subheader("Interactive Obsidian Graph View (Wikilinks)")
+        dot_code = risolutore_artigiano.costruisci_grafo_dot_wiki(radice_vault)
+        st.graphviz_chart(dot_code)
+
+        st.subheader("Browse Vault Markdown Files")
+        tutti_md = sorted(
+            [p for p in radice_vault.glob("**/*.md") if p.is_file()],
+            key=lambda p: str(p.relative_to(radice_vault)).lower(),
+        )
+        if tutti_md:
+            opzioni_file = {
+                str(p.relative_to(radice_vault)).replace("\\", "/"): p for p in tutti_md
+            }
+            scelto = st.selectbox(
+                "Select a file to inspect (index.md, log.md, concepts, entities, sources, synthesis, presentations):",
+                list(opzioni_file.keys()),
+                key="sel_vault_file",
+            )
+            if scelto:
+                path_scelto = opzioni_file[scelto]
+                contenuto_file = path_scelto.read_text(encoding="utf-8", errors="ignore")
+                st.markdown(f"**Viewing: `{scelto}`**")
+                st.code(contenuto_file, language="markdown")
+                st.download_button(
+                    f"💾 Download `{path_scelto.name}`",
+                    data=contenuto_file.encode("utf-8"),
+                    file_name=path_scelto.name,
+                    mime="text/markdown",
+                    key=f"dl_file_{scelto}",
+                )
 
 with tab_ponte_web:
     st.subheader("Zero-API Mode: Generate a Grounded Prompt & Audit External AI Responses")
