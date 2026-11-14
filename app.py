@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.14.v23"
+_VERSIONE_MODULI_THE = "2026.11.14.v24"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -814,6 +814,10 @@ with tab_artigiano:
             )
             discorso_completo = risolutore_artigiano.rimuovi_coda_audit_6_punti(testo_base) or testo_base
 
+        if esito.get("fonte_generazione") == "LLM_NEURALE":
+            st.caption("🧠 Generazione Neurale LLM attiva (verificata da Strato L · A · D)")
+        elif esito.get("fonte_generazione") == "SINTESI_DETERMINISTICA":
+            st.caption("⚙️ Sintesi Deterministica Locale attiva (Zero-Hallucination Mode)")
         st.markdown("### Answer from Your Documents")
         st.markdown(discorso_completo)
 

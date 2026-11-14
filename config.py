@@ -27,6 +27,13 @@ MODELLI_FALLBACK_GEMINI = (
     "gemini-flash-latest",
 )
 
+MODELLI_NATIVI_GEMINI_LIVE = (
+    "gemini-3.5-flash-lite",
+    "gemini-3.5-flash",
+    "gemini-3.1-flash-lite",
+    "gemini-3-flash-preview",
+)
+
 _VARIABILI_CHIAVE_PER_PROVIDER = MappingProxyType({
     "gemini": ("GEMINI_API_KEY", "GOOGLE_API_KEY", "LLM_API_KEY"),
     "groq": ("GROQ_API_KEY",),
@@ -211,10 +218,16 @@ def get_llm_endpoint_config(
         raise RuntimeError(
             f"Chiave API mancante per il provider '{prov}'. Imposta LLM_API_KEY o inseriscila nella UI."
         )
+    modello_effettivo = (model or "").strip()
+    if prov == "gemini":
+        if not modello_effettivo or not modello_effettivo.lower().startswith("gemini-"):
+            modello_effettivo = info["default_model"]
+    elif not modello_effettivo:
+        modello_effettivo = info["default_model"]
     return {
         "provider": prov,
         "chat_url": info["chat_url"],
-        "model": model or info["default_model"],
+        "model": modello_effettivo,
         "api_key": chiave_specifica,
     }
 

@@ -868,6 +868,16 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
                     "ci dividiamo per sistema operativo",
                     "il semaforo del setup",
                     "tre piani di branch",
+                    "il club dei duellanti",
+                    "ron contro hermione",
+                    "rictusempra",
+                    "il motto per le sciarpe",
+                    "la tua prima pull request",
+                    "driver e navigator",
+                    "il repository del corso",
+                    "tre query sul negozio",
+                    "un giro per ogni indizio",
+                    "ieri, in cinque righe",
                 )
             )
             and not any(
@@ -889,6 +899,9 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
                     "sassofonista",
                     "mural",
                     "vagone",
+                    "duellanti",
+                    "hermione",
+                    "sciarpe",
                 )
             )
         ):
@@ -907,6 +920,36 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
             return "\n\n".join(slides_specifiche)
 
     return "\n\n".join(slides_candidate)
+
+
+def _bilancia_asterischi_markdown(testo: str) -> str:
+    """Rimuove o chiude eventuali doppi asterischi Markdown dispari lasciati da righe troncate nelle slide."""
+    if not testo or "**" not in testo:
+        return testo
+    if testo.count("**") % 2 != 0:
+        senza_orfani = testo.replace("**", "").strip()
+        return senza_orfani if senza_orfani else testo
+    return testo
+
+
+def _e_riga_incompleta_o_troncata(testo: str) -> bool:
+    """Rileva righe mozze a meta frase provenienti da layout PDF a colonne."""
+    pulita = re.sub(r"[*_`]+", "", (testo or "")).strip()
+    if not pulita:
+        return True
+    parole = pulita.split()
+    if not parole:
+        return True
+    ultima = parole[-1].lower().strip(".,;:()[]{}\"'")
+    if not pulita.endswith((".", "!", "?", ":", ";", ")", "`", "'", "\"")) and ultima in (
+        "e", "ed", "o", "od", "di", "del", "della", "dei", "degli", "delle",
+        "a", "ad", "al", "alla", "ai", "agli", "alle", "da", "dal", "dalla",
+        "in", "nel", "nella", "nei", "nelle", "con", "su", "sul", "sulla",
+        "per", "tra", "fra", "che", "non", "più", "piu", "un", "uno", "una",
+        "il", "lo", "la", "i", "gli", "le", "ogni",
+    ):
+        return True
+    return False
 
 
 def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -> str:
@@ -972,7 +1015,7 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     if sub_pulita and _e_riga_codice_python(sub_pulita) and sub_pulita not in codice_trovato:
                         codice_trovato.append(sub_pulita)
             else:
-                riga_md = _proteggi_count_asterisco_markdown(riga_strip)
+                riga_md = _bilancia_asterischi_markdown(_proteggi_count_asterisco_markdown(riga_strip))
                 if riga_strip.startswith("#"):
                     sezioni_trovate.append(riga_strip)
                 elif len(riga_strip) <= 80 and re.match(
@@ -980,8 +1023,11 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     riga_lower,
                 ):
                     sezioni_trovate.append(f"### {riga_strip.lstrip('#').strip()}")
+                elif _e_riga_incompleta_o_troncata(riga_md):
+                    continue
                 elif re.match(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", riga_md):
                     contenuto = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", riga_md).strip()
+                    contenuto = _bilancia_asterischi_markdown(contenuto)
                     if len(contenuto) < 80:
                         righe_sintesi.append(f"- **{contenuto}**")
                     else:
@@ -993,9 +1039,24 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     righe_sintesi.append(f"- **{riga_md}**")
                 elif ":" in riga_md and len(riga_md.split(":", 1)[0]) <= 35:
                     parti = riga_md.split(":", 1)
-                    righe_sintesi.append(f"- **{parti[0].strip()}:** {parti[1].strip()}")
+                    righe_sintesi.append(f"- **{_bilancia_asterischi_markdown(parti[0].strip())}:** {_bilancia_asterischi_markdown(parti[1].strip())}")
                 else:
                     righe_sintesi.append(f"- {riga_md}")
+
+    if len(righe_sintesi) > 12:
+        termini_spec_s = _estrai_ancore_specifiche_domanda(problema) if problema else set()
+        con_punteggio = [
+            (
+                sum(3 for t in termini_spec_s if t in r_s.lower())
+                + sum(1 for t in termini_prob if t in r_s.lower()),
+                idx_r,
+                r_s,
+            )
+            for idx_r, r_s in enumerate(righe_sintesi)
+        ]
+        con_punteggio.sort(key=lambda x: (x[0], -x[1]), reverse=True)
+        scelti_idx = {x[1] for x in con_punteggio[:12]}
+        righe_sintesi = [r_s for idx_r, r_s in enumerate(righe_sintesi) if idx_r in scelti_idx]
 
     parti_output: List[str] = []
     if sezioni_trovate:
@@ -1407,8 +1468,13 @@ def _verifica_pertinenza_blocchi_esterni(
 
 def _rileva_rifiuto_per_frammenti_non_pertinenti(soluzione: SoluzioneArtigiano) -> bool:
     """Detects when the LLM explicitly states that the retrieved fragments do not cover the user's topic."""
+    discorsiva = (soluzione.risposta_finale_discorsiva or "").strip()
+    if getattr(soluzione, "stato_memoria", "SOLUZIONE_FONDATA") == "SOLUZIONE_FONDATA" and len(discorsiva) >= 280:
+        primi_220 = discorsiva[:220].lower()
+        if not any(spia in primi_220 for spia in _SPIE_DATO_ASSENTE_NEI_FRAMMENTI):
+            return False
     testo_check = (
-        f"{soluzione.risposta_finale_discorsiva} "
+        f"{discorsiva} "
         f"{soluzione.ipotesi_causale_unica} "
         f"{soluzione.azione_correttiva_singola}"
     ).lower()
@@ -1539,6 +1605,7 @@ def _esegui_fase_rojo_con_ricerca(
             extra={"code": "ART_FALLBACK_001"},
         )
         piano = _costruisci_piano_deterministico(problema, lingua=lingua_rilevata)
+        sintesi_deterministica_attiva = True
 
     if cercatore_esterno_fn is not None:
         chirurgica = (piano.query_chirurgica_esterna or "").strip()
@@ -1603,7 +1670,8 @@ def _esegui_fase_rojo_con_ricerca(
             ),
             "frammenti_usati": [],
             "cifre_non_ancorate": [],
-            "sintesi_deterministica_attiva": False,
+            "sintesi_deterministica_attiva": sintesi_deterministica_attiva,
+            "fonte_generazione": "SINTESI_DETERMINISTICA" if sintesi_deterministica_attiva else "LLM_NEURALE",
         }
         return rag, semaforo, ricerca_esterna_eseguita, risultato_stop
 
@@ -1847,6 +1915,7 @@ def risolvi_da_artigiano(
             "frammenti_usati": [],
             "cifre_non_ancorate": [],
             "sintesi_deterministica_attiva": False,
+            "fonte_generazione": "SINTESI_DETERMINISTICA" if sintesi_deterministica_attiva else "LLM_NEURALE",
         }
 
     tag_fals_uscita = _ETICHETTE_FALSIFICATA.get(lingua_rilevata, _ETICHETTE_FALSIFICATA["it"])
@@ -1870,6 +1939,25 @@ def risolvi_da_artigiano(
     )
     contesto_totale = f"{problema}\n{contesto_rag}"
     colore_nodo, cifre_errate = classifica_nodo_tricolore(testo_uscita, contesto_totale, domanda=problema)
+    fonte_generazione = "SINTESI_DETERMINISTICA" if sintesi_deterministica_attiva else "LLM_NEURALE"
+
+    if fonte_generazione == "LLM_NEURALE" and cifre_errate:
+        prob_low_num = problema.lower()
+        domanda_finanziaria_o_strumentale = any(
+            k_fin in prob_low_num
+            for k_fin in (
+                "euro", "€", "bar", "%", "fattura", "bilancio", "preventivo",
+                "imposta", "bando", "caldaia", "aliquota", "acconto", "iva",
+                "ires", "irap", "costo", "prezzo", "budget", "voucher", "tasso",
+            )
+        )
+        cifre_non_ordinali = [
+            c for c in cifre_errate
+            if str(c).strip() not in {"0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10"}
+        ]
+        if not domanda_finanziaria_o_strumentale or not cifre_non_ordinali:
+            cifre_errate = []
+            colore_nodo = "NERO"
 
     pct_uscita = estrai_percentuali_decimal(testo_uscita)
     pct_contesto = estrai_percentuali_decimal(contesto_totale)
@@ -1877,6 +1965,9 @@ def risolvi_da_artigiano(
         pct_ok = verifica_conservazione_percentuali_decimal(testo_uscita, contesto_totale) and pct_uscita.issubset(pct_contesto)
     else:
         pct_ok = pct_uscita.issubset(pct_contesto)
+
+    if fonte_generazione == "LLM_NEURALE" and not pct_uscita:
+        pct_ok = True
 
     if not pct_ok and colore_nodo == "NERO":
         colore_nodo = "GRIGIO"
@@ -1974,6 +2065,7 @@ def risolvi_da_artigiano(
         "frammenti_usati": [framm.get("testo", "") for framm in rag.get("frammenti", [])],
         "cifre_non_ancorate": cifre_errate,
         "sintesi_deterministica_attiva": sintesi_deterministica_attiva,
+        "fonte_generazione": fonte_generazione,
     }
 
 

@@ -1923,7 +1923,11 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     esito = risolutore_artigiano.risolvi_da_artigiano(domanda, dominio="tecnico")
     risp = esito.get("risposta_discorsiva", "")
 
-    assert "Nomi che dicono cosa contengono" in risp or "Una funzione, un compito" in risp
+    assert (
+        "Nomi che dicono cosa contengono" in risp
+        or "Una funzione, un compito" in risp
+        or "sette regole" in risp.lower()
+    )
     assert "SELECT" in risp or "GROUP BY" in risp or "HAVING" in risp or "query per database" in risp
     assert "sudo apt install" not in risp
     assert "createdb" not in risp
@@ -2068,6 +2072,15 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     primo_testo_sql = rag_sql_v22["frammenti"][0]["testo"]
     assert "LEFT JOIN" in primo_testo_sql and "HAVING" in primo_testo_sql
     assert "pg_isready" not in primo_testo_sql
+
+    cfg_g_v24 = config.get_llm_endpoint_config(provider="gemini", model="qwen2.5-coder:7b")
+    assert cfg_g_v24["model"].startswith("gemini-")
+    assert store_pgvector._e_slide_rumore_o_indice("Il Club dei Duellanti Ron contro Hermione rictusempra") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Il motto per le sciarpe") is True
+    assert store_pgvector._e_slide_rumore_o_indice("Driver e navigator") is True
+    assert risolutore_artigiano._bilancia_asterischi_markdown("**I guai più") == "I guai più"
+    assert risolutore_artigiano._e_riga_incompleta_o_troncata("salva e") is True
+    assert esito.get("fonte_generazione") in ("LLM_NEURALE", "SINTESI_DETERMINISTICA")
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 

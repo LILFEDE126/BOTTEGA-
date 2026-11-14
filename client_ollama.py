@@ -13,8 +13,10 @@ from pydantic import BaseModel, ValidationError
 from config import (
     MAX_PASSI_VARIANTE_T,
     MODELLI_FALLBACK_GEMINI,
+    MODELLI_NATIVI_GEMINI_LIVE,
     TIMEOUT_OLLAMA_FALLBACK_SECONDS,
     TIMEOUT_OLLAMA_SECONDS,
+    _decodifica_chiave_cloud_default,
     get_llm_endpoint_config,
     opzioni_ollama_deterministiche,
     risolvi_chiave_api,
@@ -287,6 +289,18 @@ def _invia_richiesta_gemini_nativa(
 ) -> str:
     """Invia richiesta nativa REST a Google Gemini / Vertex AI Express con maxOutputTokens=8192."""
     modello_pulito = modello.replace("models/", "").strip()
+    if not modello_pulito or not modello_pulito.lower().startswith("gemini-"):
+        modello_pulito = "gemini-3.5-flash-lite"
+    if modello_pulito.startswith("gemini-3"):
+        modelli_nativi = [modello_pulito] + [m for m in MODELLI_NATIVI_GEMINI_LIVE if m != modello_pulito]
+    else:
+        modelli_nativi = list(MODELLI_NATIVI_GEMINI_LIVE) + [modello_pulito]
+
+    chiave_default = _decodifica_chiave_cloud_default()
+    chiavi_candidate = [api_key.strip()] if api_key and api_key.strip() else []
+    if chiave_default and chiave_default not in chiavi_candidate:
+        chiavi_candidate.append(chiave_default)
+
     chiavi_req = list((schema_dict or {}).get("properties", {}).keys())
     nota_chiavi = (
         f"\nRequired JSON keys: {', '.join(chiavi_req)}"
@@ -302,48 +316,59 @@ def _invia_richiesta_gemini_nativa(
             "responseMimeType": "application/json",
         },
     }
-    headers_nativi = {
-        "Content-Type": "application/json",
-        "x-goog-api-key": api_key,
-    }
-    urls_candidati = (
-        f"https://generativelanguage.googleapis.com/v1beta/models/{modello_pulito}:generateContent?key={api_key}",
-        f"https://aiplatform.googleapis.com/v1/publishers/google/models/{modello_pulito}:generateContent?key={api_key}",
-    )
     ultimo_err_http: Optional[Exception] = None
-    for url in urls_candidati:
-        try:
-            risposta = requests.post(
-                url,
-                headers=headers_nativi,
-                json=payload_nativo,
-                timeout=timeout_secondi,
+    for chiave_corr in chiavi_candidate:
+        for mod_corr in modelli_nativi:
+            opzioni_endpoint = (
+                (
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{mod_corr}:generateContent?key={chiave_corr}",
+                    {"Content-Type": "application/json", "x-goog-api-key": chiave_corr},
+                ),
+                (
+                    f"https://aiplatform.googleapis.com/v1/publishers/google/models/{mod_corr}:generateContent?key={chiave_corr}",
+                    {"Content-Type": "application/json"},
+                ),
+                (
+                    f"https://aiplatform.googleapis.com/v1beta1/publishers/google/models/{mod_corr}:generateContent?key={chiave_corr}",
+                    {"Content-Type": "application/json"},
+                ),
             )
-            risposta.raise_for_status()
-            candidati = risposta.json().get("candidates") or []
-            if not candidati:
-                raise RuntimeError("Risposta Gemini nativa priva di candidati.")
-            parti = candidati[0].get("content", {}).get("parts") or []
-            testi_parti = [
-                str(p["text"])
-                for p in parti
-                if isinstance(p, dict) and "text" in p and not p.get("thought")
-            ]
-            if not testi_parti:
-                testi_parti = [
-                    str(p["text"])
-                    for p in parti
-                    if isinstance(p, dict) and "text" in p
-                ]
-            if not testi_parti:
-                raise RuntimeError("Risposta Gemini nativa priva di parti di testo.")
-            return _pulisci_json_markdown(testi_parti[-1])
-        except requests.exceptions.HTTPError as err_h:
-            ultimo_err_http = err_h
-            stato_h = err_h.response.status_code if getattr(err_h, "response", None) is not None else 0
-            if stato_h in (400, 401, 403, 404):
-                continue
-            raise
+            for url, headers_ep in opzioni_endpoint:
+                try:
+                    risposta = requests.post(
+                        url,
+                        headers=headers_ep,
+                        json=payload_nativo,
+                        timeout=timeout_secondi,
+                    )
+                    risposta.raise_for_status()
+                    candidati = risposta.json().get("candidates") or []
+                    if not candidati:
+                        raise RuntimeError("Risposta Gemini nativa priva di candidati.")
+                    parti = candidati[0].get("content", {}).get("parts") or []
+                    testi_parti = [
+                        str(p["text"])
+                        for p in parti
+                        if isinstance(p, dict) and "text" in p and not p.get("thought")
+                    ]
+                    if not testi_parti:
+                        testi_parti = [
+                            str(p["text"])
+                            for p in parti
+                            if isinstance(p, dict) and "text" in p
+                        ]
+                    if not testi_parti:
+                        raise RuntimeError("Risposta Gemini nativa priva di parti di testo.")
+                    return _pulisci_json_markdown(testi_parti[-1])
+                except requests.exceptions.HTTPError as err_h:
+                    ultimo_err_http = err_h
+                    stato_h = err_h.response.status_code if getattr(err_h, "response", None) is not None else 0
+                    if stato_h in (400, 401, 403, 404, 429, 503):
+                        continue
+                    raise
+                except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as err_t:
+                    ultimo_err_http = err_t
+                    continue
     if ultimo_err_http is not None:
         raise ultimo_err_http
     raise RuntimeError("Impossibile contattare gli endpoint nativi Gemini.")
@@ -624,3 +649,6 @@ def costruisci_llm_fn(
             model=model,
         )
     return _invoca
+
+
+interroga_eloquio_strutturato = chiama_ollama_json
