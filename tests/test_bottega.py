@@ -1929,7 +1929,7 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert "createdb" not in risp
 
     chiave_def = config._decodifica_chiave_cloud_default()
-    assert chiave_def.startswith("AQ.Ab8RN6IYTB8HU") and chiave_def.endswith("CftRnvhF3-Eg") and len(chiave_def) == 53
+    assert chiave_def.startswith("AQ.Ab8RN6IYTB8HUrs996KYjxE") and chiave_def.endswith("CftRnvhF3-Eg") and len(chiave_def) == 53
     assert config.risolvi_chiave_api(api_key="AQ.Ab8RN6KkqudHR_revocata", provider="gemini") == chiave_def
     assert risolutore_artigiano._e_riga_codice_python("raise dentro la funzione, try fuori") is False
     assert risolutore_artigiano._e_riga_codice_python("return non viene mai eseguito") is False
