@@ -11,8 +11,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 _PARTI_CHIAVE_CLOUD_DEFAULT = (
-    "QVEuQWI4Uk42S2txdWRIUg==",
-    "OEpnenpsUzRBLUVBZzJ4TzE5Z2tkVEZHOFY5WmtMMnlpeGFSdw==",
+    "QVEuQWI4Uk42SVlUQjhIVQ==",
+    "cnM5OTZLWmp4RS1zSmtVQ2twN1kzTDA0NENmdFJudmhGMy1FZw==",
+)
+
+_PREFISSI_CHIAVI_REVOCATE = (
+    "AQ.Ab8RN6Is6Hp",
+    "AQ.Ab8RN6KkqudHR",
 )
 
 MODELLI_FALLBACK_GEMINI = (
@@ -54,6 +59,15 @@ def _leggi_secret_streamlit(nome_chiave: str) -> str:
     return ""
 
 
+def _filtra_chiave_non_revocata(valore: Optional[str]) -> str:
+    if not valore or not valore.strip():
+        return ""
+    pulita = valore.strip()
+    if any(pulita.startswith(pref) for pref in _PREFISSI_CHIAVI_REVOCATE):
+        return ""
+    return pulita
+
+
 BOTTEGA_ENV = (os.getenv("BOTTEGA_ENV") or "dev").strip().lower()
 LLM_PROVIDER = (
     os.getenv("LLM_PROVIDER")
@@ -61,11 +75,11 @@ LLM_PROVIDER = (
     or "gemini"
 ).strip().lower()
 LLM_API_KEY = (
-    os.getenv("LLM_API_KEY")
-    or os.getenv("GEMINI_API_KEY")
-    or os.getenv("GOOGLE_API_KEY")
-    or _leggi_secret_streamlit("LLM_API_KEY")
-    or _leggi_secret_streamlit("GEMINI_API_KEY")
+    _filtra_chiave_non_revocata(os.getenv("LLM_API_KEY"))
+    or _filtra_chiave_non_revocata(os.getenv("GEMINI_API_KEY"))
+    or _filtra_chiave_non_revocata(os.getenv("GOOGLE_API_KEY"))
+    or _filtra_chiave_non_revocata(_leggi_secret_streamlit("LLM_API_KEY"))
+    or _filtra_chiave_non_revocata(_leggi_secret_streamlit("GEMINI_API_KEY"))
     or _decodifica_chiave_cloud_default()
 ).strip()
 
@@ -73,30 +87,33 @@ LLM_API_KEY = (
 def risolvi_chiave_api(api_key: Optional[str] = None, provider: Optional[str] = None) -> str:
     """Resolves the active Cloud LLM API key for the requested provider without leaking Gemini's key to other providers."""
     if api_key is not None and api_key.strip():
-        return api_key.strip()
+        filtrata_arg = _filtra_chiave_non_revocata(api_key)
+        return filtrata_arg if filtrata_arg else _decodifica_chiave_cloud_default()
 
     prov = (provider or "gemini").strip().lower()
     if prov in _VARIABILI_CHIAVE_PER_PROVIDER and prov != "gemini":
         for nome_var in _VARIABILI_CHIAVE_PER_PROVIDER[prov]:
-            da_secret = _leggi_secret_streamlit(nome_var)
+            da_secret = _filtra_chiave_non_revocata(_leggi_secret_streamlit(nome_var))
             if da_secret:
                 return da_secret
-            da_env = os.getenv(nome_var)
-            if da_env is not None and da_env.strip():
-                return da_env.strip()
-        llm_env_generica = os.getenv("LLM_API_KEY") or _leggi_secret_streamlit("LLM_API_KEY") or ""
-        if llm_env_generica.strip() and not llm_env_generica.strip().startswith("AQ."):
-            return llm_env_generica.strip()
+            da_env = _filtra_chiave_non_revocata(os.getenv(nome_var))
+            if da_env:
+                return da_env
+        llm_env_generica = _filtra_chiave_non_revocata(
+            os.getenv("LLM_API_KEY") or _leggi_secret_streamlit("LLM_API_KEY") or ""
+        )
+        if llm_env_generica and not llm_env_generica.startswith("AQ."):
+            return llm_env_generica
         return ""
 
     for nome_var in ("LLM_API_KEY", "GEMINI_API_KEY", "GOOGLE_API_KEY"):
-        da_secret = _leggi_secret_streamlit(nome_var)
+        da_secret = _filtra_chiave_non_revocata(_leggi_secret_streamlit(nome_var))
         if da_secret:
             return da_secret
-        da_env = os.getenv(nome_var)
-        if da_env is not None and da_env.strip():
-            return da_env.strip()
-    return LLM_API_KEY.strip() or _decodifica_chiave_cloud_default()
+        da_env = _filtra_chiave_non_revocata(os.getenv(nome_var))
+        if da_env:
+            return da_env
+    return _filtra_chiave_non_revocata(LLM_API_KEY) or _decodifica_chiave_cloud_default()
 
 
 def ha_chiave_dedicata_provider(provider: str, api_key: Optional[str] = None) -> bool:

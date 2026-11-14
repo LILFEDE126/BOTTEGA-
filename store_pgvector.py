@@ -393,7 +393,8 @@ def normalizza_spazi_testo_pdf(testo: str) -> str:
     testo_lavorato = re.sub(r"\b(assert\s+[^=\n]+?)\s*-=\s*", r"\1 == ", testo_lavorato)
     testo_lavorato = re.sub(r"\b([a-zA-Z_]\w*)\s*-=\s*0\b", r"\1 <= 0", testo_lavorato)
     testo_lavorato = re.sub(r"COUNT\s*\(\s*\*\s*\)\s*-=\s*(\d+)", r"COUNT(*) >= \1", testo_lavorato)
-    testo_lavorato = re.sub(r"(\b\w+\.\w+)\s*→\s*'([^']+)'", r"\1 != '\2'", testo_lavorato)
+    testo_lavorato = re.sub(r"COUNT\s*\(\s*\*\s*\)", "COUNT(*)", testo_lavorato)
+    testo_lavorato = re.sub(r"(\w+(?:\.\w+)?)\s*(?:→|->)\s*'([^']+)'", r"\1 != '\2'", testo_lavorato)
     testo_lavorato = re.sub(r"\n{3,}", "\n\n", testo_lavorato)
     return testo_lavorato.strip()
 
@@ -433,6 +434,23 @@ _MARCATORI_SLIDE_RUMORE = (
     "il giallo · la mappa in vs code",
     "il giallo · gli aiuti",
     "tre aiuti, dal più leggero",
+    "ci dividiamo per sistema operativo",
+    "il semaforo del setup",
+    "sei passi, sempre in quest'ordine",
+    "il test finale: check_setup.py",
+    "tre piani di branch su github",
+    "il venv di oggi, adesso",
+    "la cartella della squadra, in vs code",
+    "cosa fa ogni riga che avete scritto",
+    "i test compaiono",
+    "quasi tutti rossi, ed è giusto",
+    "il giallo · le regole",
+    "la bacheca su mural",
+    "trovate chi ha staccato il vagone",
+    "come si gioca",
+    "una versione per progetto: asdf",
+    "asdf per python e node",
+    "installare node con nvm",
     "il metodo · a ogni tappa",
     "il metodo a ogni tappa",
     "le squadre · tappa per tappa",
@@ -956,7 +974,9 @@ _TERMINI_CORSO_FREQUENTI = frozenset({
 _TERMINI_TECNICI_SPECIFICI = frozenset({
     "having", "group", "left", "inner", "join", "where", "raises", "approx", "tdd",
     "rebase", "merge", "sha", "assert", "elif", "comprehension", "valueerror",
-    "keyerror", "typeerror", "pg_rewind", "raft", "quorum",
+    "keyerror", "typeerror", "pg_rewind", "raft", "quorum", "traceback", "breakpoint",
+    "f10", "f11", "venv", "pip", "gitignore", "requirements", "externally", "managed",
+    "count", "null", "step", "over", "into",
 })
 
 

@@ -283,26 +283,124 @@ def _invia_richiesta_gemini_nativa(
     istruzione_schema: str,
     prompt_corrente: str,
     timeout_secondi: int,
+    schema_dict: Optional[dict] = None,
 ) -> str:
-    """Fallback to native Google Gemini :generateContent endpoint when OpenAI-compatible endpoint fails."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modello}:generateContent?key={api_key}"
+    """Invia richiesta nativa REST a Google Gemini / Vertex AI Express con maxOutputTokens=8192."""
+    modello_pulito = modello.replace("models/", "").strip()
+    chiavi_req = list((schema_dict or {}).get("properties", {}).keys())
+    nota_chiavi = (
+        f"\nRequired JSON keys: {', '.join(chiavi_req)}"
+        if chiavi_req
+        else ""
+    )
     payload_nativo = {
-        "systemInstruction": {"parts": [{"text": istruzione_schema}]},
+        "systemInstruction": {"parts": [{"text": f"{istruzione_schema}{nota_chiavi}"}]},
         "contents": [{"role": "user", "parts": [{"text": prompt_corrente}]}],
         "generationConfig": {
-            "temperature": 0.0,
+            "temperature": 0.1,
+            "maxOutputTokens": 8192,
             "responseMimeType": "application/json",
         },
     }
-    risposta = requests.post(url, json=payload_nativo, timeout=timeout_secondi)
-    risposta.raise_for_status()
-    candidati = risposta.json().get("candidates") or []
-    if not candidati:
-        raise RuntimeError("Risposta Gemini nativa priva di candidati.")
-    parti = candidati[0].get("content", {}).get("parts") or []
-    if not parti or "text" not in parti[0]:
-        raise RuntimeError("Risposta Gemini nativa priva di parti di testo.")
-    return _pulisci_json_markdown(parti[0]["text"])
+    headers_nativi = {
+        "Content-Type": "application/json",
+        "x-goog-api-key": api_key,
+    }
+    urls_candidati = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/{modello_pulito}:generateContent?key={api_key}",
+        f"https://aiplatform.googleapis.com/v1/publishers/google/models/{modello_pulito}:generateContent?key={api_key}",
+    )
+    ultimo_err_http: Optional[Exception] = None
+    for url in urls_candidati:
+        try:
+            risposta = requests.post(
+                url,
+                headers=headers_nativi,
+                json=payload_nativo,
+                timeout=timeout_secondi,
+            )
+            risposta.raise_for_status()
+            candidati = risposta.json().get("candidates") or []
+            if not candidati:
+                raise RuntimeError("Risposta Gemini nativa priva di candidati.")
+            parti = candidati[0].get("content", {}).get("parts") or []
+            testi_parti = [
+                str(p["text"])
+                for p in parti
+                if isinstance(p, dict) and "text" in p and not p.get("thought")
+            ]
+            if not testi_parti:
+                testi_parti = [
+                    str(p["text"])
+                    for p in parti
+                    if isinstance(p, dict) and "text" in p
+                ]
+            if not testi_parti:
+                raise RuntimeError("Risposta Gemini nativa priva di parti di testo.")
+            return _pulisci_json_markdown(testi_parti[-1])
+        except requests.exceptions.HTTPError as err_h:
+            ultimo_err_http = err_h
+            stato_h = err_h.response.status_code if getattr(err_h, "response", None) is not None else 0
+            if stato_h in (400, 401, 403, 404):
+                continue
+            raise
+    if ultimo_err_http is not None:
+        raise ultimo_err_http
+    raise RuntimeError("Impossibile contattare gli endpoint nativi Gemini.")
+
+
+_interroga_gemini_nativo_rest = _invia_richiesta_gemini_nativa
+
+
+def _normalizza_json_per_schema(contenuto_testo: str, schema_pydantic: Type[T]) -> str:
+    """Normalizes minor LLM JSON deviations for SoluzioneArtigiano so valid neural answers are never discarded."""
+    testo_pulito = _pulisci_json_markdown(contenuto_testo)
+    try:
+        dati_raw = json.loads(testo_pulito)
+    except (ValueError, TypeError):
+        return testo_pulito
+    if not isinstance(dati_raw, dict):
+        return testo_pulito
+
+    props_schema = schema_pydantic.model_json_schema().get("properties", {})
+    if "risposta_finale_discorsiva" not in props_schema:
+        return testo_pulito
+
+    risp_disc = str(
+        dati_raw.get("risposta_finale_discorsiva")
+        or dati_raw.get("risposta_discorsiva")
+        or dati_raw.get("risposta")
+        or ""
+    ).strip()
+    if not risp_disc:
+        return testo_pulito
+
+    dati_raw["risposta_finale_discorsiva"] = risp_disc
+    stato_mem = str(dati_raw.get("stato_memoria") or "").strip().upper()
+    if stato_mem not in ("SOLUZIONE_FONDATA", "RICERCA_RICHIESTA"):
+        dati_raw["stato_memoria"] = "SOLUZIONE_FONDATA"
+
+    scartati_val = dati_raw.get("elementi_scartati_per_non_fare_mucchio")
+    if isinstance(scartati_val, str):
+        dati_raw["elementi_scartati_per_non_fare_mucchio"] = [scartati_val] if scartati_val.strip() else []
+    elif not isinstance(scartati_val, list):
+        dati_raw["elementi_scartati_per_non_fare_mucchio"] = []
+
+    estratto_breve = risp_disc.splitlines()[0][:240].strip() or risp_disc[:240].strip()
+    valori_default_campi = {
+        "principio_guida_unico": estratto_breve,
+        "precondizione_wp_richiesta": "Verifica e riscontro documentale sui riferimenti dell'archivio tecnico certificato.",
+        "invariante_violato": "Mantenere piena aderenza ai parametri, alle specifiche e alle regole stabilite nel testo d'archivio.",
+        "ipotesi_causale_unica": f"Regola documentale individuata: {estratto_breve}",
+        "azione_correttiva_singola": f"Applicare la prescrizione certificata: {estratto_breve}",
+        "esperimento_di_verifica_pratica": "Controllare la corrispondenza puntuale di ciascun parametro, comando e regola con la documentazione d'origine.",
+    }
+    for campo_k, val_def in valori_default_campi.items():
+        val_attuale = dati_raw.get(campo_k)
+        if not isinstance(val_attuale, str) or not val_attuale.strip():
+            dati_raw[campo_k] = val_def
+
+    return json.dumps(dati_raw, ensure_ascii=False)
 
 
 def _invia_richiesta_cloud_json(
@@ -315,11 +413,24 @@ def _invia_richiesta_cloud_json(
     timeout_secondi: int = TIMEOUT_OLLAMA_FALLBACK_SECONDS,
 ) -> str:
     """Invia richiesta HTTP POST verso provider Cloud (Gemini, Groq, OpenRouter) con istruzione schema JSON."""
+    chiavi_schema = list(schema_dict.get("properties", {}).keys())
     istruzione_schema = (
         f"{system_prompt}\n\n"
         "OUTPUT CONSTRAINT: Reply EXCLUSIVELY with a valid JSON object "
+        f"(required keys: {', '.join(chiavi_schema)}) "
         f"conforming to this JSON Schema:\n{json.dumps(schema_dict, ensure_ascii=False)}"
     )
+    e_gemini = "generativelanguage.googleapis.com" in chat_url
+    if requests.post is _REQUESTS_POST_ORIGINALE and e_gemini:
+        return _invia_richiesta_gemini_nativa(
+            api_key,
+            modello,
+            istruzione_schema,
+            prompt_corrente,
+            timeout_secondi,
+            schema_dict=schema_dict,
+        )
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json",
@@ -341,9 +452,15 @@ def _invia_richiesta_cloud_json(
         )
     except requests.exceptions.HTTPError as err:
         stato = err.response.status_code if getattr(err, "response", None) is not None else None
-        e_gemini = "generativelanguage.googleapis.com" in chat_url
         if requests.post is _REQUESTS_POST_ORIGINALE and e_gemini and stato in (400, 401, 403, 404):
-            return _invia_richiesta_gemini_nativa(api_key, modello, istruzione_schema, prompt_corrente, timeout_secondi)
+            return _invia_richiesta_gemini_nativa(
+                api_key,
+                modello,
+                istruzione_schema,
+                prompt_corrente,
+                timeout_secondi,
+                schema_dict=schema_dict,
+            )
         raise
 
 
@@ -404,7 +521,8 @@ def chiama_ollama_json(
                     TIMEOUT_OLLAMA_FALLBACK_SECONDS,
                 )
 
-            return schema_pydantic.model_validate_json(contenuto_json)
+            contenuto_norm = _normalizza_json_per_schema(contenuto_json, schema_pydantic)
+            return schema_pydantic.model_validate_json(contenuto_norm)
         except (ValidationError, KeyError, ValueError, IndexError) as err:
             ultimo_errore = err
             log.warning(

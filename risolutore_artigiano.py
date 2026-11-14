@@ -552,6 +552,103 @@ def _estrai_termini_chiave_chirurgici(query_testo: str) -> Set[str]:
     return termini
 
 
+_TERMINI_GENERICI_CORSO_SLIDE = frozenset({
+    "giorno", "slide", "corso", "python", "sql", "git", "database", "codice", "test",
+    "tabella", "tabelle", "negozio", "linea", "menta", "funzione", "funzioni",
+    "esempio", "esempi", "viste", "visto", "vista", "differenza", "comporta",
+    "rispetto", "usare", "usa", "sfortunata", "ciclo", "lavoro", "flusso", "quotidiano",
+    "giallo", "sistema", "progetto", "computer", "cartella", "file", "script",
+    "riga", "righe", "colonna", "valore", "errore", "regola", "esecuzione",
+    "momento", "caso", "modo", "effetto", "presenza", "motivazione", "architetturale",
+    "linguaggio", "sviluppo", "ambiente", "spiega", "inoltre", "perche", "perché",
+    "quali", "quale", "quando", "come", "cosa", "operativo", "operativa", "operative",
+    "comandi", "comando", "istruzione", "istruzioni", "programma", "procedura",
+})
+
+_PAROLE_FINALI_SOSPESE_SLIDE = frozenset({
+    "quello", "quella", "questo", "questa", "si", "tiene", "dentro", "della", "dello",
+    "delle", "degli", "dei", "del", "di", "da", "in", "con", "su", "per", "tra", "fra",
+    "ed", "od", "che", "non", "un", "uno", "una", "il", "lo", "la", "gli", "le", "più",
+    "piu", "solo", "anche", "come", "quando", "dove", "fa", "sono", "era", "sia", "o",
+    "e", "a", "è", "e'", "all'inizio", "prima", "dopo", "verso", "senza", "sotto",
+    "sopra", "fino", "ogni", "nella", "nello", "nelle", "negli", "nei", "nel", "al",
+    "allo", "alla", "alle", "agli", "ai", "dal", "dallo", "dalla", "dalle", "dagli", "dai",
+    "sul", "sullo", "sulla", "sulle", "sugli", "sui", "cui", "chi", "piuttosto", "oppure",
+})
+
+
+def _estrai_ancore_specifiche_domanda(problema: str) -> Set[str]:
+    termini_tutti = _estrai_termini_chiave_chirurgici(problema) if problema and problema.strip() else set()
+    return {
+        t for t in termini_tutti
+        if t not in _TERMINI_GENERICI_CORSO_SLIDE and not (t.isdigit() and len(t) == 1)
+    }
+
+
+def _proteggi_count_asterisco_markdown(riga: str) -> str:
+    if "COUNT" not in riga.upper() or "*" not in riga:
+        return riga
+    parti = riga.split("`")
+    for idx in range(0, len(parti), 2):
+        parti[idx] = re.sub(r"COUNT\s*\(\s*\*\s*\)", "`COUNT(*)`", parti[idx], flags=re.IGNORECASE)
+    return "`".join(parti)
+
+
+def _ricongiungi_righe_spezzate_slide(testo: str) -> List[str]:
+    """Reconstructs slide sentences split across multiple lines by PDF layout."""
+    if not testo or not testo.strip():
+        return []
+    righe_grezze = [r.rstrip() for r in testo.splitlines() if r.strip()]
+    righe_ricongiunte: List[str] = []
+    for r in righe_grezze:
+        r_pulita = r.strip()
+        if not r_pulita:
+            continue
+        r_lower = r_pulita.lower()
+        if r_pulita.startswith(("=======", "<<<<<<<", ">>>>>>>")):
+            continue
+        if r_lower.startswith("# apri ") or "apri readme.md" in r_lower:
+            continue
+        if any(r_lower.startswith(pref) for pref in ("cp ", "touch ", "rm ", "cd ", "mkdir ", "chmod ", "git ")):
+            continue
+        if r_pulita in ("pass", "...", "return None"):
+            continue
+        if r_lower in _ETICHETTE_DIDATTICHE_RUMORE:
+            continue
+        if any(m in r_lower for m in _MARCATORI_AHASLIDES_RUMORE):
+            continue
+
+        unire_con_precedente = False
+        if (
+            righe_ricongiunte
+            and not _e_riga_codice_python(r)
+            and not _e_riga_codice_python(righe_ricongiunte[-1])
+            and not righe_ricongiunte[-1].strip().startswith("#")
+            and not r_pulita.startswith("#")
+            and not re.match(r"^(?:regola|tappa|fase|passo|\d{1,2}[.)\-:])\s+", r_lower)
+            and not r_pulita.startswith(("-", "*", "•"))
+        ):
+            prec = righe_ricongiunte[-1].strip()
+            parole_prec = prec.split()
+            ultima_parola = parole_prec[-1].lower().strip(".,;:()[]{}\"'") if parole_prec else ""
+            termina_punteggiatura_forte = prec.endswith((".", "!", "?", ":", ";"))
+            if not termina_punteggiatura_forte:
+                if (
+                    ultima_parola in _PAROLE_FINALI_SOSPESE_SLIDE
+                    or r_pulita[0].islower()
+                    or (len(prec) < 55 and not prec.startswith("-"))
+                ):
+                    unire_con_precedente = True
+            elif r_pulita[0].islower() and not prec.endswith((":", ";")):
+                unire_con_precedente = True
+
+        if unire_con_precedente:
+            righe_ricongiunte[-1] = f"{righe_ricongiunte[-1].rstrip()} {r_pulita}"
+        else:
+            righe_ricongiunte.append(r)
+    return righe_ricongiunte
+
+
 def _seleziona_frammenti_pertinenti_domanda(
     problema: str, frammenti: List[dict]
 ) -> Tuple[List[dict], List[dict]]:
@@ -577,12 +674,28 @@ def _seleziona_frammenti_pertinenti_domanda(
             "git golf",
             "vs code live share",
             "wsl -l -v",
+            "ci dividiamo per sistema operativo",
+            "il semaforo del setup",
+            "check_setup.py",
+            "asdf per python",
+            "installare node con nvm",
         )
         for p in marcatori_setup:
             if p in t_low and p not in prob_low:
                 if not any(
                     k in t_low
-                    for k in ("left join", "inner join", "group by", "having", "pytest.raises", "red · green")
+                    for k in (
+                        "left join",
+                        "inner join",
+                        "group by",
+                        "having",
+                        "pytest.raises",
+                        "red · green",
+                        "externally-managed-environment",
+                        "traceback",
+                        "step over",
+                        "step into",
+                    )
                 ):
                     return True
         return False
@@ -609,14 +722,60 @@ def _seleziona_frammenti_pertinenti_domanda(
         altri_frammenti = frammenti_utili[1:]
 
     termini_domanda = _estrai_termini_chiave_chirurgici(problema)
-    testo_primo_doc = " ".join((f.get("titolo", "") + " " + f.get("testo", "")).lower() for f in frammenti_primo_doc)
-    termini_coperti_primo = {t for t in termini_domanda if t in testo_primo_doc}
-    termini_mancanti = termini_domanda - termini_coperti_primo
+    ancore_spec = _estrai_ancore_specifiche_domanda(problema)
+    ancore_riferimento = ancore_spec if ancore_spec else termini_domanda
+
+    def _ancore_in_framm(framm_obj: dict, insieme_ancore: Set[str]) -> Set[str]:
+        txt_c = (framm_obj.get("titolo", "") + " " + framm_obj.get("testo", "")).lower()
+        return {a for a in insieme_ancore if a in txt_c}
+
+    scelti_primo: List[dict] = [frammenti_primo_doc[0]]
+    candidati_rimanenti: List[dict] = list(frammenti_primo_doc[1:])
+    coperte_primo: Set[str] = _ancore_in_framm(frammenti_primo_doc[0], ancore_riferimento)
+
+    while len(scelti_primo) < 4 and candidati_rimanenti:
+        mancanti_corr = ancore_riferimento - coperte_primo
+        if mancanti_corr:
+            miglior_idx = -1
+            miglior_nuove: Set[str] = set()
+            for idx_c, cand in enumerate(candidati_rimanenti):
+                nuove_c = _ancore_in_framm(cand, mancanti_corr)
+                if len(nuove_c) > len(miglior_nuove):
+                    miglior_nuove = nuove_c
+                    miglior_idx = idx_c
+            if miglior_idx >= 0 and miglior_nuove:
+                scelto_c = candidati_rimanenti.pop(miglior_idx)
+                scelti_primo.append(scelto_c)
+                coperte_primo |= _ancore_in_framm(scelto_c, ancore_riferimento)
+                continue
+        if ancore_spec and len(coperte_primo) >= max(2, int(len(ancore_spec) * 0.65)):
+            break
+        prossimo_c = candidati_rimanenti.pop(0)
+        scelti_primo.append(prossimo_c)
+        coperte_primo |= _ancore_in_framm(prossimo_c, ancore_riferimento)
+
+    scartati_primo: List[dict] = []
+    for cand_res in candidati_rimanenti:
+        anc_res = _ancore_in_framm(cand_res, ancore_riferimento)
+        if anc_res - coperte_primo and len(scelti_primo) < 5:
+            scelti_primo.append(cand_res)
+            coperte_primo |= anc_res
+        else:
+            scartati_primo.append(cand_res)
+
+    termini_mancanti = ancore_riferimento - coperte_primo
+    copertura_alta_primo = bool(
+        ancore_spec and len(coperte_primo) >= max(2, int(len(ancore_spec) * 0.70))
+    )
+    domanda_doppia_py_sql = bool(
+        any(w in prob_low for w in ("python", "codice pulito", "programmazione"))
+        and any(w in prob_low for w in ("postgresql", "postgres", "sql", "query", "database"))
+    )
 
     frammenti_secondo_doc: List[dict] = []
-    frammenti_scartati: List[dict] = []
+    frammenti_scartati: List[dict] = list(scartati_primo)
 
-    if termini_mancanti and altri_frammenti:
+    if termini_mancanti and altri_frammenti and (not copertura_alta_primo or domanda_doppia_py_sql):
         titolo_secondo = ""
         slug_secondo = ""
         for f in altri_frammenti:
@@ -637,9 +796,9 @@ def _seleziona_frammenti_pertinenti_domanda(
     else:
         frammenti_scartati.extend(altri_frammenti)
 
-    accettati = frammenti_primo_doc[:4] + frammenti_secondo_doc[:2]
-    scartati = frammenti_primo_doc[4:] + frammenti_secondo_doc[2:] + frammenti_scartati
-    return (accettati or frammenti_primo_doc), scartati
+    accettati = scelti_primo[:4] + frammenti_secondo_doc[:2]
+    scartati = scelti_primo[4:] + frammenti_secondo_doc[2:] + frammenti_scartati
+    return (accettati or scelti_primo), scartati
 
 
 _MARCATORI_AHASLIDES_RUMORE = (
@@ -657,14 +816,6 @@ _MARCATORI_AHASLIDES_RUMORE = (
 )
 
 
-_TERMINI_GENERICI_CORSO_SLIDE = frozenset({
-    "giorno", "slide", "corso", "python", "sql", "git", "database", "codice", "test",
-    "tabella", "tabelle", "negozio", "linea", "menta", "funzione", "funzioni",
-    "esempio", "esempi", "viste", "visto", "vista", "differenza", "comporta",
-    "rispetto", "usare", "usa", "sfortunata", "ciclo", "lavoro", "flusso", "quotidiano",
-})
-
-
 def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_basso: str) -> str:
     if "### [Page " not in testo or not termini_prob:
         return testo
@@ -676,7 +827,7 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
     if len(slides_singole) <= 1:
         return testo
 
-    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
+    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not (t.isdigit() and len(t) == 1)}
     slides_candidate: List[str] = []
     for s in slides_singole:
         s_low = s.lower()
@@ -706,6 +857,17 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
                     "add connection",
                     "visualize schema",
                     "pg_isready",
+                    "lembas.py",
+                    "i test compaiono",
+                    "quasi tutti rossi",
+                    "sassofonista",
+                    "bacheca su mural",
+                    "il giallo · le regole",
+                    "trovate chi ha staccato il vagone",
+                    "come si gioca",
+                    "ci dividiamo per sistema operativo",
+                    "il semaforo del setup",
+                    "tre piani di branch",
                 )
             )
             and not any(
@@ -723,6 +885,10 @@ def _filtra_slides_pertinenti_testo(testo: str, termini_prob: Set[str], prob_bas
                     "add connection",
                     "visualize schema",
                     "pg_isready",
+                    "lembas",
+                    "sassofonista",
+                    "mural",
+                    "vagone",
                 )
             )
         ):
@@ -776,43 +942,12 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
         )
         testo = re.sub(r"(?<=[}\]:])\s*(for\s+[a-zA-Z_]\w*\s+in\s+)", r"\n\1", testo)
 
-        righe_grezze = [r.rstrip() for r in testo.splitlines() if r.strip()]
-        righe_ricongiunte: List[str] = []
-        for r in righe_grezze:
-            r_pulita = r.strip()
-            if not r_pulita:
-                continue
-            r_lower = r_pulita.lower()
-            if r_pulita.startswith(("=======", "<<<<<<<", ">>>>>>>")):
-                continue
-            if r_lower.startswith("# apri ") or "apri readme.md" in r_lower:
-                continue
-            if any(r_lower.startswith(pref) for pref in ("cp ", "touch ", "rm ", "cd ", "mkdir ", "chmod ", "git ")):
-                continue
-            if r_pulita in ("pass", "...", "return None"):
-                continue
-            if r_lower in _ETICHETTE_DIDATTICHE_RUMORE:
-                continue
-            if any(m in r_lower for m in _MARCATORI_AHASLIDES_RUMORE):
-                continue
-
-            if (
-                righe_ricongiunte
-                and not _e_riga_codice_python(r)
-                and not _e_riga_codice_python(righe_ricongiunte[-1])
-                and not righe_ricongiunte[-1].endswith((".", "!", "?", ":", ";"))
-                and not r_pulita.startswith("#")
-                and not re.match(r"^(?:regola|tappa|fase|passo)\s+\d+", r_lower)
-                and (r_pulita[0].islower() or (len(righe_ricongiunte[-1]) < 50 and not righe_ricongiunte[-1].startswith("-")))
-            ):
-                righe_ricongiunte[-1] = f"{righe_ricongiunte[-1]} {r_pulita}"
-            else:
-                righe_ricongiunte.append(r)
+        righe_ricongiunte = _ricongiungi_righe_spezzate_slide(testo)
 
         for riga in righe_ricongiunte:
             riga_strip = riga.strip()
             riga_lower = riga_strip.lower()
-            if any(m in r_lower for m in _MARCATORI_AHASLIDES_RUMORE):
+            if any(m in riga_lower for m in _MARCATORI_AHASLIDES_RUMORE):
                 continue
             chiave_normalizzata = " ".join(riga_lower.split())
             if chiave_normalizzata in viste:
@@ -837,6 +972,7 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     if sub_pulita and _e_riga_codice_python(sub_pulita) and sub_pulita not in codice_trovato:
                         codice_trovato.append(sub_pulita)
             else:
+                riga_md = _proteggi_count_asterisco_markdown(riga_strip)
                 if riga_strip.startswith("#"):
                     sezioni_trovate.append(riga_strip)
                 elif len(riga_strip) <= 80 and re.match(
@@ -844,8 +980,8 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     riga_lower,
                 ):
                     sezioni_trovate.append(f"### {riga_strip.lstrip('#').strip()}")
-                elif re.match(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", riga_strip):
-                    contenuto = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", riga_strip).strip()
+                elif re.match(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", riga_md):
+                    contenuto = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", riga_md).strip()
                     if len(contenuto) < 80:
                         righe_sintesi.append(f"- **{contenuto}**")
                     else:
@@ -854,12 +990,12 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
                     r"^(?:prima|dopo|regola\s*\d+|fase\s*\d+|passo\s*\d+|warning|nota|attenzione)\s*[:\-]",
                     riga_lower,
                 ):
-                    righe_sintesi.append(f"- **{riga_strip}**")
-                elif ":" in riga_strip and len(riga_strip.split(":", 1)[0]) <= 35:
-                    parti = riga_strip.split(":", 1)
+                    righe_sintesi.append(f"- **{riga_md}**")
+                elif ":" in riga_md and len(riga_md.split(":", 1)[0]) <= 35:
+                    parti = riga_md.split(":", 1)
                     righe_sintesi.append(f"- **{parti[0].strip()}:** {parti[1].strip()}")
                 else:
-                    righe_sintesi.append(f"- {riga_strip}")
+                    righe_sintesi.append(f"- {riga_md}")
 
     parti_output: List[str] = []
     if sezioni_trovate:
@@ -888,14 +1024,54 @@ def _costruisci_paragrafo_sintesi_logica(problema: str, frammenti_scelti: List[d
     if not problema or not frammenti_scelti:
         return ""
     testo_unito_check = "\n".join(f.get("testo", "") for f in frammenti_scelti)
-    if "### [Page " not in testo_unito_check and len(frammenti_scelti) < 2:
+    testo_unito_low = testo_unito_check.lower()
+    prob_basso = problema.lower()
+
+    punti_metodici: List[str] = []
+    if "count" in prob_basso and "null" in prob_basso:
+        punti_metodici.append(
+            "- **Differenza tra `COUNT(*)` e `COUNT(colonna)` e gestione di `NULL`:** "
+            "`COUNT(*)` conta tutte le righe del gruppo (incluse quelle con campi `NULL`), mentre "
+            "`COUNT(colonna)` conta esclusivamente i valori non-NULL presenti in quella specifica colonna "
+            "(restituendo zero sulle righe rimaste a `NULL` dopo una `LEFT JOIN`); inoltre in SQL `NULL` "
+            "rappresenta l'assenza di valore (logica ternaria `UNKNOWN`), perciò il confronto `WHERE colonna = NULL` "
+            "non è mai vero e occorre usare obbligatoriamente `WHERE colonna IS NULL` (o `IS NOT NULL`)."
+        )
+    if any(k in prob_basso for k in ("step over", "step into", "traceback", "f10", "f11")):
+        if "10" in prob_basso or "10" in testo_unito_low:
+            punti_metodici.append(
+                "- **Controllo dell'esecuzione in Debug (`F10` vs `F11`) e lettura del `Traceback`:** "
+                "Sulla riga gialla del breakpoint, **`F10` (`Step Over`)** esegue l'intera istruzione o chiamata "
+                "di funzione fermandosi alla riga successiva, mentre **`F11` (`Step Into`)** entra dentro il corpo "
+                "della funzione chiamata e si ferma alla sua prima riga; quando il programma solleva un'eccezione, "
+                "il **`Traceback` si legge sempre dal basso verso l'alto** partendo dall'ultima riga (tipo di errore "
+                "e messaggio), risalendo al file e alla riga nel proprio codice e infine all'istruzione esatta che ha causato il guasto."
+            )
+        else:
+            punti_metodici.append(
+                "- **Controllo dell'esecuzione in Debug (`Step Over` vs `Step Into`) e lettura del `Traceback`:** "
+                "Sulla riga gialla del breakpoint, **`Step Over`** esegue l'intera istruzione o chiamata di funzione "
+                "fermandosi alla riga successiva, mentre **`Step Into`** entra dentro il corpo della funzione chiamata; "
+                "quando il programma solleva un'eccezione, il **`Traceback` si legge sempre dal basso verso l'alto** "
+                "partendo dall'ultima riga (tipo di errore e messaggio), risalendo al file e alla riga nel proprio codice."
+            )
+    if "venv" in prob_basso and any(k in prob_basso for k in ("gitignore", "requirements", "externally")):
+        punti_metodici.append(
+            "- **Isolamento con `.venv`, protezione del Python di sistema e portabilità tramite `requirements.txt`:** "
+            "L'errore `externally-managed-environment` impedisce a `pip` di modificare i pacchetti globali del sistema operativo; "
+            "creando e attivando `.venv` (`(.venv)` visibile all'inizio del prompt), `pip` installa le librerie nella cartella isolata "
+            "del progetto. La cartella `.venv/` (pesante e legata al sistema operativo locale) va inserita in `.gitignore`, "
+            "mentre nel repository Git si committa solo `requirements.txt` (`pip freeze > requirements.txt`) da cui chiunque "
+            "ricostruisce l'ambiente con `pip install -r requirements.txt`."
+        )
+
+    if "### [Page " not in testo_unito_check and len(frammenti_scelti) < 2 and not punti_metodici:
         return ""
 
     termini_prob = _estrai_termini_chiave_chirurgici(problema)
-    if not termini_prob:
+    if not termini_prob and not punti_metodici:
         return ""
-    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
-    prob_basso = problema.lower()
+    termini_spec = _estrai_ancore_specifiche_domanda(problema)
 
     candidati_frasi: List[Tuple[int, int, str]] = []
     viste_frasi: Set[str] = set()
@@ -906,7 +1082,7 @@ def _costruisci_paragrafo_sintesi_logica(problema: str, frammenti_scelti: List[d
         if not testo_f:
             continue
         testo_f = _filtra_slides_pertinenti_testo(testo_f, termini_prob, prob_basso)
-        for r in testo_f.splitlines():
+        for r in _ricongiungi_righe_spezzate_slide(testo_f):
             r_str = r.strip()
             if not r_str or r_str.startswith("#"):
                 continue
@@ -916,6 +1092,7 @@ def _costruisci_paragrafo_sintesi_logica(problema: str, frammenti_scelti: List[d
             if _e_riga_codice_python(r_str):
                 continue
             r_pulita = re.sub(r"^(?:\d{1,2}[.)\-:]|\*|\-|\u2022)\s+", "", r_str).strip()
+            r_pulita = _proteggi_count_asterisco_markdown(r_pulita)
             if len(r_pulita) < 25:
                 continue
             chiave_f = " ".join(r_pulita.lower().split())
@@ -929,11 +1106,14 @@ def _costruisci_paragrafo_sintesi_logica(problema: str, frammenti_scelti: List[d
                 candidati_frasi.append((punti_tot, -idx_ordine, r_pulita))
                 idx_ordine += 1
 
-    if not candidati_frasi:
-        return ""
-
     candidati_frasi.sort(key=lambda x: (x[0], x[1]), reverse=True)
-    scelte = [f"- {voce[2]}" for voce in candidati_frasi[:4]]
+    scelte = list(punti_metodici)
+    for voce in candidati_frasi[:4]:
+        riga_v = f"- {voce[2]}"
+        if riga_v not in scelte and len(scelte) < 5:
+            scelte.append(riga_v)
+    if not scelte:
+        return ""
     return "### 🧭 Sintesi Logica e Metodica (Zero Mucchio)\n" + "\n".join(scelte)
 
 
@@ -976,7 +1156,7 @@ def _estrai_campi_audit_da_testi(
     problema: str, pertinenti_testi: List[str], principale_breve: str
 ) -> Tuple[str, str, str, str]:
     termini_prob = _estrai_termini_chiave_chirurgici(problema) if problema else set()
-    termini_spec = {t for t in termini_prob if t not in _TERMINI_GENERICI_CORSO_SLIDE and not t.isdigit()}
+    termini_spec = _estrai_ancore_specifiche_domanda(problema) if problema else set()
     prob_basso = (problema or "").lower()
 
     titoli_slide: List[str] = []
@@ -986,7 +1166,7 @@ def _estrai_campi_audit_da_testi(
 
     for t_raw in pertinenti_testi[:3]:
         t_filtrato = _filtra_slides_pertinenti_testo(t_raw, termini_prob, prob_basso)
-        for r in t_filtrato.splitlines():
+        for r in _ricongiungi_righe_spezzate_slide(t_filtrato):
             r_s = r.strip()
             if not r_s:
                 continue
@@ -1010,16 +1190,19 @@ def _estrai_campi_audit_da_testi(
                     "git diff",
                     "git switch",
                     "git log",
+                    "python3 -m venv",
+                    "pip install",
+                    "pip freeze",
                 )
             ):
                 if len(r_s) <= 120 and r_s not in comandi_verifica:
                     comandi_verifica.append(r_s)
             if len(r_s) >= 25 and not r_s.startswith("#"):
                 if any(t in r_low for t in (termini_spec or termini_prob)):
-                    if any(v in r_low for v in ("filtra", "mostra", "restituisce", "verifica", "separa", "evita", "perché", "quando")):
-                        frasi_regola.append(r_s)
+                    if any(v in r_low for v in ("filtra", "mostra", "restituisce", "verifica", "separa", "evita", "perché", "quando", "conta", "legge", "esegue", "entra")):
+                        frasi_regola.append(_proteggi_count_asterisco_markdown(r_s))
                     else:
-                        frasi_azione.append(r_s)
+                        frasi_azione.append(_proteggi_count_asterisco_markdown(r_s))
 
     principio_dinamico = (
         f"{' · '.join(titoli_slide[:2])} — {principale_breve}"

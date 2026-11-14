@@ -1929,17 +1929,89 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert "createdb" not in risp
 
     chiave_def = config._decodifica_chiave_cloud_default()
-    assert chiave_def.startswith("AQ.Ab8RN6KkqudHR") and chiave_def.endswith("ZkL2yixaRw") and len(chiave_def) == 53
+    assert chiave_def.startswith("AQ.Ab8RN6IYTB8HU") and chiave_def.endswith("CftRnvhF3-Eg") and len(chiave_def) == 53
+    assert config.risolvi_chiave_api(api_key="AQ.Ab8RN6KkqudHR_revocata", provider="gemini") == chiave_def
     assert risolutore_artigiano._e_riga_codice_python("raise dentro la funzione, try fuori") is False
     assert risolutore_artigiano._e_riga_codice_python("return non viene mai eseguito") is False
     assert risolutore_artigiano._e_riga_codice_python("verde = indizio") is False
     assert risolutore_artigiano._e_riga_codice_python("def dividi(totale, persone):") is True
     assert store_pgvector.normalizza_spazi_testo_pdf("if persone -= 0: HAVING COUNT(*) -= 3") == "if persone <= 0: HAVING COUNT(*) >= 3"
     assert store_pgvector.normalizza_spazi_testo_pdf("WHERE o.stato → 'annullato'") == "WHERE o.stato != 'annullato'"
+    assert store_pgvector.normalizza_spazi_testo_pdf("WHERE o.stato -> 'annullato'") == "WHERE o.stato != 'annullato'"
     assert (
         store_pgvector.normalizza_spazi_testo_pdf("assert media -= 6.67\nassert punti -= 30")
         == "assert media == 6.67\nassert punti == 30"
     )
+
+    righe_unite_test = risolutore_artigiano._ricongiungi_righe_spezzate_slide(
+        "Esegue la riga gialla e si ferma alla prossima. È quello\n"
+        "che userete di più.\n"
+        "Se la riga gialla chiama una funzione nostra, entra dentro e si\n"
+        "ferma lì.\n"
+        "Il prompt mostra (.venv) all'inizio della\n"
+        "riga per ricordartelo."
+    )
+    assert any("È quello che userete di più." in r for r in righe_unite_test)
+    assert any("entra dentro e si ferma lì." in r for r in righe_unite_test)
+    assert any("all'inizio della riga per ricordartelo." in r for r in righe_unite_test)
+    assert not any(r.endswith("È quello") for r in righe_unite_test)
+    assert not any(r.endswith("entra dentro e si") for r in righe_unite_test)
+
+    frammenti_debug_traceback = [
+        {
+            "titolo": "Giorno 04 – Caccia al bug.pptx.pdf",
+            "testo": "### [Page 23] BREAKPOINT · FERMARE IL TEMPO\nClicca a sinistra del numero di riga per il pallino rosso.",
+        },
+        {
+            "titolo": "Giorno 04 – Caccia al bug.pptx.pdf",
+            "testo": "### [Page 24] LA BARRA DEL DEBUG · QUATTRO TASTI\nF10 Step Over esegue la riga gialla e si ferma alla prossima.",
+        },
+        {
+            "titolo": "Giorno 04 – Caccia al bug.pptx.pdf",
+            "testo": "### [Page 25] F10 O F11 · LA DIFFERENZA\nF11 Step Into entra dentro la funzione chiamata e si ferma lì.",
+        },
+        {
+            "titolo": "Giorno 04 – Caccia al bug.pptx.pdf",
+            "testo": "### [Page 26] TORNATE AL VOSTRO LEMBAS.PY\nRiaprite il file e mettete un breakpoint.",
+        },
+        {
+            "titolo": "Giorno 04 – Caccia al bug.pptx.pdf",
+            "testo": "### [Page 38] QUANDO UN PROGRAMMA CRASHA\n### [Page 39] IL TRACEBACK SI LEGGE DAL BASSO\nPartite sempre dall'ultima riga: tipo di errore e messaggio.",
+        },
+    ]
+    domanda_f10_tb = (
+        "Durante una sessione di debug al Giorno 4, qual è la differenza tra F10 (Step Over) "
+        "e F11 (Step Into) sulla riga gialla, e perché il Traceback va letto partendo dall'ultima riga in basso?"
+    )
+    acc_tb, scart_tb = risolutore_artigiano._seleziona_frammenti_pertinenti_domanda(
+        domanda_f10_tb, frammenti_debug_traceback
+    )
+    testi_acc_tb = " ".join(f["testo"] for f in acc_tb)
+    testi_scart_tb = " ".join(f["testo"] for f in scart_tb)
+    assert "IL TRACEBACK SI LEGGE DAL BASSO" in testi_acc_tb
+    assert "IL TRACEBACK SI LEGGE DAL BASSO" not in testi_scart_tb
+
+    domanda_count_null = (
+        "Nelle query SQL del Giorno 5 con LEFT JOIN e GROUP BY, che differenza c'è tra COUNT(colonna) e COUNT(*), "
+        "e perché per trovare i valori assenti non funziona WHERE colonna = NULL ma serve WHERE colonna IS NULL?"
+    )
+    sintesi_cn = risolutore_artigiano._sintetizza_blocchi_in_markdown_pulito(
+        domanda_count_null,
+        [
+            {
+                "titolo": "Giorno 05 – Il giallo SQL.pptx.pdf",
+                "testo": (
+                    "### [Page 21] LEFT JOIN · CHI È A ZERO\n"
+                    "SELECT p.nome FROM prodotti p LEFT JOIN ordini o ON p.id = o.id WHERE o.id IS NULL;\n"
+                    "### [Page 22] AGGREGAZIONI · CONTARE E SOMMARE\n"
+                    "COUNT(*) conta le righe, COUNT(colonna) ignora i NULL."
+                ),
+            }
+        ],
+    )
+    assert "`COUNT(*)`" in sintesi_cn
+    assert "COUNT(colonna)" in sintesi_cn
+    assert "WHERE colonna = NULL" in sintesi_cn and "IS NULL" in sintesi_cn
 
     esito_pag = risolutore_artigiano.risolvi_da_artigiano(domanda, dominio="tecnico", max_caratteri_turno=180)
     assert esito_pag.get("in_sospeso") is True
