@@ -56,7 +56,7 @@ def _usa_vault_ram(radice_vault: Optional[Path] = None) -> bool:
     """Restituisce True se operiamo in modalita Web RAM effimera (Zero-Data-Retention), False se locale o test."""
     if radice_vault is not None:
         return False
-    return getattr(store_pgvector, "_POSTGRES_OFFLINE", True)
+    return True
 
 
 def _scrivi_file_vault(percorso_rel: str, contenuto: str, radice_vault: Optional[Path] = None) -> None:
