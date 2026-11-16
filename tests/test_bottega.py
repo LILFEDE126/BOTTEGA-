@@ -2281,11 +2281,12 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
         "### [Page 3]\n"
         + "\n".join(righe_v30_tutte[:100])
     )
-    audit_v30_rojo = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_vivi_100_parziale)
-    assert audit_v30_rojo["verdetto_semaforo"] == "ROJO"
-    assert audit_v30_rojo["certificabile"] is False
-    assert audit_v30_rojo["strato_l_osservazione"]["rate_mancanti"] == "101..120"
-    assert "0 anomalie" not in str(audit_v30_rojo["tabulato_audit_python"]).lower()
+    audit_v30_ambar = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_vivi_100_parziale)
+    assert audit_v30_ambar["verdetto_semaforo"] == "AMBAR"
+    assert audit_v30_ambar["certificabile"] is False
+    assert audit_v30_ambar["totale_anomalie"] == 0
+    assert audit_v30_ambar["strato_l_osservazione"]["rate_mancanti"] == "101..120"
+    assert audit_v30_ambar["strato_l_osservazione"]["stato_certificazione"] == "PIANO_COERENTE_OCR_PARZIALE_DA_COMPLETARE"
 
     assert hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
     assert hasattr(store_pgvector, "_raggruppa_intervalli_mancanti")
@@ -2389,6 +2390,36 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert audit_v32["totale_anomalie"] == 0
     assert audit_v32["verdetto_semaforo"] == "VERDE"
     assert "PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI" in str(audit_v32["tabulato_audit_python"])
+
+    testo_v34_distrattori_082_120 = (
+        "### [Page 1]\n"
+        "Numero rate: 120 rate mensili da 223,00 € | Montante: 26.760,00 € | TAN 5,30% | TAEG 8,66%\n"
+        "Interessi di mora massimi su esempio decumulo: 3.100,00 €\n"
+        "Importo erogato copertura massima garanzia esterna: 18.500,00 €\n"
+        "### [Page 3]\n"
+        + "\n".join(righe_v30_tutte[81:])
+        + "\n### [Page 8]\n"
+        "Spese di istruttoria: 600,00 € | Oneri fiscali / Imposta sostitutiva: 16,00 € | Subtotale spese fisse: 616,00 €\n"
+        "Polizza vita/impiego: 1.766,16 € | Costi incasso rate: 241,20 € | Totale interessi contrattuali: 6.023,13 €\n"
+        "### [Page 9]\n"
+        "Saldo netto erogato / Importo totale del credito al cliente: 18.113,51 €\n"
+    )
+    audit_v34 = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_v34_distrattori_082_120)
+    assert audit_v34["strato_l_osservazione"]["n_rate_estratte"] == 39
+    assert audit_v34["strato_l_osservazione"]["capitale_finanziato"] == "20736.87"
+    assert audit_v34["strato_l_osservazione"]["interessi_totali_contrattuali"] == "6023.13"
+    assert audit_v34["strato_l_osservazione"]["netto_ricavo"] == "18113.51"
+    assert audit_v34["strato_l_osservazione"]["costi_accessori_trattenuti"] == "2623.36"
+    assert audit_v34["strato_l_osservazione"]["riconciliazione_costi_ok"] is True
+    assert audit_v34["strato_a_quadrature"]["rata_francese_teorica"] == "223.00"
+    assert audit_v34["strato_d_ricalcolo_taeg_tan"]["tan_ricalcolato_pct"] == "5.30"
+    assert Decimal("8.65") <= Decimal(str(audit_v34["strato_d_ricalcolo_taeg_tan"]["taeg_ricalcolato_pct"])) <= Decimal("8.68")
+    assert audit_v34["totale_anomalie"] == 0
+    assert audit_v34["verdetto_semaforo"] == "AMBAR"
+    assert audit_v34["certificabile"] is False
+    assert audit_v34["strato_l_osservazione"]["rate_mancanti"] == "1..81"
+    assert audit_v34["strato_a_quadrature"]["verifica_teorica_continuita"]["eseguita"] is True
+    assert audit_v34["strato_a_quadrature"]["verifica_teorica_continuita"]["continuita_ok"] is True
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 

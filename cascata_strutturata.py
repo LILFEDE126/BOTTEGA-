@@ -323,7 +323,7 @@ def esegui_audit_pdf_scansionato_python_first(
                 f"(`stato_taeg={strato_d.get('stato_taeg')}`) e non va considerato ricalcolato fino al reperimento di `C_netto`."
             )
         nota_onesta = ""
-        if not certificabile_py or verdetto_semaforo_py in ("ROJO", "GREY"):
+        if verdetto_semaforo_py in ("ROJO", "GREY"):
             rate_manc = strato_l.get("rate_mancanti", "N/D") if isinstance(strato_l, dict) else "N/D"
             rate_let = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
             n_tot = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
@@ -341,6 +341,23 @@ def esegui_audit_pdf_scansionato_python_first(
                 f"\n\n> ⚠️ **Vincolo di Onestà Epistemica (`{verdetto_semaforo_py}` · `{audit_py.get('stato_certificazione')}`):** "
                 f"Estratte **{rate_let} rate su {n_tot}** (rate mancanti: **`{rate_manc}`**, anomalie rilevate: **`{totale_anomalie_py}`**). "
                 f"Impossibile certificare o escludere vizi sull'intero piano."
+            )
+        elif verdetto_semaforo_py == "AMBAR" and not certificabile_py:
+            rate_manc = strato_l.get("rate_mancanti", "N/D") if isinstance(strato_l, dict) else "N/D"
+            rate_let = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
+            n_tot = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
+            if any(
+                frase_vietata in verdetto_testo.lower()
+                for frase_vietata in ("intero piano corretto", "privo di vizi sull'intero")
+            ):
+                verdetto_testo = (
+                    f"🟡 AMBAR (PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; "
+                    f"DA COMPLETARE ESTRAZIONE OCR RATE {rate_manc}): lette da OCR {rate_let} rate su {n_tot}, `0` anomalie."
+                )
+            nota_onesta = (
+                f"\n\n> 🟡 **Onestà Epistemica (`AMBAR` · `{audit_py.get('stato_certificazione')}`):** "
+                f"Lette da OCR **{rate_let} rate su {n_tot}** (`0` anomalie rilevate sulle rate visibili; "
+                f"da completare estrazione OCR per le rate `{rate_manc}`)."
             )
         valutazione_md = (
             "### 🧠 Valutazione Tecnica Forense (LLM vincolato al Tabulato Python `Decimal`)\n\n"
@@ -362,7 +379,16 @@ def esegui_audit_pdf_scansionato_python_first(
                 + (f" {nota_cong_fb}" if nota_cong_fb else "")
             )
         elif verdetto_semaforo_py == "AMBAR":
-            verdetto_fb = f"Verdetto `AMBAR` (`{audit_py.get('stato_certificazione')}`): piano completo al 100% con minimi arrotondamenti."
+            if completo_fb:
+                verdetto_fb = f"Verdetto `AMBAR` (`{audit_py.get('stato_certificazione')}`): piano completo al 100% con minimi arrotondamenti."
+            else:
+                rate_let_fb = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
+                n_tot_fb = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
+                verdetto_fb = (
+                    f"🟡 **AMBAR — PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; "
+                    f"DA COMPLETARE ESTRAZIONE OCR RATE `[{rate_manc_fb}]`** "
+                    f"(`{audit_py.get('stato_certificazione')}` · Lette da OCR `{rate_let_fb}/{n_tot_fb}` · `0` anomalie)."
+                )
         elif not completo_fb:
             verdetto_fb = f"IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI (`{verdetto_semaforo_py}`): tabella incompleta (rate mancanti nella scansione: `{rate_manc_fb}`)."
         else:

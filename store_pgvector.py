@@ -1058,42 +1058,62 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
                     if e_pag_piano and target_rate_pag >= 20 and len(rate_dopo_vis) < target_rate_pag:
                         try:
                             bmp_hi = pagina.render(scale=3.0)
-                            png_hi_full = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 1.0)
-                            png_hi_b1 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 0.42)
-                            png_hi_b2 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.28, 0.72)
-                            png_hi_b3 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.58, 1.0)
-                            rate_mancanti_pag = [
-                                k_f for k_f in range(1, target_rate_pag + 1) if k_f not in rate_dopo_vis
+                            terzo_n = max(1, target_rate_pag // 3)
+                            due_terzi_n = max(terzo_n + 1, (2 * target_rate_pag) // 3)
+                            strisce_verticali = [
+                                ("Sinistra", 0.00, 0.36, 1, terzo_n),
+                                ("Centrale", 0.32, 0.68, terzo_n + 1, due_terzi_n),
+                                ("Destra", 0.64, 1.00, due_terzi_n + 1, target_rate_pag),
                             ]
-                            blocchi_mancanti = _raggruppa_intervalli_mancanti(rate_mancanti_pag, max_blocco=30)
+                            for nome_col, x0_col, x1_col, c_start, c_end in strisce_verticali:
+                                mancanti_col = [k_c for k_c in range(c_start, c_end + 1) if k_c not in rate_dopo_vis]
+                                if not mancanti_col:
+                                    continue
+                                png_col = _codifica_bitmap_ritaglio_in_png(bmp_hi, x0_col, x1_col)
+                                if not png_col:
+                                    continue
+                                parti_col: List[Dict[str, Any]] = [
+                                    {"text": f"Striscia verticale {nome_col} di Pagina {num_p} (scale=3.0):"},
+                                    {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_col).decode("ascii")}},
+                                    {
+                                        "text": (
+                                            f"Trascrivi ESCLUSIVAMENTE e INTEGRALMENTE tutte le righe visibili in questa colonna {nome_col} "
+                                            f"(attese approssimativamente dalla Rata {c_start} alla Rata {c_end}) nel formato: "
+                                            f"| Rata | Scadenza | Quota Interessi | Quota Capitale | Importo Rata | Capitale Residuo | Debito Residuo |. "
+                                            f"Riporta OGNI singola riga senza riassumere e senza scrivere '...'."
+                                        )
+                                    },
+                                ]
+                                txt_col = _invia_parti_multimodali_gemini_ocr(parti_col, chiavi_ocr, modelli_ocr)
+                                if txt_col:
+                                    txt_col_norm = normalizza_spazi_testo_pdf(txt_col).strip()
+                                    testo_finale_p = f"{testo_finale_p}\n{txt_col_norm}"
+                                    rate_dopo_vis.update(_estrai_numeri_rata_presenti(txt_col_norm))
 
-                            for b_start, b_end in blocchi_mancanti:
-                                parti_fascia: List[Dict[str, Any]] = []
-                                if png_hi_full:
-                                    parti_fascia.append({"text": f"Pagina {num_p} completa a scale=3.0 (blocco rate {b_start}..{b_end}):"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_full).decode("ascii")}})
-                                if png_hi_b1:
-                                    parti_fascia.append({"text": f"Banda 1 (sinistra) Pagina {num_p}:"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b1).decode("ascii")}})
-                                if png_hi_b2:
-                                    parti_fascia.append({"text": f"Banda 2 (centrale) Pagina {num_p}:"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b2).decode("ascii")}})
-                                if png_hi_b3:
-                                    parti_fascia.append({"text": f"Banda 3 (destra) Pagina {num_p}:"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b3).decode("ascii")}})
-                                parti_fascia.append({
-                                    "text": (
-                                        f"Trascrivi ESCLUSIVAMENTE e INTEGRALMENTE le righe dalla Rata {b_start} alla Rata {b_end} "
-                                        f"della tabella del piano di ammortamento in questa pagina, riportando per ogni singola rata "
-                                        f"da {b_start} a {b_end}: Numero Rata | Scadenza | Quota Interessi | Quota Capitale | Importo Rata | "
-                                        f"Capitale Residuo | Debito Residuo. Non saltare nessuna riga e non scrivere '...'."
-                                    )
-                                })
-                                txt_fascia = _invia_parti_multimodali_gemini_ocr(parti_fascia, chiavi_ocr, modelli_ocr)
-                                if txt_fascia:
-                                    txt_fascia_norm = normalizza_spazi_testo_pdf(txt_fascia).strip()
-                                    testo_finale_p = f"{testo_finale_p}\n{txt_fascia_norm}"
-                                    rate_dopo_vis.update(_estrai_numeri_rata_presenti(txt_fascia_norm))
+                            if len(rate_dopo_vis) < target_rate_pag:
+                                png_hi_full = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 1.0)
+                                rate_mancanti_pag = [
+                                    k_f for k_f in range(1, target_rate_pag + 1) if k_f not in rate_dopo_vis
+                                ]
+                                blocchi_mancanti = _raggruppa_intervalli_mancanti(rate_mancanti_pag, max_blocco=30)
+                                for b_start, b_end in blocchi_mancanti:
+                                    if not png_hi_full:
+                                        break
+                                    parti_fascia: List[Dict[str, Any]] = [
+                                        {"text": f"Pagina {num_p} completa (focus rate {b_start}..{b_end}):"},
+                                        {"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_full).decode("ascii")}},
+                                        {
+                                            "text": (
+                                                f"Trascrivi ESCLUSIVAMENTE e INTEGRALMENTE le righe dalla Rata {b_start} alla Rata {b_end} "
+                                                f"nel formato: | Rata | Scadenza | Quota Interessi | Quota Capitale | Importo Rata | Capitale Residuo | Debito Residuo |."
+                                            )
+                                        },
+                                    ]
+                                    txt_fascia = _invia_parti_multimodali_gemini_ocr(parti_fascia, chiavi_ocr, modelli_ocr)
+                                    if txt_fascia:
+                                        txt_fascia_norm = normalizza_spazi_testo_pdf(txt_fascia).strip()
+                                        testo_finale_p = f"{testo_finale_p}\n{txt_fascia_norm}"
+                                        rate_dopo_vis.update(_estrai_numeri_rata_presenti(txt_fascia_norm))
                         except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
                             pass
 
