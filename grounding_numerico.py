@@ -944,9 +944,116 @@ def _auto_allinea_colonne_ammortamento(
             "debito_residuo": deb_res_v,
             "ha_capitale_residuo": ha_cap_res,
             "ha_debito_residuo": ha_deb_res,
+            "riallineata_ocr": False,
         }
 
     return righe_out, criterio_allineamento
+
+
+def _riallinea_colonne_riga_per_riga(
+    righe_normalizzate: Dict[int, Dict[str, object]],
+    c_fin_stima: Optional[Decimal],
+    i_m_stima: Optional[Decimal],
+    numero_rate_atteso: int,
+) -> List[str]:
+    """FIX 2 (v32): Rileva e riallinea eventuali inversioni OCR locali su singole righe (es. Rata 97)
+    valutando prossimita' all'interesse teorico, discesa del capitale residuo e continuita' monotona."""
+    chiavi_ord = sorted(righe_normalizzate.keys())
+    log_riallineamenti: List[str] = []
+    if len(chiavi_ord) < 2:
+        return log_riallineamenti
+
+    for idx_pos, k in enumerate(chiavi_ord):
+        info_k = righe_normalizzate[k]
+        qc = Decimal(str(info_k["quota_capitale"]))
+        qi = Decimal(str(info_k["quota_interessi"]))
+        r_v = Decimal(str(info_k["importo_rata"]))
+        cap_res = Decimal(str(info_k["capitale_residuo"]))
+        ha_res = bool(info_k["ha_capitale_residuo"])
+
+        if qc == qi or abs((qc + qi) - r_v) > Decimal("0.10"):
+            continue
+
+        k_prev = chiavi_ord[idx_pos - 1] if idx_pos > 0 else None
+        k_next = chiavi_ord[idx_pos + 1] if idx_pos + 1 < len(chiavi_ord) else None
+
+        costo_dir = Decimal("0.00")
+        costo_inv = Decimal("0.00")
+        segnali_validi = 0
+
+        if i_m_stima is not None and i_m_stima > Decimal("0"):
+            d_prec_dir: Optional[Decimal] = None
+            d_prec_inv: Optional[Decimal] = None
+            if k == 1 and c_fin_stima is not None and c_fin_stima > Decimal("0"):
+                d_prec_dir = c_fin_stima
+                d_prec_inv = c_fin_stima
+            elif k_prev == k - 1 and righe_normalizzate[k_prev]["ha_capitale_residuo"]:
+                d_prec_k = Decimal(str(righe_normalizzate[k_prev]["capitale_residuo"]))
+                d_prec_dir = d_prec_k
+                d_prec_inv = d_prec_k
+            elif ha_res:
+                d_prec_dir = cap_res + qc
+                d_prec_inv = cap_res + qi
+
+            if d_prec_dir is not None and d_prec_inv is not None:
+                costo_dir += abs(qi - q2(d_prec_dir * i_m_stima)) * Decimal("2")
+                costo_inv += abs(qc - q2(d_prec_inv * i_m_stima)) * Decimal("2")
+                segnali_validi += 1
+
+        if ha_res and k_prev == k - 1 and righe_normalizzate[k_prev]["ha_capitale_residuo"]:
+            d_prev_k = Decimal(str(righe_normalizzate[k_prev]["capitale_residuo"]))
+            drop_res = d_prev_k - cap_res
+            costo_dir += abs(drop_res - qc) * Decimal("3")
+            costo_inv += abs(drop_res - qi) * Decimal("3")
+            segnali_validi += 1
+
+        rif_cap_vicini: List[Decimal] = []
+        rif_int_vicini: List[Decimal] = []
+        if k_prev is not None and (k - k_prev) <= 3:
+            rif_cap_vicini.append(Decimal(str(righe_normalizzate[k_prev]["quota_capitale"])))
+            rif_int_vicini.append(Decimal(str(righe_normalizzate[k_prev]["quota_interessi"])))
+        if k_next is not None and (k_next - k) <= 3:
+            rif_cap_vicini.append(Decimal(str(righe_normalizzate[k_next]["quota_capitale"])))
+            rif_int_vicini.append(Decimal(str(righe_normalizzate[k_next]["quota_interessi"])))
+
+        if rif_cap_vicini:
+            med_cap = sum(rif_cap_vicini, Decimal("0")) / Decimal(len(rif_cap_vicini))
+            med_int = sum(rif_int_vicini, Decimal("0")) / Decimal(len(rif_int_vicini))
+            costo_dir += abs(qc - med_cap) + abs(qi - med_int)
+            costo_inv += abs(qi - med_cap) + abs(qc - med_int)
+            segnali_validi += 1
+
+        if segnali_validi >= 1 and costo_inv + Decimal("1.00") < costo_dir:
+            nuovo_q_cap, nuovo_q_int = qi, qc
+            info_k["quota_capitale"] = nuovo_q_cap
+            info_k["quota_interessi"] = nuovo_q_int
+            info_k["riallineata_ocr"] = True
+            log_riallineamenti.append(
+                f"Riallineata colonna invertita dall'OCR sulla Rata {k} "
+                f"(Q_cap={nuovo_q_cap} €, Q_int={nuovo_q_int} €)"
+            )
+
+    return log_riallineamenti
+
+
+def _estrai_voci_costi_accessori(testo_sorgente: str) -> List[Tuple[str, Decimal]]:
+    pattern_voci = [
+        ("Spese di istruttoria", r"(?:spese\s+(?:di\s+)?istruttoria|istruttoria)[^0-9\n]{0,60}?(\d{1,3}(?:\.\d{3})*[.,]\d{2})\b"),
+        ("Commissioni / Intermediazione", r"(?:commissioni(?:\s+(?:bancarie|di\s+intermediazione|di\s+distribuzione|di\s+attivazione|finanziarie))?|provvigioni)[^0-9\n]{0,60}?(\d{1,3}(?:\.\d{3})*[.,]\d{2})\b"),
+        ("Oneri fiscali / Imposta", r"(?:oneri\s+fiscali|imposta\s+sostitutiva|imposta\s+di\s+bollo|bolli)[^0-9\n]{0,60}?(\d{1,3}(?:\.\d{3})*[.,]\d{2})\b"),
+        ("Polizza / Premi assicurativi", r"(?:polizza(?:\s+(?:vita|impiego|rischio|assicurativa))?|premi\s+assicurativi|assicurazione)[^0-9\n]{0,60}?(\d{1,3}(?:\.\d{3})*[.,]\d{2})\b"),
+    ]
+    trovate: List[Tuple[str, Decimal]] = []
+    importi_visti: set[Decimal] = set()
+    for etichetta, pat_v in pattern_voci:
+        for m_v in re.finditer(pat_v, testo_sorgente, flags=re.IGNORECASE):
+            val_v = _converti_stringa_in_decimal_audit(m_v.group(1))
+            if val_v is not None and Decimal("0.00") < val_v < Decimal("20000.00"):
+                v_q = q2(val_v)
+                if v_q not in importi_visti:
+                    importi_visti.add(v_q)
+                    trovate.append((etichetta, v_q))
+    return trovate
 
 
 def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, object]:
@@ -1017,15 +1124,26 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
 
     pattern_c_fin = [
         r"CAPITALE_FINANZIATO\s*[:=]\s*(?:euro|eur|€)?\s*(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{4,6}[.,]\d{2})",
-        r"(?:capitale\s+(?:finanziato|lordo|iniziale|mutuato)|importo\s+finanziato(?:\s+lordo)?|somma\s+finanziata)[^0-9]{0,160}?(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{4,6}[.,]\d{2})",
+        r"(?:capitale\s+(?:finanziato|lordo|iniziale|mutuato)|importo\s+finanziato(?:\s+lordo)?|somma\s+finanziata)[^0-9]{0,90}?(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{4,6}[.,]\d{2})",
     ]
-    capitale_finanziato_esplicito = _cerca_parametro_dec(testo_costi_liq, pattern_c_fin) or _cerca_parametro_dec(testo, pattern_c_fin)
+    capitale_finanziato_esplicito = _cerca_parametro_dec(
+        testo_costi_liq,
+        pattern_c_fin,
+        vieta_parola_intermedia=r"(?:importo\s+totale\s+del\s+credito|netto\s+ricavo|saldo\s+netto|netto\s+erogato|somma\s+netta)",
+    ) or _cerca_parametro_dec(
+        testo,
+        pattern_c_fin,
+        vieta_parola_intermedia=r"(?:importo\s+totale\s+del\s+credito|netto\s+ricavo|saldo\s+netto|netto\s+erogato|somma\s+netta)",
+    )
 
     pattern_netto = [
         r"NETTO_RICAVO_CREDITO\s*[:=]\s*(?:euro|eur|€)?\s*(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{4,6}[.,]\d{2})",
         r"(?:netto\s+ricavo|saldo\s+netto(?:\s+erogato)?|importo\s+totale\s+del\s+credito|importo\s+netto\s+erogato|importo\s+erogato|somma\s+netta(?:\s+erogata)?|erogato\s+netto|netto\s+al\s+cliente|erogazione\s+netta|totale\s+credito|valore\s+attuale(?:\s+netto)?)[^0-9]{0,200}?(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{4,6}[.,]\d{2})",
     ]
     netto_ricavo_esplicito = _cerca_parametro_dec(testo, pattern_netto, min_val=Decimal("100.00"))
+
+    if capitale_finanziato_esplicito is not None and netto_ricavo_esplicito is not None and capitale_finanziato_esplicito == netto_ricavo_esplicito:
+        capitale_finanziato_esplicito = None
 
     pattern_interessi_tot = [
         r"INTERESSI_TOTALI\s*[:=]\s*(?:euro|eur|€)?\s*(\d{1,3}(?:\.\d{3})+[.,]\d{2}|\d{3,6}[.,]\d{2})",
@@ -1096,11 +1214,13 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
     )
     m_rif_iniz = montante_dichiarato or montante_calcolato_iniz
 
-    c_fin_stima = capitale_finanziato_esplicito
-    if totale_interessi_dich is not None and m_rif_iniz is not None:
+    c_fin_da_montante: Optional[Decimal] = None
+    if m_rif_iniz is not None and totale_interessi_dich is not None:
         cand_da_montante = q2(m_rif_iniz - totale_interessi_dich)
-        if cand_da_montante > Decimal("0.00") and c_fin_stima is None:
-            c_fin_stima = cand_da_montante
+        if cand_da_montante > Decimal("0.00"):
+            c_fin_da_montante = cand_da_montante
+
+    c_fin_stima = c_fin_da_montante or capitale_finanziato_esplicito
 
     righe_normalizzate, criterio_allineamento_colonne = _auto_allinea_colonne_ammortamento(
         righe_grezze,
@@ -1108,6 +1228,25 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         m_rif_iniz,
         totale_interessi_dich,
         tan_dichiarato,
+        numero_rate_atteso,
+    )
+
+    if c_fin_stima is None and 1 in righe_normalizzate and righe_normalizzate[1]["ha_capitale_residuo"]:
+        c_fin_stima = q2(
+            Decimal(str(righe_normalizzate[1]["capitale_residuo"]))
+            + Decimal(str(righe_normalizzate[1]["quota_capitale"]))
+        )
+
+    i_m_stima_loc: Optional[Decimal] = (
+        (tan_dichiarato / Decimal("1200")) if tan_dichiarato is not None else None
+    )
+    if i_m_stima_loc is None and c_fin_stima is not None and numero_rate_atteso > 0 and importo_rata is not None:
+        i_m_stima_loc = irr_bisection(c_fin_stima, [importo_rata] * numero_rate_atteso)
+
+    rate_riallineate_ocr = _riallinea_colonne_riga_per_riga(
+        righe_normalizzate,
+        c_fin_stima,
+        i_m_stima_loc,
         numero_rate_atteso,
     )
 
@@ -1135,14 +1274,9 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         sum((Decimal(str(righe_normalizzate[k]["importo_rata"])) for k in rate_lette_lista), Decimal("0.00"))
     )
 
-    c_fin = capitale_finanziato_esplicito
-    c_fin_da_montante: Optional[Decimal] = None
-    if m_rif_iniz is not None and totale_interessi_dich is not None:
-        cand_m_int = q2(m_rif_iniz - totale_interessi_dich)
-        if cand_m_int > Decimal("0.00"):
-            c_fin_da_montante = cand_m_int
-            if c_fin is None:
-                c_fin = c_fin_da_montante
+    c_fin: Optional[Decimal] = c_fin_da_montante
+    if c_fin is None and capitale_finanziato_esplicito is not None and capitale_finanziato_esplicito != netto_ricavo_esplicito:
+        c_fin = capitale_finanziato_esplicito
     if c_fin is None and 1 in righe_normalizzate and righe_normalizzate[1]["ha_capitale_residuo"]:
         c_fin = q2(
             Decimal(str(righe_normalizzate[1]["capitale_residuo"]))
@@ -1152,6 +1286,8 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         c_fin = somma_quote_capitale_lette
 
     c_netto = netto_ricavo_esplicito
+    if c_netto is not None and c_fin is not None and c_netto >= c_fin and c_fin_da_montante is None:
+        c_netto = None
     if c_netto is None and c_fin is not None and costi_upfront_taeg > Decimal("0.00"):
         cand_netto = q2(c_fin - costi_upfront_taeg)
         if cand_netto > Decimal("0.00"):
@@ -1175,6 +1311,17 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
                     break
             if c_netto is not None:
                 break
+
+    costi_accessori_trattenuti: Optional[Decimal] = None
+    if c_fin is not None and c_netto is not None and c_fin >= c_netto:
+        costi_accessori_trattenuti = q2(c_fin - c_netto)
+    voci_costi_trovate = _estrai_voci_costi_accessori(testo)
+    somma_voci_costi_trovate = q2(sum((v_acc for _, v_acc in voci_costi_trovate), Decimal("0.00")))
+    riconciliazione_costi_ok: Optional[bool] = (
+        abs(somma_voci_costi_trovate - costi_accessori_trattenuti) <= Decimal("1.00")
+        if (costi_accessori_trattenuti is not None and voci_costi_trovate)
+        else None
+    )
 
     if totale_interessi_dich is None and m_rif_iniz is not None and c_fin is not None and m_rif_iniz > c_fin:
         totale_interessi_stimato = q2(m_rif_iniz - c_fin)
@@ -1604,6 +1751,29 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
             f"ma mancano elementi essenziali per chiudere il ricalcolo TAN/TAEG (`{', '.join(voci_mancanti_cashflow) or 'TAN/TAEG dichiarati'}`)."
         )
 
+    analisi_rata_finale: Optional[Dict[str, str]] = None
+    if numero_rate_atteso > 0 and numero_rate_atteso in righe_normalizzate and i_m_primario is not None:
+        r_fin_obj = righe_normalizzate[numero_rate_atteso]
+        d_prec_fin_val, _ = _risolvi_d_precedente(numero_rate_atteso)
+        if d_prec_fin_val is not None and d_prec_fin_val > Decimal("0.00"):
+            q_cap_fin_val = Decimal(str(r_fin_obj["quota_capitale"]))
+            q_int_fin_val = Decimal(str(r_fin_obj["quota_interessi"]))
+            q_int_teor_fin_val = q2(d_prec_fin_val * i_m_primario)
+            delta_fin_val = q2(abs(q_int_fin_val - q_int_teor_fin_val))
+            analisi_rata_finale = {
+                "rata": str(numero_rate_atteso),
+                "d_precedente": str(d_prec_fin_val),
+                "q_cap_letta": str(q_cap_fin_val),
+                "q_int_letta": str(q_int_fin_val),
+                "q_int_teorico": str(q_int_teor_fin_val),
+                "scarto_euro": str(delta_fin_val),
+                "spiegazione": (
+                    f"Rata {numero_rate_atteso}: Q_int letta {q_int_fin_val} € su D({numero_rate_atteso - 1})={d_prec_fin_val} € "
+                    f"contro {q_int_teor_fin_val} € teorici (scarto {delta_fin_val} €). Verificare puntualmente se "
+                    f"conguaglio di chiusura della rata costante ({importo_rata} € vs rata teorica non arrotondata) o imprecisione OCR."
+                ),
+            }
+
     righe_tabella_serializzate = [
         {
             "rata": int(righe_normalizzate[k]["rata"]),
@@ -1613,6 +1783,7 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
             "quota_interessi": str(righe_normalizzate[k]["quota_interessi"]),
             "capitale_residuo": str(righe_normalizzate[k]["capitale_residuo"]),
             "debito_residuo": str(righe_normalizzate[k]["debito_residuo"]),
+            "riallineata_ocr": bool(righe_normalizzate[k].get("riallineata_ocr", False)),
         }
         for k in rate_lette_lista
     ]
@@ -1625,17 +1796,23 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "pagine_intestazione_contratto": [n for n, _ in classif["PAGINE_INTESTAZIONE_CONTRATTO"]],
         "pagine_riepilogo_taeg_presenti": ha_pag_8_9,
         "criterio_allineamento_colonne": criterio_allineamento_colonne,
+        "rate_riallineate_ocr": rate_riallineate_ocr,
         "convenzione_tan_adottata": convenzione_tan_adottata,
         "fonte_tan_controllo": fonte_tan_controllo,
         "numero_rate_totale": numero_rate_atteso,
         "n_rate_atteso": numero_rate_atteso,
         "n_rate_estratte": n_rate_estratte,
+        "n_rate_lette_da_ocr": n_rate_estratte,
         "importo_rata": str(importo_rata) if importo_rata is not None else None,
         "montante_dichiarato": str(montante_dichiarato) if montante_dichiarato is not None else None,
         "interessi_totali_contrattuali": str(totale_interessi_stimato) if totale_interessi_stimato is not None else None,
         "capitale_o_valore_attuale": str(c_fin) if c_fin is not None else None,
         "capitale_finanziato": str(c_fin) if c_fin is not None else None,
         "netto_ricavo": str(c_netto) if c_netto is not None else None,
+        "costi_accessori_trattenuti": str(costi_accessori_trattenuti) if costi_accessori_trattenuti is not None else None,
+        "voci_costi_accessori_trovate": [{"voce": et_v, "importo": str(val_v)} for et_v, val_v in voci_costi_trovate],
+        "somma_voci_costi_trovate": str(somma_voci_costi_trovate) if voci_costi_trovate else None,
+        "riconciliazione_costi_ok": riconciliazione_costi_ok,
         "tan_dichiarato": str(tan_dichiarato) if tan_dichiarato is not None else None,
         "taeg_dichiarato": str(taeg_dichiarato) if taeg_dichiarato is not None else None,
         "rate_lette_conteggio": n_rate_estratte,
@@ -1668,6 +1845,8 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "quadratura_rata_francese_ok": quadratura_rata_francese_ok,
         "fonte_tan_rata_francese": fonte_tan_controllo,
         "rate_verificate_ok": rate_verificate_ok,
+        "rate_riallineate_ocr": rate_riallineate_ocr,
+        "analisi_rata_finale": analisi_rata_finale,
         "somma_quote_capitale_lette": str(somma_quote_capitale_lette),
         "somma_quote_interessi_lette": str(somma_quote_interessi_lette),
         "somma_rate_lette": str(somma_rate_lette),
@@ -1701,6 +1880,8 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "montante_lordo_m": str(m_rif_iniz) if m_rif_iniz is not None else None,
         "capitale_finanziato_c_fin": str(c_fin) if c_fin is not None else None,
         "capitale_netto_taeg_c_netto": str(c_netto) if c_netto is not None else None,
+        "costi_accessori_trattenuti": str(costi_accessori_trattenuti) if costi_accessori_trattenuti is not None else None,
+        "riconciliazione_costi_ok": riconciliazione_costi_ok,
         "capitale_riferimento_irr": str(c_netto or c_fin) if (c_netto or c_fin) is not None else None,
         "tasso_periodale_mensile_pct": str(tasso_mensile_irr) if tasso_mensile_irr is not None else None,
         "tan_ricalcolato_pct": str(tan_ricalcolato) if tan_ricalcolato is not None else None,
@@ -1714,9 +1895,9 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
     }
 
     stato_completezza = (
-        f"COMPLETO AL 100% ({n_rate_estratte}/{numero_rate_atteso} rate verificate)"
+        f"COMPLETO AL 100% ({n_rate_estratte}/{numero_rate_atteso} rate lette da OCR)"
         if piano_completo_al_100
-        else f"PARZIALE — NON CERTIFICABILE ({n_rate_estratte}/{numero_rate_atteso} rate estratte: presenti [{strato_l['rate_lette_intervalli']}], MANCANTI [{elenco_mancanti_str}])"
+        else f"PARZIALE — NON CERTIFICABILE ({n_rate_estratte}/{numero_rate_atteso} rate lette da OCR: presenti [{strato_l['rate_lette_intervalli']}], MANCANTI [{elenco_mancanti_str}])"
     )
     blocco_avviso_md = f"\n> {messaggio_blocco_certificazione}\n" if messaggio_blocco_certificazione else ""
     avviso_cashflow = (
@@ -1724,6 +1905,26 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         if stato_taeg == "FLUSSO_CASSA_INCOMPLETO"
         else ""
     )
+
+    blocco_costi_md = ""
+    if costi_accessori_trattenuti is not None:
+        voci_str = " + ".join(f"{val_v} € ({et_v})" for et_v, val_v in voci_costi_trovate)
+        dettaglio_voci = (
+            f" · Voci estratte: {voci_str} = `{somma_voci_costi_trovate} €` (Riconciliazione: `{riconciliazione_costi_ok}`)"
+            if voci_costi_trovate
+            else ""
+        )
+        blocco_costi_md = (
+            f"- **Riconciliazione Costi Accessori Upfront ($C_{{fin}} - C_{{netto}}$):** `{costi_accessori_trattenuti} €`{dettaglio_voci}\n"
+        )
+
+    blocco_riallineamento_md = ""
+    if rate_riallineate_ocr:
+        blocco_riallineamento_md = "- **Riallineamenti OCR Riga per Riga:** `" + "` | `".join(rate_riallineate_ocr[:5]) + "`\n"
+
+    blocco_rata_finale_md = ""
+    if analisi_rata_finale and Decimal(analisi_rata_finale["scarto_euro"]) > TOL:
+        blocco_rata_finale_md = f"- **Analisi Specifica Rata Finale ({analisi_rata_finale['rata']}):** {analisi_rata_finale['spiegazione']}\n"
 
     blocco_mancanti_md = ""
     if n_rate_mancanti > 0:
@@ -1761,24 +1962,27 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "### 🧮 Tabulato Deterministico Python-First (11 Sezioni · `Decimal ROUND_HALF_UP`)\n"
         f"**Verdetto Semaforo Matematico:** {icona_verdetto} **`{verdetto_semaforo}`** (`{stato_certificazione}`)\n"
         f"{blocco_avviso_md}\n"
-        "#### 1. Strato L — Classificazione Pagine, Auto-Allineamento Colonne & Completezza\n"
+        "#### 1. Strato L — Classificazione Pagine, Basi $C_{{fin}}$ vs $C_{{netto}}$ & Completezza\n"
         f"- **Pagine Rilevate:** `{pagine_trovate}` | **Piano Ammortamento:** `{strato_l['pagine_piano_ammortamento']}` | **Costi/TAEG:** `{strato_l['pagine_riepilogo_costi_taeg']}` | **Liquidazione:** `{strato_l['pagine_prospetto_liquidazione']}`\n"
         f"- **Allineamento Colonne (`Q_int`/`Q_cap`) & Convenzione TAN:** `{criterio_allineamento_colonne}` · `{convenzione_tan_adottata}` (`{fonte_tan_controllo}`)\n"
-        f"- **Numero Rate Atteso:** `{numero_rate_atteso}` | **Importo Rata Contrattuale:** `{strato_l['importo_rata'] or 'N/D'} €`\n"
-        f"- **Montante Lordo ($M$):** `{strato_l['montante_dichiarato'] or str(m_rif_iniz) or 'N/D'} €` | **Capitale Finanziato da Prospetto ($C_{{fin}}$):** `{strato_l['capitale_finanziato'] or 'N/D'} €` | **Interessi Contrattuali:** `{strato_l['interessi_totali_contrattuali'] or 'N/D'} €` | **Netto Ricavo / Credito ($C_{{netto}}$):** `{strato_l['netto_ricavo'] or 'N/D'} €`\n"
+        f"- **Numero Rate Atteso:** `{numero_rate_atteso}` | **Importo Rata Contrattuale:** `{strato_l['importo_rata'] or 'N/D'} €` | **Rate Lette da OCR:** `{n_rate_estratte}/{numero_rate_atteso}`\n"
+        f"- **Montante Lordo ($M$):** `{strato_l['montante_dichiarato'] or str(m_rif_iniz) or 'N/D'} €` | **Capitale Finanziato Piano ($C_{{fin}}$ base TAN):** `{strato_l['capitale_finanziato'] or 'N/D'} €` | **Interessi Contrattuali:** `{strato_l['interessi_totali_contrattuali'] or 'N/D'} €` | **Netto Erogato ($C_{{netto}}$ base TAEG):** `{strato_l['netto_ricavo'] or 'N/D'} €`\n"
+        f"{blocco_costi_md}"
         f"- **TAN Dichiarato:** `{strato_l['tan_dichiarato'] or 'N/D'}%` | **TAEG Dichiarato:** `{strato_l['taeg_dichiarato'] or 'N/D'}%`\n"
         f"- **Stato Completezza (`{stato_certificazione}`):** **{stato_completezza}**\n\n"
-        "#### 2. Strato A — Quadrature Rata per Rata, Controllo Rate Mancanti & Formula Alla Francese\n"
+        "#### 2. Strato A — Quadrature Rata per Rata, Riallineamenti OCR & Formula Alla Francese\n"
         f"- **Verifica Montante ($n \\times R$):** `{montante_calcolato or 'N/D'} €` (Quadratura OK: `{quadratura_montante_ok}`)\n"
         f"- **Rata Teorica Alla Francese ({fonte_tan_controllo}):** `{rata_francese_teorica or 'N/D'} €` (vs Contrattuale `{strato_l['importo_rata'] or 'N/D'} €` · Delta: `{delta_rata_francese if delta_rata_francese is not None else 'N/D'} €` · `|Delta| <= 0.01`: `{quadratura_rata_francese_ok}`)\n"
         f"- **Rate Verificate ($Q_{{cap}} + Q_{{int}} = \\text{{Rata}}$):** `{rate_verificate_ok} / {n_rate_estratte}` | **$D(n) = 0$ ({numero_rate_atteso}):** {stato_dn_str}\n"
         f"- **Somma Rate / $Q_{{cap}}$ / $Q_{{int}}$ (su {n_rate_estratte} rate lette):** `{somma_rate_lette} €` | `{somma_quote_capitale_lette} €` (`OK: {quadratura_somma_quote_capitale_ok if piano_completo_al_100 else 'NON VERIFICATO'}`) | `{somma_quote_interessi_lette} €` (`OK: {quadratura_somma_quote_interessi_ok if piano_completo_al_100 else 'NON VERIFICATO'}`)\n"
+        f"{blocco_riallineamento_md}"
         f"{blocco_mancanti_md}"
         f"- **Totale Anomalie Aritmetiche Rilevate (`scarto max {scarto_massimo_tabella} €`):** `{totale_anomalie}` (`Somma rata: {len(righe_quadratura_errata)}`, `Capitale res.: {len(anomalie_capitale_residuo)}`, `Interessi {convenzione_tan_adottata}: {len(anomalie_interessi_primaria)}`, `Aggregate: {len(anomalie_aggregate)}`)\n"
+        f"{blocco_rata_finale_md}"
         f"{dettagli_anomalie_md}\n"
         "#### 3. Strato D — Ricalcolo NPV Separato $C_{{fin}}$ (TAN) vs $C_{{netto}}$ (TAEG)\n"
         f"{avviso_cashflow}"
-        f"- **TAN Ricalcolato da $C_{{fin}}$ (`{strato_d['capitale_finanziato_c_fin'] or 'N/D'} €`) [Coerenza Interna Prospetto]:** `{strato_d['tan_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['tan_dichiarato'] or 'N/D'}%` · OK: `{tan_verificato_ok}`)\n"
+        f"- **TAN Ricalcolato da $C_{{fin}}$ (`{strato_d['capitale_finanziato_c_fin'] or 'N/D'} €`):** `{strato_d['tan_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['tan_dichiarato'] or 'N/D'}%` · OK: `{tan_verificato_ok}`)\n"
         f"- **TAEG Ricalcolato da $C_{{netto}}$ (`{strato_d['capitale_netto_taeg_c_netto'] or 'N/D'} €`):** `{strato_d['taeg_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['taeg_dichiarato'] or 'N/D'}%` · OK: `{taeg_verificato_ok}`)\n"
     )
 

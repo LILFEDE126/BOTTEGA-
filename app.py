@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.16.v31"
+_VERSIONE_MODULI_THE = "2026.11.16.v32"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -48,6 +48,7 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(grounding_numerico, "esegui_audit_matematico_tabella_pdf")
         or not hasattr(grounding_numerico, "anonimizza_testo_finanziario")
         or not hasattr(grounding_numerico, "irr_bisection")
+        or not hasattr(grounding_numerico, "_riallinea_colonne_riga_per_riga")
         or not hasattr(store_pgvector, "estrai_pagine_complete_per_audit_tabellare")
         or not hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
         or not hasattr(store_pgvector, "_raggruppa_intervalli_mancanti")
@@ -1192,6 +1193,40 @@ with tab_codice:
     esito_4c_salvato = st.session_state.get("ultimo_esito_audit_4c")
     if isinstance(esito_4c_salvato, dict):
         st.markdown(str(esito_4c_salvato.get("tabulato_audit_python", "")))
+        audit_py_4c = esito_4c_salvato.get("audit_python") or {}
+        righe_estratte_4c = audit_py_4c.get("righe_tabella_normalizzate") or []
+        strato_l_4c = audit_py_4c.get("strato_l_osservazione") or {}
+        if isinstance(righe_estratte_4c, list) and righe_estratte_4c:
+            n_ocr_lette = strato_l_4c.get("n_rate_lette_da_ocr", len(righe_estratte_4c))
+            n_att_4c = strato_l_4c.get("n_rate_atteso", len(righe_estratte_4c))
+            riall_4c = strato_l_4c.get("rate_riallineate_ocr") or []
+            st.markdown(
+                f"#### 📋 Extracted Installment Schedule Snapshot (`{n_ocr_lette} / {n_att_4c}` OCR rows read"
+                + (f" · Realigned rows: `{len(riall_4c)}`" if riall_4c else "")
+                + ")"
+            )
+            righe_chiave: list = []
+            indici_inclusi: set = set()
+            for row_item in righe_estratte_4c[:5]:
+                r_num = row_item.get("rata")
+                if r_num not in indici_inclusi:
+                    righe_chiave.append(row_item)
+                    indici_inclusi.add(r_num)
+            for row_item in righe_estratte_4c:
+                if row_item.get("riallineata_ocr") and row_item.get("rata") not in indici_inclusi:
+                    righe_chiave.append(row_item)
+                    indici_inclusi.add(row_item.get("rata"))
+            for row_item in righe_estratte_4c[-5:]:
+                r_num = row_item.get("rata")
+                if r_num not in indici_inclusi:
+                    righe_chiave.append(row_item)
+                    indici_inclusi.add(r_num)
+            st.dataframe(righe_chiave, use_container_width=True, hide_index=True)
+            with st.expander(
+                f"Inspect All {len(righe_estratte_4c)} Extracted Installment Rows (OCR Verified & Row-Aligned)",
+                expanded=False,
+            ):
+                st.dataframe(righe_estratte_4c, use_container_width=True, hide_index=True)
         st.markdown("---")
         st.markdown(str(esito_4c_salvato.get("valutazione_llm_markdown", "")))
         st.download_button(

@@ -2326,6 +2326,64 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert audit_v31_62["totale_anomalie"] >= 1
     assert "0 anomalie" not in str(audit_v31_62["tabulato_audit_python"]).lower()
 
+    d_ex_v32 = Decimal("20736.87")
+    d_pr_v32 = d_ex_v32
+    righe_v32_rata97_inv = []
+    for k_v32 in range(1, 121):
+        d_ex_v32 = d_ex_v32 * (Decimal("1") + i_m_v30) - Decimal("223.00")
+        if k_v32 == 1:
+            d_rd_v32 = Decimal("20605.45")
+        elif k_v32 == 97:
+            d_rd_v32 = Decimal("4866.88")
+        elif k_v32 == 119:
+            d_rd_v32 = Decimal("221.29")
+        elif k_v32 == 120:
+            d_rd_v32 = Decimal("0.00")
+        else:
+            d_rd_v32 = d_ex_v32.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        qc_32 = d_pr_v32 - d_rd_v32
+        qi_32 = Decimal("223.00") - qc_32
+        deb_32 = Decimal("26760.00") - (Decimal(k_v32) * Decimal("223.00"))
+        if k_v32 == 97:
+            righe_v32_rata97_inv.append(
+                f"| 97 | 31/01/2034 | {qc_32:.2f} | {qi_32:.2f} | 223,00 | {d_rd_v32:.2f} | {deb_32:.2f} |"
+            )
+        else:
+            righe_v32_rata97_inv.append(
+                f"| {k_v32} | 31/01/2026 | {qi_32:.2f} | {qc_32:.2f} | 223,00 | {d_rd_v32:.2f} | {deb_32:.2f} |"
+            )
+        d_pr_v32 = d_rd_v32
+
+    testo_v32_scambio97 = (
+        "### [Page 1]\n"
+        "Numero rate: 120 rate mensili da 223,00 € | Montante: 26.760,00 € | Totale interessi: 6.023,13 €\n"
+        "Importo finanziato | Importo totale del credito: 18.113,51 €\n"
+        "TAN 5,30% | TAEG 8,66%\n"
+        "### [Page 3]\n"
+        "| Rata | Scadenza | Quota Interessi | Quota Capitale | Rata | Capitale Residuo | Debito Residuo |\n"
+        + "\n".join(righe_v32_rata97_inv)
+        + "\n### [Page 8]\n"
+        "Spese di istruttoria: 600,00 € | Imposta sostitutiva: 16,00 €\n"
+        "Commissioni di intermediazione: 1.766,16 € | Polizza assicurativa: 241,20 €\n"
+        "### [Page 9]\nSaldo netto erogato: 18.113,51 €"
+    )
+    audit_v32 = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_v32_scambio97)
+    assert Decimal(str(audit_v32["strato_l_osservazione"]["capitale_finanziato"])) == Decimal("20736.87")
+    assert Decimal(str(audit_v32["strato_l_osservazione"]["netto_ricavo"])) == Decimal("18113.51")
+    assert Decimal(str(audit_v32["strato_l_osservazione"]["costi_accessori_trattenuti"])) == Decimal("2623.36")
+    assert audit_v32["strato_l_osservazione"]["riconciliazione_costi_ok"] is True
+    assert Decimal(str(audit_v32["strato_a_quadrature"]["somma_quote_capitale_lette"])) == Decimal("20736.87")
+    assert Decimal(str(audit_v32["strato_a_quadrature"]["somma_quote_interessi_lette"])) == Decimal("6023.13")
+    assert audit_v32["strato_d_ricalcolo_taeg_tan"]["tan_ricalcolato_pct"] == "5.30"
+    assert audit_v32["strato_d_ricalcolo_taeg_tan"]["taeg_ricalcolato_pct"] == "8.66"
+    assert any("Rata 97" in log_r for log_r in audit_v32["strato_a_quadrature"]["rate_riallineate_ocr"])
+    riga_97_norm = [r for r in audit_v32["righe_tabella_normalizzate"] if r["rata"] == 97][0]
+    assert riga_97_norm["quota_capitale"] == "200.63"
+    assert riga_97_norm["quota_interessi"] == "22.37"
+    assert riga_97_norm["riallineata_ocr"] is True
+    assert audit_v32["strato_a_quadrature"]["analisi_rata_finale"]["q_int_letta"] == "1.71"
+    assert audit_v32["strato_a_quadrature"]["analisi_rata_finale"]["q_int_teorico"] == "0.98"
+
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
