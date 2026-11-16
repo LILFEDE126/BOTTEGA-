@@ -150,6 +150,18 @@ def _calcola_derivati_aritmetici_ammissibili(
                 diff = b - a
                 derivati.add(diff)
                 derivati.add(arrotonda_esatto_el_x8(diff, 2))
+            if b != 0:
+                try:
+                    quoz_ab = a / b
+                    derivati.add(arrotonda_esatto_el_x8(quoz_ab, 2))
+                except (InvalidOperation, ZeroDivisionError):
+                    pass
+            if a != 0:
+                try:
+                    quoz_ba = b / a
+                    derivati.add(arrotonda_esatto_el_x8(quoz_ba, 2))
+                except (InvalidOperation, ZeroDivisionError):
+                    pass
 
     return derivati
 

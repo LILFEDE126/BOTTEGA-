@@ -2138,6 +2138,27 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert rag_param["semaforo"] in ("VERDE", "AMBAR")
     assert "PARAMETRIZE" in rag_param["frammenti"][0]["testo"]
 
+    from decimal import Decimal
+    derivati_div = grounding_numerico._calcola_derivati_aritmetici_ammissibili(
+        {Decimal("12000.00"), Decimal("48")}, set()
+    )
+    assert Decimal("250.00") in derivati_div
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    store_pgvector.incasella_e_salva(
+        "generale",
+        "allegato 9 vivibanca_finanz.pdf",
+        [("Page 1", "Tabella: 250,00 x 48 = 12.000,00 EUR TAN 5,50% TAEG 6,85%")],
+    )
+    rag_vivi = store_pgvector.recupera_con_semaforo(
+        "mi verifichi il calcolo del piano di ammortamento?",
+        dominio="tecnico",
+        top_k=3,
+    )
+    assert rag_vivi["semaforo"] == "VERDE"
+    assert len(rag_vivi["frammenti"]) == 1
+    assert "250,00" in rag_vivi["frammenti"][0]["testo"]
+
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 

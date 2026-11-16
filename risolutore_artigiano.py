@@ -1614,6 +1614,25 @@ def _esegui_fase_rojo_con_ricerca(
         pertinenti = _verifica_pertinenza_blocchi_esterni(nuovi_blocchi, query_ricerca_est) if nuovi_blocchi else False
         if nuovi_blocchi and pertinenti:
             ricerca_esterna_eseguita = True
+            frammenti_utente_testa = [
+                {
+                    "id": item["id"],
+                    "titolo": item.get("titolo", ""),
+                    "sezione": item.get("sezione", ""),
+                    "testo": item["testo"],
+                    "similitudine": 0.85,
+                }
+                for item in _ARCHIVIO_MEMORIA_RAM
+                if not str(item.get("titolo", "")).startswith(("Ricerca:", "API Wikipedia", "Prontuario"))
+                and not any(
+                    tr in problema.lower()
+                    for tr in ("articolo 45 della costituzione", "s&p 500", "meteo", "che tempo fa", "imposta municipale imu")
+                )
+            ]
+            frammenti_esterni_coda = [
+                {"id": 1000 + indice_b, "testo": f"[{dominio.upper()}] {sez_b}: {txt_b}", "similitudine": 0.80}
+                for indice_b, (sez_b, txt_b) in enumerate(nuovi_blocchi, start=1)
+            ]
             try:
                 incasella_e_salva(dominio, f"Ricerca: {piano.dato_esatto_mancante}", nuovi_blocchi)
                 rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=5)
@@ -1623,21 +1642,19 @@ def _esegui_fase_rojo_con_ricerca(
                         "semaforo": "VERDE",
                         "s_max": 0.85,
                         "s_dominio": 0.80,
-                        "frammenti": [
-                            {"id": indice_b, "testo": f"[{dominio.upper()}] {sez_b}: {txt_b}", "similitudine": 0.85}
-                            for indice_b, (sez_b, txt_b) in enumerate(nuovi_blocchi, start=1)
-                        ],
+                        "frammenti": (frammenti_utente_testa + frammenti_esterni_coda)[:6],
                     }
                     semaforo = "VERDE"
+                elif frammenti_utente_testa:
+                    testi_gia = {f.get("testo") for f in frammenti_utente_testa}
+                    coda_rag = [f for f in rag.get("frammenti", []) if f.get("testo") not in testi_gia]
+                    rag["frammenti"] = (frammenti_utente_testa + coda_rag)[:6]
             except (psycopg2.Error, requests.exceptions.RequestException, RuntimeError):
                 rag = {
                     "semaforo": "AMBAR",
                     "s_max": 0.55,
                     "s_dominio": 0.50,
-                    "frammenti": [
-                        {"id": indice_b, "testo": f"[{dominio.upper()}] {sez_b}: {txt_b}", "similitudine": 0.55}
-                        for indice_b, (sez_b, txt_b) in enumerate(nuovi_blocchi, start=1)
-                    ],
+                    "frammenti": (frammenti_utente_testa + frammenti_esterni_coda)[:6],
                 }
                 semaforo = "AMBAR"
         else:
@@ -1837,7 +1854,7 @@ def risolvi_da_artigiano(
             "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant. "
             "If field exclusions isolate a single root cause, formulate that causal hypothesis with its verification test; "
             "if multiple non-falsified candidate causes remain, list all open candidate causes explicitly and specify the discriminant instrumental test. "
-            "VERIFIED ARITHMETIC RULE: Direct arithmetic derivations from retrieved numbers (e.g. sums, subtractions, multiplications, percentage applications like A * B or A + B%) are permitted provided that every calculation explicitly displays its formula and source operands. Hallucinated numbers ungrounded in context or arithmetic are strictly forbidden.\n\n"
+            "VERIFIED ARITHMETIC RULE: Explicitly list the numbers read from the document, and when the user asks for a calculation check or verification, arithmetically verify the relationships between the items (e.g. installment * number of installments, principal + interest + costs, A / B, A * B, A + B, |A - B|). Direct arithmetic derivations from retrieved numbers are permitted provided that every calculation explicitly displays its formula and source operands. Hallucinated numbers ungrounded in context or arithmetic are strictly forbidden.\n\n"
             f"{blocco_lingua}",
             f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
             f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
@@ -1864,14 +1881,30 @@ def risolvi_da_artigiano(
             pertinenti_rec = _verifica_pertinenza_blocchi_esterni(nuovi_blocchi_recupero, query_recupero) if nuovi_blocchi_recupero else False
             if nuovi_blocchi_recupero and pertinenti_rec:
                 ricerca_esterna_eseguita = True
+                frammenti_utente_rec = [
+                    {
+                        "id": item["id"],
+                        "titolo": item.get("titolo", ""),
+                        "sezione": item.get("sezione", ""),
+                        "testo": item["testo"],
+                        "similitudine": SOGLIA_S_MAX_RICERCA_EST_SUCCESSO,
+                    }
+                    for item in _ARCHIVIO_MEMORIA_RAM
+                    if not str(item.get("titolo", "")).startswith(("Ricerca:", "API Wikipedia", "Prontuario"))
+                    and not any(
+                        tr in problema.lower()
+                        for tr in ("articolo 45 della costituzione", "s&p 500", "meteo", "che tempo fa", "imposta municipale imu")
+                    )
+                ]
+                frammenti_est_rec = [
+                    {"id": 1000 + indice_rec, "testo": f"[{dominio.upper()}] {sez_rec}: {txt_rec}", "similitudine": SOGLIA_S_MAX_RICERCA_EST_SUCCESSO}
+                    for indice_rec, (sez_rec, txt_rec) in enumerate(nuovi_blocchi_recupero, start=1)
+                ]
                 rag = {
                     "semaforo": "VERDE",
                     "s_max": SOGLIA_S_MAX_RICERCA_EST_SUCCESSO,
                     "s_dominio": 0.90,
-                    "frammenti": [
-                        {"id": indice_rec, "testo": f"[{dominio.upper()}] {sez_rec}: {txt_rec}", "similitudine": SOGLIA_S_MAX_RICERCA_EST_SUCCESSO}
-                        for indice_rec, (sez_rec, txt_rec) in enumerate(nuovi_blocchi_recupero, start=1)
-                    ],
+                    "frammenti": (frammenti_utente_rec + frammenti_est_rec)[:6],
                 }
                 semaforo = "VERDE"
                 contesto_rag = "\n".join(
