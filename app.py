@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.16.v27"
+_VERSIONE_MODULI_THE = "2026.11.16.v28"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -45,6 +45,8 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(risolutore_artigiano, "carica_voci_wiki_da_disco")
         or not hasattr(risolutore_artigiano, "esegui_ingest_documento_in_wiki")
         or not hasattr(config, "ha_chiave_dedicata_provider")
+        or not hasattr(grounding_numerico, "esegui_audit_matematico_tabella_pdf")
+        or not hasattr(cascata_strutturata, "esegui_audit_pdf_scansionato_python_first")
     )
     if necessita_reload:
         archivio_precedente = list(getattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM", []))
@@ -711,7 +713,7 @@ tab_artigiano, tab_wiki, tab_ponte_web, tab_codice = st.tabs([
     "🔍 1. Ask Your Documents & Second Brain",
     "📚 2. Knowledge Wiki & Visual Map",
     "🛡️ 3. Fact-Check External AI",
-    "⚙️ 4. Python Code Inspector",
+    "⚙️ 4. Python Code & Math Inspector",
 ])
 
 with tab_artigiano:
@@ -1121,6 +1123,73 @@ with tab_codice:
                     except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                         logging_bottega.log_exception("Errore in esegui_cascata UI", "APP_CAS_001", err)
                         st.error(f"Error during cascade execution ({provider_ui}): {err}")
+
+    st.markdown("---")
+    st.markdown("### 🧮 4C. Python-First Scanned PDF & Amortization Table Auditor (Strato L · A · D)")
+    st.caption(
+        "Python Decimal runs first: inspects all pages, checks every amortization installment row (Q_cap + Q_int = Rata, residual debt descent, monthly interest on residual debt) and recalculates actuarial IRR/TAN/TAEG via 60-step bisection before passing the verified math ledger to the LLM."
+    )
+    archivio_per_audit = st.session_state.get("documenti_archivio_sessione", {})
+    opzioni_doc_audit = ["(Upload a PDF file directly below)"] + list(archivio_per_audit.keys())
+    doc_scelto_audit = st.selectbox(
+        "Select an already uploaded document from Archive (or upload below):",
+        opzioni_doc_audit,
+        index=1 if len(opzioni_doc_audit) > 1 else 0,
+        key="sel_doc_audit_4c",
+    )
+    file_pdf_audit_4c = st.file_uploader(
+        "Or upload a Scanned Financial/Amortization PDF directly for Python-First Math Audit:",
+        type=["pdf", "txt", "md", "csv"],
+        key="up_pdf_audit_4c",
+    )
+    quesito_audit_4c = st.text_input(
+        "Specific Audit Question (optional):",
+        value="Verifica completa del piano di ammortamento rata per rata, quadratura costi (Pag. 1, 5, 6, 8, 9) e ricalcolo TAN/TAEG",
+        key="q_audit_4c",
+    )
+    if st.button("🧮 Run Python-First Math Audit (Python Decimal -> LLM Evaluation)", type="primary", key="btn_run_4c"):
+        nome_doc_4c = ""
+        testo_doc_4c = ""
+        bytes_doc_4c = b""
+        if file_pdf_audit_4c is not None:
+            nome_doc_4c = file_pdf_audit_4c.name
+            bytes_doc_4c = file_pdf_audit_4c.getvalue()
+        elif doc_scelto_audit in archivio_per_audit:
+            nome_doc_4c = doc_scelto_audit
+            meta_4c = archivio_per_audit[doc_scelto_audit]
+            blocchi_4c = meta_4c.get("blocchi") or []
+            testo_doc_4c = "\n\n".join(
+                f"### [{sez_b}]\n{txt_b}" for sez_b, txt_b in blocchi_4c if txt_b
+            )
+        if not nome_doc_4c and not testo_doc_4c and not bytes_doc_4c:
+            st.warning("Please select a loaded document from the Archive or upload a PDF file first.")
+        else:
+            try:
+                with st.spinner("Running Python Decimal Table & IRR/TAEG Auditor (Strato L · A · D) followed by LLM Forensic Evaluation..."):
+                    esito_4c = cascata_strutturata.esegui_audit_pdf_scansionato_python_first(
+                        testo_doc_4c,
+                        nome_doc_4c or "Documento_Finanziario.pdf",
+                        domanda_specifica=quesito_audit_4c,
+                        contenuto_bytes=bytes_doc_4c,
+                        llm_fn=llm_selezionato_fn,
+                    )
+                st.session_state["ultimo_esito_audit_4c"] = esito_4c
+            except (RuntimeError, ValueError, OSError, KeyError, TypeError) as err_4c:
+                logging_bottega.log_exception("Errore in 4C Python-First Math Audit", "APP_CAS_4C", err_4c)
+                st.error(f"Error during Python-First Math Audit: {err_4c}")
+
+    esito_4c_salvato = st.session_state.get("ultimo_esito_audit_4c")
+    if isinstance(esito_4c_salvato, dict):
+        st.markdown(str(esito_4c_salvato.get("tabulato_audit_python", "")))
+        st.markdown("---")
+        st.markdown(str(esito_4c_salvato.get("valutazione_llm_markdown", "")))
+        st.download_button(
+            "Download Full Python-First Math Audit Report (.md)",
+            data=str(esito_4c_salvato.get("referto_completo_markdown", "")).encode("utf-8"),
+            file_name=f"audit_matematico_{Path(str(esito_4c_salvato.get('nome_documento', 'doc'))).stem}.md",
+            mime="text/markdown",
+            key="dl_audit_4c_md",
+        )
 
 st.divider()
 st.markdown(

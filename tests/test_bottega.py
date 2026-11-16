@@ -2170,6 +2170,42 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert len(rag_vivi["frammenti"]) == 1
     assert "250,00" in rag_vivi["frammenti"][0]["testo"]
 
+    righe_82_120 = "\n".join(
+        f"| {k_r} | 35,00 | 188,00 | 223,00 | {Decimal(120 - k_r) * Decimal('188.00'):.2f} |"
+        for k_r in range(82, 121)
+    )
+    testo_piano_120_parziale = (
+        "### [Page 1]\n"
+        "Prospetto Finanziamento: Numero rate 120 rate da 223,00 € (Montante complessivo 26.760,00 €)\n"
+        "Capitale finanziato: 18.000,00 € | Netto ricavo: 17.500,00 €\n"
+        "### [Page 3]\n"
+        "| Rata | Quota Interessi | Quota Capitale | Rata | Debito Residuo |\n"
+        f"{righe_82_120}\n"
+        "### [Page 8]\n"
+        "TAN 5,50% | TAEG 8,66%\n"
+        "### [Page 9]\n"
+        "Riepilogo finale costi e condizioni economiche."
+    )
+    audit_res = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_piano_120_parziale)
+    strato_l_res = audit_res["strato_l_osservazione"]
+    strato_a_res = audit_res["strato_a_quadrature"]
+    strato_d_res = audit_res["strato_d_ricalcolo_taeg_tan"]
+    assert strato_l_res["piano_completo_al_100"] is False
+    assert strato_l_res["rate_mancanti"] == "1..81"
+    assert strato_l_res["rate_lette_conteggio"] == 39
+    assert strato_a_res["quadratura_montante_ok"] is True
+    assert strato_a_res["rate_verificate_ok"] == 39
+    assert strato_d_res["taeg_ricalcolato_pct"] is not None
+
+    import cascata_strutturata
+    esito_4c_test = cascata_strutturata.esegui_audit_pdf_scansionato_python_first(
+        testo_piano_120_parziale,
+        "allegato 9 vivibanca_finanz.pdf",
+        llm_fn=lambda sys_p, usr_p, schema: (_ for _ in ()).throw(RuntimeError("Offline test")),
+    )
+    assert "1..81" in str(esito_4c_test["tabulato_audit_python"])
+    assert "1..81" in str(esito_4c_test["valutazione_llm_markdown"])
+
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
