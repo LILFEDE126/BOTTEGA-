@@ -729,11 +729,29 @@ def _seleziona_frammenti_pertinenti_domanda(
         txt_c = (framm_obj.get("titolo", "") + " " + framm_obj.get("testo", "")).lower()
         return {a for a in insieme_ancore if a in txt_c}
 
+    e_analisi_completa_doc = (
+        any(
+            w in prob_low
+            for w in (
+                "ammortamento", "tabella", "calcol", "prospetto", "rata", "rate",
+                "tan", "taeg", "teg", "interessi", "capitale", "finanziamento",
+                "vivibanca", "allegato", "verifica", "verifichi", "controlla",
+                "piano", "importi", "totale", "tutte le pagine", "intero documento",
+            )
+        )
+        or (
+            not altri_frammenti
+            and not any("lembas.py" in (f.get("testo", "") or "").lower() for f in frammenti_primo_doc)
+            and not ancore_spec
+        )
+    )
+    limite_primo_doc = 12 if e_analisi_completa_doc else 4
+
     scelti_primo: List[dict] = [frammenti_primo_doc[0]]
     candidati_rimanenti: List[dict] = list(frammenti_primo_doc[1:])
     coperte_primo: Set[str] = _ancore_in_framm(frammenti_primo_doc[0], ancore_riferimento)
 
-    while len(scelti_primo) < 4 and candidati_rimanenti:
+    while len(scelti_primo) < limite_primo_doc and candidati_rimanenti:
         mancanti_corr = ancore_riferimento - coperte_primo
         if mancanti_corr:
             miglior_idx = -1
@@ -748,7 +766,7 @@ def _seleziona_frammenti_pertinenti_domanda(
                 scelti_primo.append(scelto_c)
                 coperte_primo |= _ancore_in_framm(scelto_c, ancore_riferimento)
                 continue
-        if ancore_spec and len(coperte_primo) >= max(2, int(len(ancore_spec) * 0.65)):
+        if not e_analisi_completa_doc and ancore_spec and len(coperte_primo) >= max(2, int(len(ancore_spec) * 0.65)):
             break
         prossimo_c = candidati_rimanenti.pop(0)
         scelti_primo.append(prossimo_c)
@@ -757,11 +775,18 @@ def _seleziona_frammenti_pertinenti_domanda(
     scartati_primo: List[dict] = []
     for cand_res in candidati_rimanenti:
         anc_res = _ancore_in_framm(cand_res, ancore_riferimento)
-        if anc_res - coperte_primo and len(scelti_primo) < 5:
+        if anc_res - coperte_primo and len(scelti_primo) < max(5, limite_primo_doc):
             scelti_primo.append(cand_res)
             coperte_primo |= anc_res
         else:
             scartati_primo.append(cand_res)
+
+    if e_analisi_completa_doc and len(scelti_primo) > 1:
+        scelti_primo.sort(
+            key=lambda f_item: int(f_item["id"])
+            if isinstance(f_item.get("id"), int) or str(f_item.get("id", "")).isdigit()
+            else 0
+        )
 
     termini_mancanti = ancore_riferimento - coperte_primo
     copertura_alta_primo = bool(
@@ -796,8 +821,8 @@ def _seleziona_frammenti_pertinenti_domanda(
     else:
         frammenti_scartati.extend(altri_frammenti)
 
-    accettati = scelti_primo[:4] + frammenti_secondo_doc[:2]
-    scartati = scelti_primo[4:] + frammenti_secondo_doc[2:] + frammenti_scartati
+    accettati = scelti_primo[:limite_primo_doc] + frammenti_secondo_doc[:2]
+    scartati = scelti_primo[limite_primo_doc:] + frammenti_secondo_doc[2:] + frammenti_scartati
     return (accettati or scelti_primo), scartati
 
 
@@ -961,7 +986,7 @@ def _sintetizza_frammenti_lista(frammenti_sub: List[dict], problema: str = "") -
     termini_prob = _estrai_termini_chiave_chirurgici(problema) if problema and problema.strip() else set()
     prob_basso = (problema or "").lower()
 
-    for frammento in frammenti_sub[:5]:
+    for frammento in frammenti_sub[:12]:
         testo = _ripulisci_prefisso_tecnico_frammento(frammento.get("testo", "")).strip()
         if not testo:
             continue
@@ -1302,7 +1327,7 @@ def _costruisci_soluzione_deterministica(
     if not frammenti_accettati:
         frammenti_accettati = frammenti or []
 
-    pertinenti_raw = frammenti_accettati[:4] if frammenti_accettati else []
+    pertinenti_raw = frammenti_accettati[:12] if frammenti_accettati else []
     pertinenti_testi = [_ripulisci_prefisso_tecnico_frammento(f["testo"]) for f in pertinenti_raw]
     pertinenti_testi = [t for t in pertinenti_testi if t]
 
@@ -1764,13 +1789,46 @@ def _arricchisci_con_prontuario_se_pertinente(
         rag["s_max"] = max(float(rag.get("s_max", 0.0)), SOGLIA_S_MAX_RICERCA_EST_SUCCESSO)
 
 
+def _interroga_modello_per_soluzione(
+    llm_fn: Callable,
+    blocco_lingua: str,
+    semaforo: str,
+    contesto_rag: str,
+    problema: str,
+    vincolo_esclusioni: str,
+) -> SoluzioneArtigiano:
+    """Interroga l'LLM neurale passando l'intero contesto fino a 24.000 caratteri e richiedendo l'analisi integrale di tutte le pagine e tabelle."""
+    contesto_esteso = (contesto_rag or "")[:24000]
+    return llm_fn(
+        f"{blocco_lingua}\n\n"
+        "You are a master diagnostic engineer applying Strato L (Principle of Necessity), Strato A (Pragmatic Guardrails), "
+        "and Strato D (Weakest Preconditions wp(S, R)). "
+        "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer "
+        "that any person can easily read and understand, directly answering the user's question with the exact "
+        "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "
+        "FULL MULTI-PAGE & TABLE ANALYSIS RULE: Examine ALL pages and ALL table sections/rows present in the retrieved fragments from start to finish without omitting any page or table section. "
+        "When the document is a financial prospectus, contract, or amortization schedule, report a complete, structured analysis of ALL numerical items in the schedule and table (Gross/net principal - Capitale lordo/netto, Number of installments and installment amount - Numero rate e importo rata, Total amount due - Montante complessivo, Principal share and Interest share - Quota capitale e Quota interessi, Bank/intermediation commissions - Commissioni bancarie/intermediazione, Processing/insurance costs - Spese di istruttoria/assicurazione, TAN, TAEG/TEG, and their mathematical verifications from the beginning to the end of the table). "
+        "COMPLEMENTARY FRAGMENTS RULE: If multiple fragments originate from the same document/course or address complementary parts/steps/rules of the user's query, do NOT discard them as clutter. Synthesize them coherently together in 'risposta_finale_discorsiva' to provide the complete picture (e.g. all numbered rules, checklist points, or procedural phases). Only place truly off-topic or contradictory items in 'elementi_scartati_per_non_fare_mucchio'. "
+        "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select the single governing principle from those retrieved, "
+        "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant. "
+        "If field exclusions isolate a single root cause, formulate that causal hypothesis with its verification test; "
+        "if multiple non-falsified candidate causes remain, list all open candidate causes explicitly and specify the discriminant instrumental test. "
+        "VERIFIED ARITHMETIC RULE: Explicitly list the numbers read from the document, and when the user asks for a calculation check or verification, arithmetically verify the relationships between the items (e.g. installment * number of installments, principal + interest + costs, A / B, A * B, A + B, |A - B|). Direct arithmetic derivations from retrieved numbers are permitted provided that every calculation explicitly displays its formula and source operands. Hallucinated numbers ungrounded in context or arithmetic are strictly forbidden.\n\n"
+        f"{blocco_lingua}",
+        f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_esteso}\n\n"
+        f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
+        f"{blocco_lingua}",
+        SoluzioneArtigiano,
+    )
+
+
 def risolvi_da_artigiano(
     problema: str,
     dominio: str = "generale",
     cercatore_esterno_fn: Optional[Callable[[str], List[Tuple[str, str]]]] = None,
     ipotesi_gia_escluse: Optional[List[str]] = None,
     llm_fn: Callable = chiama_ollama_json,
-    max_caratteri_turno: int = 1800,
+    max_caratteri_turno: int = 4000,
 ) -> dict:
     """Universal closed-loop diagnostic cycle with cross-lingual query translation."""
     if not problema or not problema.strip():
@@ -1792,7 +1850,7 @@ def risolvi_da_artigiano(
             if not str(voce.get("titolo", "")).startswith("Ricerca:")
         ]
     try:
-        rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=5)
+        rag = recupera_con_semaforo(query_multilingua, dominio=dominio, top_k=15)
     except (psycopg2.Error, requests.exceptions.RequestException, RuntimeError):
         rag = {"semaforo": "ROJO", "s_max": 0.0, "s_dominio": 0.0, "frammenti": []}
 
@@ -1842,24 +1900,13 @@ def risolvi_da_artigiano(
         )
 
     try:
-        soluzione: SoluzioneArtigiano = llm_fn(
-            f"{blocco_lingua}\n\n"
-            "You are a master diagnostic engineer applying Strato L (Principle of Necessity), Strato A (Pragmatic Guardrails), "
-            "and Strato D (Weakest Preconditions wp(S, R)). "
-            "In 'risposta_finale_discorsiva', write a clear, complete, natural-language answer (4-6 sentences) "
-            "that any person can easily read and understand, directly answering the user's question with the exact "
-            "numbers and rules from the retrieved fragments (stating clearly what is covered/valid, what is excluded, and why). "
-            "COMPLEMENTARY FRAGMENTS RULE: If multiple fragments originate from the same document/course or address complementary parts/steps/rules of the user's query, do NOT discard them as clutter. Synthesize them coherently together in 'risposta_finale_discorsiva' to provide the complete picture (e.g. all numbered rules, checklist points, or procedural phases). Only place truly off-topic or contradictory items in 'elementi_scartati_per_non_fare_mucchio'. "
-            "ZERO CLUTTER RULE (REGOLA ZERO MUCCHIO): Select the single governing principle from those retrieved, "
-            "list in 'elementi_scartati_per_non_fare_mucchio' what you excluded, identify the violated invariant. "
-            "If field exclusions isolate a single root cause, formulate that causal hypothesis with its verification test; "
-            "if multiple non-falsified candidate causes remain, list all open candidate causes explicitly and specify the discriminant instrumental test. "
-            "VERIFIED ARITHMETIC RULE: Explicitly list the numbers read from the document, and when the user asks for a calculation check or verification, arithmetically verify the relationships between the items (e.g. installment * number of installments, principal + interest + costs, A / B, A * B, A + B, |A - B|). Direct arithmetic derivations from retrieved numbers are permitted provided that every calculation explicitly displays its formula and source operands. Hallucinated numbers ungrounded in context or arithmetic are strictly forbidden.\n\n"
-            f"{blocco_lingua}",
-            f"FRAMMENTI RECUPERATI ({semaforo}):\n{contesto_rag}\n\n"
-            f"PROBLEMA:\n{problema}{vincolo_esclusioni}\n\n"
-            f"{blocco_lingua}",
-            SoluzioneArtigiano,
+        soluzione: SoluzioneArtigiano = _interroga_modello_per_soluzione(
+            llm_fn,
+            blocco_lingua,
+            semaforo,
+            contesto_rag,
+            problema,
+            vincolo_esclusioni,
         )
     except (RuntimeError, requests.exceptions.RequestException) as err:
         log.warning(

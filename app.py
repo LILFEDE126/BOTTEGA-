@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.16.v26"
+_VERSIONE_MODULI_THE = "2026.11.16.v27"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -777,7 +777,7 @@ with tab_artigiano:
                             cercatore_esterno_fn=cercatore_fn,
                             ipotesi_gia_escluse=lista_escluse,
                             llm_fn=llm_selezionato_fn,
-                            max_caratteri_turno=2200,
+                            max_caratteri_turno=4000,
                         )
                         st.session_state["esito_principale_originale"] = esito
                         st.session_state["ultimo_esito_artigiano"] = esito

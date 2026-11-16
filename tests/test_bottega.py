@@ -2084,7 +2084,18 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
 
     import inspect
     sig_art = inspect.signature(risolutore_artigiano.risolvi_da_artigiano)
-    assert sig_art.parameters["max_caratteri_turno"].default == 1800
+    assert sig_art.parameters["max_caratteri_turno"].default == 4000
+
+    framm_multi_pag = [
+        {"id": idx_p, "titolo": "allegato 9 vivibanca_finanz.pdf", "testo": f"### [Page {idx_p}]\nRata {idx_p}: 250,00 EUR TAN 5,50% TAEG 6,85%"}
+        for idx_p in range(1, 8)
+    ]
+    acc_multi, scart_multi = risolutore_artigiano._seleziona_frammenti_pertinenti_domanda(
+        "verifica il calcolo del piano di ammortamento e tutte le rate della tabella",
+        framm_multi_pag,
+    )
+    assert len(acc_multi) == 7
+    assert len(scart_multi) == 0
 
     class _FakeEmptyPage:
         def extract_text(self):

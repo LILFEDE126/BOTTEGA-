@@ -831,10 +831,11 @@ def _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes: bytes) -> List[Tuple[i
         dict.fromkeys(list(MODELLI_NATIVI_GEMINI_LIVE) + ["gemini-2.5-flash", "gemini-2.0-flash"])
     )
     istruzione_ocr = (
-        "Trascrivi fedelmente e integralmente tutto il testo visibile in ogni pagina "
-        "di questo documento PDF scansionato (inclusi titoli, tabelle, numeri, importi, "
-        "percentuali TAN/TAEG, date e note). Non riassumere e non omettere alcun dato. "
-        "Inizia ogni pagina esattamente con il marcatore: ### [Page N] (dove N è 1, 2, 3...)."
+        "Trascrivi INTEGRALMENTE ogni singola pagina, dalla prima all'ultima riga, senza MAI riassumere, "
+        "senza MAI usare '...' o 'omissis' e senza saltare alcuna riga delle tabelle. Ricostruisci tutte "
+        "le tabelle in formato Markdown completo (| Col1 | Col2 | ... |) riportando ogni singolo numero, "
+        "rata, data, importo in Euro, capitale, interessi, TAN, TAEG, TEG e nota contrattuale. "
+        "Inizia ogni pagina con ### [Page N]."
     )
 
     b64_pdf = base64.b64encode(contenuto_bytes).decode("ascii")
@@ -843,39 +844,50 @@ def _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes: bytes) -> List[Tuple[i
         {"text": istruzione_ocr},
     ]
     testo_da_pdf = _invia_parti_multimodali_gemini_ocr(parti_pdf, chiavi_ocr, modelli_ocr)
-    if testo_da_pdf and len(re.findall(r"\d", testo_da_pdf)) >= 4:
-        return _parse_testo_ocr_in_pagine(testo_da_pdf)
+    pagine_da_pdf = _parse_testo_ocr_in_pagine(testo_da_pdf) if testo_da_pdf else []
+    mappa_pagine_ocr: Dict[int, str] = dict(pagine_da_pdf)
 
     if PDFIUM_DISPONIBILE and pdfium is not None:
         doc_ocr = None
         try:
             doc_ocr = pdfium.PdfDocument(contenuto_bytes)
-            parti_png: List[Dict[str, Any]] = []
-            for idx_p, pag_p in enumerate(doc_ocr, start=1):
-                if idx_p > 8:
-                    break
-                bmp = pag_p.render(scale=2.0)
-                png_bytes = _codifica_bitmap_pdfium_in_png(bmp)
-                if png_bytes:
-                    parti_png.append({
-                        "inlineData": {
-                            "mimeType": "image/png",
-                            "data": base64.b64encode(png_bytes).decode("ascii"),
-                        }
-                    })
-            if parti_png:
-                parti_png.append({"text": istruzione_ocr})
-                testo_da_png = _invia_parti_multimodali_gemini_ocr(parti_png, chiavi_ocr, modelli_ocr)
-                if testo_da_png:
-                    return _parse_testo_ocr_in_pagine(testo_da_png)
+            n_pag_reali = len(doc_ocr)
+            pagine_da_renderizzare = [
+                idx_p
+                for idx_p in range(1, min(n_pag_reali, 15) + 1)
+                if idx_p not in mappa_pagine_ocr
+                or len(re.findall(r"\d", mappa_pagine_ocr.get(idx_p, ""))) < 6
+            ]
+            if pagine_da_renderizzare:
+                parti_png: List[Dict[str, Any]] = []
+                for idx_p in pagine_da_renderizzare[:12]:
+                    pag_p = doc_ocr[idx_p - 1]
+                    bmp = pag_p.render(scale=2.0)
+                    png_bytes = _codifica_bitmap_pdfium_in_png(bmp)
+                    if png_bytes:
+                        parti_png.append({"text": f"Immagine scansione Pagina {idx_p}:"})
+                        parti_png.append({
+                            "inlineData": {
+                                "mimeType": "image/png",
+                                "data": base64.b64encode(png_bytes).decode("ascii"),
+                            }
+                        })
+                if parti_png:
+                    parti_png.append({"text": istruzione_ocr})
+                    testo_da_png = _invia_parti_multimodali_gemini_ocr(parti_png, chiavi_ocr, modelli_ocr)
+                    if testo_da_png:
+                        for num_png, txt_png in _parse_testo_ocr_in_pagine(testo_da_png):
+                            esist = mappa_pagine_ocr.get(num_png, "")
+                            if len(txt_png) > len(esist):
+                                mappa_pagine_ocr[num_png] = txt_png
         except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
             pass
         finally:
             if doc_ocr is not None and hasattr(doc_ocr, "close"):
                 doc_ocr.close()
 
-    if testo_da_pdf:
-        return _parse_testo_ocr_in_pagine(testo_da_pdf)
+    if mappa_pagine_ocr:
+        return sorted(mappa_pagine_ocr.items(), key=lambda x: x[0])
     return []
 
 
@@ -931,11 +943,37 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
                 pagine_raw.append((idx, testo_pag))
 
         totale_caratteri = sum(len(re.findall(r"\w", t)) for _, t in pagine_raw)
-        soglia_min_ocr = (100 * max(1, len(pagine_raw))) if usa_estrattore_reale else 25
-        if not pagine_raw or totale_caratteri < soglia_min_ocr:
+        n_pag_estr = max(1, len(pagine_raw))
+        media_caratteri_pag = totale_caratteri / n_pag_estr
+        pagina_povera_numeri = any(len(re.findall(r"\d", t)) < 10 for _, t in pagine_raw) if pagine_raw else True
+        richiede_ocr = (
+            not pagine_raw
+            or totale_caratteri < 25
+            or (usa_estrattore_reale and (media_caratteri_pag < 600 or pagina_povera_numeri))
+        )
+        if richiede_ocr:
             pagine_ocr = _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes)
             if pagine_ocr:
-                pagine_raw = pagine_ocr
+                mappa_ocr = dict(pagine_ocr)
+                pagine_arricchite: List[Tuple[int, str]] = []
+                for idx_p, txt_nat in pagine_raw:
+                    txt_ocr_p = mappa_ocr.pop(idx_p, "").strip()
+                    txt_nat_p = (txt_nat or "").strip()
+                    if txt_ocr_p and txt_nat_p:
+                        if txt_nat_p[:60].lower() not in txt_ocr_p.lower():
+                            pagine_arricchite.append((idx_p, f"{txt_nat_p}\n{txt_ocr_p}"))
+                        else:
+                            pagine_arricchite.append((idx_p, txt_ocr_p))
+                    elif txt_ocr_p:
+                        pagine_arricchite.append((idx_p, txt_ocr_p))
+                    elif txt_nat_p:
+                        pagine_arricchite.append((idx_p, txt_nat_p))
+                for idx_rem, txt_rem in sorted(mappa_ocr.items(), key=lambda x: x[0]):
+                    if txt_rem.strip():
+                        pagine_arricchite.append((idx_rem, txt_rem.strip()))
+                pagine_arricchite.sort(key=lambda x: x[0])
+                if pagine_arricchite:
+                    pagine_raw = pagine_arricchite
 
         blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
 
@@ -1543,8 +1581,10 @@ def _recupera_da_archivio_ram(
             "congestion window",
         )
         frammenti_utente = [item for item in _ARCHIVIO_MEMORIA_RAM if _e_frammento_documento_utente(item)]
+        titoli_utente = {str(item.get("titolo", "")) for item in frammenti_utente}
         if (
-            1 <= len(frammenti_utente) <= 6
+            1 <= len(frammenti_utente) <= 15
+            and len(titoli_utente) <= 2
             and not any(t_off in query_bassa for t_off in trappole_off_topic)
         ):
             ordinati_utente = [
@@ -1572,7 +1612,12 @@ def _recupera_da_archivio_ram(
             "frammenti": [],
         }
 
-    limite_k = max(top_k, 5)
+    titoli_doc_utente = {
+        str(item.get("titolo", ""))
+        for item in candidati
+        if _e_frammento_documento_utente(item)
+    }
+    limite_k = max(top_k, 15 if 1 <= len(titoli_doc_utente) <= 2 else 5)
     lista_vett = sorted(con_match, key=lambda f: (f["similitudine"], f["match_count"]), reverse=True)[:MAX_CANDIDATI_RRF_ARCHIVIO]
     lista_it = sorted(con_match, key=lambda f: (f["match_count"], f["similitudine"]), reverse=True)[:MAX_CANDIDATI_RRF_ARCHIVIO]
     lista_simple = list(lista_it)
