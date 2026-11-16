@@ -290,12 +290,13 @@ def esegui_audit_pdf_scansionato_python_first(
             "Il motore Python ha gia' eseguito in aritmetica esatta Decimal (ROUND_HALF_UP) tutti i calcoli delle 11 Sezioni matematiche sul documento. "
             "REGOLE TASSATIVE:\n"
             "1. Basa il tuo giudizio ESCLUSIVAMENTE sui risultati numerici del TABULATO DETERMINISTICO PYTHON e sulle righe normalizzate fornite qui sotto.\n"
-            "2. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9); (b) Verifica rata per rata della tabella di ammortamento (Pag. 3), "
-            "dichiarando con ONESTA' EPISTEMICA ASSOLUTA quante rate su N sono state effettivamente lette e verificate da Python e quali rate mancano nella scansione "
+            "2. DIVIETO ASSOLUTO DI CONTRADDIZIONE: Se un valore nel Tabulato Python appare come 'N/D' o 'NON VERIFICATO', e' TASSATIVAMENTE VIETATO scrivere che e' stato ricalcolato o verificato!\n"
+            "3. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9) distinguendo C_fin da Prospetto vs Verifica Indipendente della tabella 1..N e riportando i totali attesi delle eventuali rate mancanti; "
+            "(b) Verifica rata per rata della tabella di ammortamento (Pag. 3), dichiarando con ONESTA' EPISTEMICA ASSOLUTA quante rate su N sono state effettivamente lette e verificate da Python e quali rate mancano nella scansione "
             "(se certificabile e' False o verdetto e' ROJO/GREY, e' TASSATIVAMENTE VIETATO usare espressioni come 'i calcoli sono corretti e privi di vizi' o 'privo di vizi'; "
-            "se TOTALE_ANOMALIE > 0, e' TASSATIVAMENTE VIETATO scrivere '0 anomalie'!); "
-            "(c) Ricalcolo degli interessi mensili sul capitale residuo (convenzione adottata da Python) e ricalcolo attuariale IRR/NPV separato C_fin (TAN) vs C_netto (TAEG).\n"
-            "3. Rispondi in italiano chiaro, rigoroso e strutturato.",
+            "se TOTALE_ANOMALIE > 0, e' TASSATIVAMENTE VIETATO scrivere '0 anomalie' e devi citare le singole rate anomale rilevate da Python, es. Rata 120!); "
+            "(c) Ricalcolo degli interessi mensili sul capitale residuo D_precedente(t) e ricalcolo attuariale IRR/NPV separato C_fin (TAN) vs C_netto (TAEG).\n"
+            "4. Rispondi in italiano chiaro, rigoroso e strutturato.",
             f"DOCUMENTO ANALIZZATO: {nome_documento}\n"
             f"QUESITO SPECIFICO: {quesito_eff}\n"
             f"CERTIFICABILE_PY: {certificabile_py} (Verdetto: {verdetto_semaforo_py} | Stato: {audit_py.get('stato_certificazione')} | TOTALE_ANOMALIE: {totale_anomalie_py})\n\n"
@@ -307,10 +308,18 @@ def esegui_audit_pdf_scansionato_python_first(
         fonte_valutazione = "LLM_SU_CALCOLO_PYTHON"
         verdetto_testo = str(esito_llm.verdetto_finale_onesta_epistemica or "").strip()
         verifica_tab_testo = str(esito_llm.verifica_tabella_ammortamento_rata_per_rata or "").strip()
+        ricalcolo_taeg_testo = str(esito_llm.ricalcolo_interessi_e_taeg or "").strip()
         if totale_anomalie_py > 0 and "0 anomalie" in verifica_tab_testo.lower():
+            dettagli_int = strato_a.get("anomalie_interessi_dettaglio", []) if isinstance(strato_a, dict) else []
+            extra_det = f" Esempi: {'; '.join(dettagli_int[:3])}" if dettagli_int else ""
             verifica_tab_testo = (
                 f"{verifica_tab_testo}\n\n> ⚠️ Nota di Coerenza Deterministica: Python ha rilevato "
-                f"**{totale_anomalie_py} anomalie** (vedi dettagli Strato A nel Tabulato Python)."
+                f"**{totale_anomalie_py} anomalie**.{extra_det}"
+            )
+        if isinstance(strato_d, dict) and strato_d.get("taeg_ricalcolato_pct") is None:
+            ricalcolo_taeg_testo = (
+                f"{ricalcolo_taeg_testo}\n\n> ℹ️ **Precisazione Python `N/D`:** Nel tabulato Python il `TAEG Ricalcolato` è `N/D` "
+                f"(`stato_taeg={strato_d.get('stato_taeg')}`) e non va considerato ricalcolato fino al reperimento di `C_netto`."
             )
         nota_onesta = ""
         if not certificabile_py or verdetto_semaforo_py in ("ROJO", "GREY"):
@@ -336,7 +345,7 @@ def esegui_audit_pdf_scansionato_python_first(
             "### 🧠 Valutazione Tecnica Forense (LLM vincolato al Tabulato Python `Decimal`)\n\n"
             f"#### a) Quadratura Aggregata dei Costi e del Montante (Pag. 1, 5, 6, 9)\n{esito_llm.quadratura_aggregata}\n\n"
             f"#### b) Verifica Analitica Rata per Rata della Tabella di Ammortamento (Pag. 3)\n{verifica_tab_testo}\n\n"
-            f"#### c) Ricalcolo Interessi Mensili sul Debito Residuo e Ricalcolo IRR / TAEG (Pag. 8 e Pag. 9)\n{esito_llm.ricalcolo_interessi_e_taeg}\n\n"
+            f"#### c) Ricalcolo Interessi Mensili sul Debito Residuo e Ricalcolo IRR / TAEG (Pag. 8 e Pag. 9)\n{ricalcolo_taeg_testo}\n\n"
             f"#### d) Verdetto Finale e Onestà Epistemica (`{verdetto_semaforo_py}`)\n{verdetto_testo}{nota_onesta}"
         )
     except (RuntimeError, requests.exceptions.RequestException, ValueError, TypeError) as err_audit:

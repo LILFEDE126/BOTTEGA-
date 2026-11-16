@@ -2288,9 +2288,43 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert "0 anomalie" not in str(audit_v30_rojo["tabulato_audit_python"]).lower()
 
     assert hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
+    assert hasattr(store_pgvector, "_raggruppa_intervalli_mancanti")
+    assert store_pgvector._raggruppa_intervalli_mancanti(list(range(24, 82)), max_blocco=30) == [(24, 53), (54, 81)]
     assert hasattr(grounding_numerico, "q2")
     assert hasattr(grounding_numerico, "npv")
     assert hasattr(grounding_numerico, "irr_bisection")
+
+    righe_62_v31 = list(righe_v30_tutte[:23]) + list(righe_v30_tutte[81:119]) + [
+        "| 120 | 31/12/2035 | 1,71 | 221,29 | 223,00 | 0,00 | 0,00 |"
+    ]
+    testo_v31_multiriga_parziale = (
+        "### [Page 1]\n"
+        "Numero rate\n| 120 |\nImporto rata mensile\n| 223,00 € |\n"
+        "Montante complessivo\n| 26.760,00 € |\nTotale interessi\n| 6.023,13 € |\n"
+        "| T.A.N. |\n| 5,30% |\n| T.A.E.G. |\n| 8,66% |\n"
+        "### [Page 3]\n"
+        + "\n".join(righe_62_v31)
+        + "\n### [Page 9]\n| Saldo netto erogato |\n| 18.113,51 € |"
+    )
+    audit_v31_62 = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_v31_multiriga_parziale)
+    assert audit_v31_62["verdetto_semaforo"] == "ROJO"
+    assert audit_v31_62["certificabile"] is False
+    assert audit_v31_62["strato_l_osservazione"]["tan_dichiarato"] == "5.30"
+    assert audit_v31_62["strato_l_osservazione"]["taeg_dichiarato"] == "8.66"
+    assert audit_v31_62["strato_l_osservazione"]["netto_ricavo"] == "18113.51"
+    assert audit_v31_62["strato_l_osservazione"]["capitale_finanziato"] == "20736.87"
+    assert audit_v31_62["strato_l_osservazione"]["rate_mancanti"] == "24..81"
+    assert audit_v31_62["strato_l_osservazione"]["rate_mancanti_conteggio"] == 58
+    assert audit_v31_62["strato_a_quadrature"]["rata_francese_teorica"] == "223.00"
+    assert audit_v31_62["strato_a_quadrature"]["debito_residuo_finale_valore"] == "0.00"
+    assert audit_v31_62["strato_a_quadrature"]["debito_residuo_finale_zero_ok"] is True
+    assert audit_v31_62["strato_a_quadrature"]["somma_rate_mancanti_attesa"] == "12934.00"
+    assert audit_v31_62["strato_a_quadrature"]["quadratura_blocco_mancante_ok"] is True
+    assert audit_v31_62["strato_d_ricalcolo_taeg_tan"]["tan_ricalcolato_pct"] == "5.30"
+    assert audit_v31_62["strato_d_ricalcolo_taeg_tan"]["taeg_ricalcolato_pct"] == "8.66"
+    assert any("Rata 120" in msg_r for msg_r in audit_v31_62["strato_a_quadrature"]["anomalie_interessi_dettaglio"])
+    assert audit_v31_62["totale_anomalie"] >= 1
+    assert "0 anomalie" not in str(audit_v31_62["tabulato_audit_python"]).lower()
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 

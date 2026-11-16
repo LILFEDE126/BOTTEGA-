@@ -923,9 +923,28 @@ def _estrai_numeri_rata_presenti(testo_pagina: str) -> set[int]:
     return trovati
 
 
+def _raggruppa_intervalli_mancanti(mancanti: List[int], max_blocco: int = 30) -> List[Tuple[int, int]]:
+    if not mancanti:
+        return []
+    ordinati = sorted(set(mancanti))
+    fasce: List[Tuple[int, int]] = []
+    inizio = ordinati[0]
+    fine = ordinati[0]
+    for val in ordinati[1:]:
+        if val <= fine + 2 and (val - inizio + 1) <= max_blocco:
+            fine = val
+        else:
+            fasce.append((inizio, fine))
+            inizio = val
+            fine = val
+    fasce.append((inizio, fine))
+    return fasce
+
+
 def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[Tuple[int, str]]:
     """Estrae tutte le pagine 1..N di un PDF senza alcun filtro slide per l'audit 4C, con cache deterministica
-    SHA-256 (_CACHE_AUDIT_PAGINE_PDF) ed estrazione mirata in due passaggi (1..60, 61..120) a scale=3.0."""
+    SHA-256 (_CACHE_AUDIT_PAGINE_PDF), riepilogo chiave-valore SECCI/TAN/TAEG/Netto e recupero mirato a
+    3 bande orizzontali/verticali in blocchi da max 30 rate a scale=3.0 per rate centrali mancanti."""
     if not contenuto_bytes or len(contenuto_bytes) > 20 * 1024 * 1024:
         return []
 
@@ -943,7 +962,10 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
         "Trascrivi in una tabella Markdown normalizzata TUTTE le righe e TUTTE le colonne presenti "
         "in questa pagina (leggendo prima per intero la colonna/tabella di sinistra dalla rata 1 in poi, "
         "poi la colonna centrale e infine la colonna di destra fino all'ultima rata, oltre a tutte le "
-        "tabelle di costo, TAEG e liquidazione). Non omettere alcuna rata e non riassumere."
+        "tabelle di costo, TAEG e liquidazione). Non omettere alcuna rata e non riassumere.\n"
+        "In fondo alla pagina riporta SEMPRE un riepilogo chiave-valore esplicito per ogni valore visibile: "
+        "TAN_DICHIARATO: ...% | TAEG_DICHIARATO: ...% | NETTO_RICAVO_CREDITO: ... EUR | "
+        "CAPITALE_FINANZIATO: ... EUR | INTERESSI_TOTALI: ... EUR"
     )
 
     pagine_risultato: List[Tuple[int, str]] = []
@@ -980,8 +1002,8 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
                 ha_tabella_incompleta = bool(rate_nat and (min(rate_nat) > 10 or (n_rate_atteso_doc > 0 and len(rate_nat) < n_rate_atteso_doc)))
                 e_pag_costi_o_taeg = any(
                     kw in t_low
-                    for kw in ("taeg", "tan", "teg", "netto ricavo", "importo totale del credito", "erogato", "commissioni", "spese", "riepilogo", "ammortamento", "rata")
-                ) or num_p in (3, 5, 6, 8, 9)
+                    for kw in ("taeg", "tan", "teg", "netto ricavo", "importo totale del credito", "saldo netto", "erogato", "commissioni", "spese", "riepilogo", "ammortamento", "rata")
+                ) or num_p in (1, 3, 5, 6, 8, 9)
                 necessita_vision = len(re.findall(r"\w", testo_nat)) < 300 or ha_tabella_incompleta or (e_pag_costi_o_taeg and len(re.findall(r"\d", testo_nat)) < 40)
 
                 testo_finale_p = testo_nat
@@ -1037,34 +1059,34 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
                         try:
                             bmp_hi = pagina.render(scale=3.0)
                             png_hi_full = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 1.0)
-                            png_hi_sx = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 0.55)
-                            png_hi_dx = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.45, 1.0)
-                            fasce_rate: List[Tuple[int, int]] = []
-                            inizio_f = 1
-                            while inizio_f <= target_rate_pag:
-                                fine_f = min(inizio_f + 59, target_rate_pag)
-                                mancanti_fascia = [k_f for k_f in range(inizio_f, fine_f + 1) if k_f not in rate_dopo_vis]
-                                if mancanti_fascia:
-                                    fasce_rate.append((inizio_f, fine_f))
-                                inizio_f += 60
+                            png_hi_b1 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 0.42)
+                            png_hi_b2 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.28, 0.72)
+                            png_hi_b3 = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.58, 1.0)
+                            rate_mancanti_pag = [
+                                k_f for k_f in range(1, target_rate_pag + 1) if k_f not in rate_dopo_vis
+                            ]
+                            blocchi_mancanti = _raggruppa_intervalli_mancanti(rate_mancanti_pag, max_blocco=30)
 
-                            for f_start, f_end in fasce_rate:
+                            for b_start, b_end in blocchi_mancanti:
                                 parti_fascia: List[Dict[str, Any]] = []
                                 if png_hi_full:
-                                    parti_fascia.append({"text": f"Pagina {num_p} ad alta risoluzione (focus rate {f_start}..{f_end}):"})
+                                    parti_fascia.append({"text": f"Pagina {num_p} completa a scale=3.0 (blocco rate {b_start}..{b_end}):"})
                                     parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_full).decode("ascii")}})
-                                if png_hi_sx and f_start <= 60:
-                                    parti_fascia.append({"text": f"Fascia sinistra/iniziale Pagina {num_p}:"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_sx).decode("ascii")}})
-                                if png_hi_dx and f_end > 60:
-                                    parti_fascia.append({"text": f"Fascia destra/finale Pagina {num_p}:"})
-                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_dx).decode("ascii")}})
+                                if png_hi_b1:
+                                    parti_fascia.append({"text": f"Banda 1 (sinistra) Pagina {num_p}:"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b1).decode("ascii")}})
+                                if png_hi_b2:
+                                    parti_fascia.append({"text": f"Banda 2 (centrale) Pagina {num_p}:"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b2).decode("ascii")}})
+                                if png_hi_b3:
+                                    parti_fascia.append({"text": f"Banda 3 (destra) Pagina {num_p}:"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_b3).decode("ascii")}})
                                 parti_fascia.append({
                                     "text": (
-                                        f"Trascrivi ESCLUSIVAMENTE le rate dalla {f_start} alla {f_end} visibili in questa pagina "
-                                        f"nel formato tabellare exact-number Markdown: "
-                                        f"'| Rata | Scadenza | Quota Interessi | Quota Capitale | Rata | Capitale Residuo | Debito Residuo |'. "
-                                        f"Riporta OGNI singola rata da {f_start} a {f_end} senza omettere nessuna riga, senza riassumere e senza scrivere '...'."
+                                        f"Trascrivi ESCLUSIVAMENTE e INTEGRALMENTE le righe dalla Rata {b_start} alla Rata {b_end} "
+                                        f"della tabella del piano di ammortamento in questa pagina, riportando per ogni singola rata "
+                                        f"da {b_start} a {b_end}: Numero Rata | Scadenza | Quota Interessi | Quota Capitale | Importo Rata | "
+                                        f"Capitale Residuo | Debito Residuo. Non saltare nessuna riga e non scrivere '...'."
                                     )
                                 })
                                 txt_fascia = _invia_parti_multimodali_gemini_ocr(parti_fascia, chiavi_ocr, modelli_ocr)
