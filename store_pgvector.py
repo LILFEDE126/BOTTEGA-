@@ -3,10 +3,15 @@
 safe transactional context manager, circuit-breaker L2 embedding fallback and RAM archive."""
 
 from contextlib import contextmanager
+import base64
 import hashlib
 import io
+import json
 import logging
 import re
+import socket
+import urllib.error
+import urllib.request
 from typing import Any, Dict, List, Optional, Tuple
 import psycopg2
 from psycopg2.extras import execute_values
@@ -25,11 +30,14 @@ from config import (
     LIMITE_ITERAZIONI_D,
     LIMITE_ITERAZIONI_DIJKSTRA,
     MAX_CARATTERI_PARAGRAFO_PDF,
+    MODELLI_NATIVI_GEMINI_LIVE,
     OLLAMA_EMBED_MODEL,
     OLLAMA_EMBED_URL,
     SOGLIA_S_MAX_FALLIMENTO_NORMATIVO,
     TIMEOUT_HTTP_BREVE,
+    _decodifica_chiave_cloud_default,
     get_db_config,
+    risolvi_chiave_api,
 )
 from logging_bottega import log, log_exception
 from geometria_semaforo import (
@@ -50,10 +58,32 @@ _PDF_READER_ORIGINALE = PdfReader
 
 _OLLAMA_EMBED_OFFLINE = False
 _POSTGRES_OFFLINE = False
+_SONDA_POSTGRES_ESEGUITA = False
+PDFIUM_DISPONIBILE = pdfium is not None
+PSYCOPG_DISPONIBILE = psycopg2 is not None
 
 
 def e_postgres_locale_attivo() -> bool:
     """Restituisce True solo quando il database PostgreSQL locale e attivo, False in modalita Web RAM."""
+    global _POSTGRES_OFFLINE, _SONDA_POSTGRES_ESEGUITA
+    if not PSYCOPG_DISPONIBILE:
+        _POSTGRES_OFFLINE = True
+        return False
+    if _POSTGRES_OFFLINE:
+        return False
+    if not _SONDA_POSTGRES_ESEGUITA:
+        try:
+            cfg_db = get_db_config()
+            host_db = str(cfg_db.get("host") or "127.0.0.1")
+            port_db = int(cfg_db.get("port") or 5432)
+            sock = socket.create_connection((host_db, port_db), timeout=0.25)
+            sock.close()
+            _SONDA_POSTGRES_ESEGUITA = True
+            return True
+        except OSError:
+            _POSTGRES_OFFLINE = True
+            _SONDA_POSTGRES_ESEGUITA = True
+            return False
     return not _POSTGRES_OFFLINE
 
 _ARCHIVIO_MEMORIA_RAM: List[Dict[str, Any]] = []
@@ -666,6 +696,155 @@ def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[st
     return blocchi_slide
 
 
+def _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes: bytes) -> List[Tuple[int, str]]:
+    """Estrae testo da PDF scansionati tramite OCR locale (se disponibile) o OCR multimodale Gemini REST."""
+    if not contenuto_bytes or len(contenuto_bytes) > 20 * 1024 * 1024:
+        return []
+
+    if PDFIUM_DISPONIBILE and pdfium is not None:
+        doc_ocr = None
+        try:
+            doc_ocr = pdfium.PdfDocument(contenuto_bytes)
+            motore_rapid = None
+            try:
+                from rapidocr_onnxruntime import RapidOCR
+                motore_rapid = RapidOCR()
+            except ImportError:
+                motore_rapid = None
+
+            if motore_rapid is not None:
+                pagine_locali: List[Tuple[int, str]] = []
+                for idx_p, pag_p in enumerate(doc_ocr, start=1):
+                    bmp = pag_p.render(scale=2.0)
+                    img_pil = bmp.to_pil()
+                    ris_ocr, _ = motore_rapid(img_pil)
+                    if ris_ocr:
+                        righe_p = [str(voce[1]).strip() for voce in ris_ocr if len(voce) >= 2 and str(voce[1]).strip()]
+                        testo_p = normalizza_spazi_testo_pdf("\n".join(righe_p)).strip()
+                        if testo_p:
+                            pagine_locali.append((idx_p, testo_p))
+                if pagine_locali:
+                    return pagine_locali
+            else:
+                try:
+                    import pytesseract
+                    pagine_tess: List[Tuple[int, str]] = []
+                    for idx_p, pag_p in enumerate(doc_ocr, start=1):
+                        bmp = pag_p.render(scale=2.0)
+                        img_pil = bmp.to_pil()
+                        testo_t = normalizza_spazi_testo_pdf(pytesseract.image_to_string(img_pil) or "").strip()
+                        if testo_t:
+                            pagine_tess.append((idx_p, testo_t))
+                    if pagine_tess:
+                        return pagine_tess
+                except (ImportError, OSError, RuntimeError):
+                    pass
+        except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
+            pass
+        finally:
+            if doc_ocr is not None and hasattr(doc_ocr, "close"):
+                doc_ocr.close()
+
+    chiave_primaria = risolvi_chiave_api(provider="gemini")
+    chiave_fallback = _decodifica_chiave_cloud_default()
+    chiavi_ocr = [k for k in (chiave_primaria, chiave_fallback) if k and k.strip()]
+    chiavi_ocr = list(dict.fromkeys(chiavi_ocr))
+    if not chiavi_ocr:
+        return []
+
+    b64_pdf = base64.b64encode(contenuto_bytes).decode("ascii")
+    payload_ocr = {
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "inlineData": {
+                            "mimeType": "application/pdf",
+                            "data": b64_pdf,
+                        }
+                    },
+                    {
+                        "text": (
+                            "Trascrivi fedelmente e integralmente tutto il testo visibile in ogni pagina "
+                            "di questo documento PDF scansionato (inclusi titoli, tabelle, numeri, importi, "
+                            "percentuali TAN/TAEG, date e note). Non riassumere e non omettere alcun dato. "
+                            "Inizia ogni pagina esattamente con il marcatore: ### [Page N] (dove N è 1, 2, 3...)."
+                        )
+                    },
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.0,
+            "maxOutputTokens": 8192,
+        },
+    }
+    corpo_json = json.dumps(payload_ocr).encode("utf-8")
+    modelli_ocr = list(MODELLI_NATIVI_GEMINI_LIVE) + ["gemini-2.5-flash", "gemini-2.5-flash-lite"]
+    modelli_ocr = list(dict.fromkeys(modelli_ocr))
+
+    for chiave_c in chiavi_ocr:
+        for mod_c in modelli_ocr:
+            urls_ocr = (
+                f"https://generativelanguage.googleapis.com/v1beta/models/{mod_c}:generateContent?key={chiave_c}",
+                f"https://aiplatform.googleapis.com/v1/publishers/google/models/{mod_c}:generateContent?key={chiave_c}",
+            )
+            for url_c in urls_ocr:
+                try:
+                    req = urllib.request.Request(
+                        url_c,
+                        data=corpo_json,
+                        headers={"Content-Type": "application/json"},
+                        method="POST",
+                    )
+                    with urllib.request.urlopen(req, timeout=45.0) as resp:
+                        dati_resp = json.loads(resp.read().decode("utf-8", errors="replace"))
+                    candidati = dati_resp.get("candidates") or []
+                    if not candidati:
+                        continue
+                    parti = candidati[0].get("content", {}).get("parts") or []
+                    testi_p = [
+                        str(p.get("text") or "")
+                        for p in parti
+                        if isinstance(p, dict) and p.get("text") and not p.get("thought")
+                    ]
+                    if not testi_p:
+                        testi_p = [
+                            str(p.get("text") or "")
+                            for p in parti
+                            if isinstance(p, dict) and p.get("text")
+                        ]
+                    testo_trascritto = "\n".join(testi_p).strip()
+                    if not testo_trascritto:
+                        continue
+                    if "### [Page " in testo_trascritto:
+                        sezioni_p = re.split(r"(?m)^###\s*\[Page\s*(\d+)\]\s*", testo_trascritto)
+                        risultato_pagine: List[Tuple[int, str]] = []
+                        idx_s = 1
+                        while idx_s + 1 < len(sezioni_p):
+                            try:
+                                num_p = int(sezioni_p[idx_s])
+                            except ValueError:
+                                num_p = (len(risultato_pagine) + 1)
+                            txt_p = normalizza_spazi_testo_pdf(sezioni_p[idx_s + 1]).strip()
+                            if txt_p:
+                                risultato_pagine.append((num_p, txt_p))
+                            idx_s += 2
+                        if risultato_pagine:
+                            return risultato_pagine
+                    return [(1, normalizza_spazi_testo_pdf(testo_trascritto))]
+                except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError, ValueError, KeyError):
+                    continue
+    return []
+
+
+def estrai_testo_da_pdf(contenuto_bytes: bytes) -> str:
+    """Estrae l'intero testo da un PDF (incluso il fallback OCR automatico per PDF scansionati)."""
+    blocchi = estrai_blocchi_documento("documento.pdf", contenuto_bytes)
+    return "\n\n".join(f"### [{sez}]\n{txt}" for sez, txt in blocchi if txt and txt.strip())
+
+
 def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tuple[str, str]]:
     """Extracts structured (section, text) tuples from PDF files (.pdf) or plain-text files (.txt, .md, .csv, .py),
     using fast native C++ pypdfium2 when available and caching results by SHA-256."""
@@ -682,20 +861,20 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
 
     if nome_file.strip().lower().endswith(".pdf"):
         blocchi_pdf: List[Tuple[str, str]] = []
+        pagine_raw: List[Tuple[int, str]] = []
         estratto_con_pdfium = False
 
         if usa_estrattore_reale and pdfium is not None:
             doc_pdfium = None
             try:
                 doc_pdfium = pdfium.PdfDocument(contenuto_bytes)
-                pagine_raw: List[Tuple[int, str]] = []
+                pagine_raw = []
                 for idx, pagina in enumerate(doc_pdfium, start=1):
                     testo_pag = (pagina.get_textpage().get_text_bounded() or "").strip()
                     pagine_raw.append((idx, testo_pag))
-                blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
                 estratto_con_pdfium = True
             except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
-                blocchi_pdf = []
+                pagine_raw = []
                 estratto_con_pdfium = False
             finally:
                 if doc_pdfium is not None and hasattr(doc_pdfium, "close"):
@@ -710,9 +889,16 @@ def estrai_blocchi_documento(nome_file: str, contenuto_bytes: bytes) -> List[Tup
                 except (PyPdfError, ValueError, KeyError, TypeError):
                     testo_pag = ""
                 pagine_raw.append((idx, testo_pag))
-            blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
 
-        if usa_estrattore_reale and chiave_cache:
+        totale_caratteri = sum(len(re.findall(r"\w", t)) for _, t in pagine_raw)
+        if not pagine_raw or totale_caratteri < 25:
+            pagine_ocr = _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes)
+            if pagine_ocr:
+                pagine_raw = pagine_ocr
+
+        blocchi_pdf = _elabora_pagine_pdf(pagine_raw)
+
+        if usa_estrattore_reale and chiave_cache and blocchi_pdf:
             _CACHE_BLOCCHI_DOCUMENTO[chiave_cache] = list(blocchi_pdf)
         return blocchi_pdf
 
@@ -986,8 +1172,11 @@ _TERMINI_TECNICI_SPECIFICI = frozenset({
     "rebase", "merge", "sha", "assert", "elif", "comprehension", "valueerror",
     "keyerror", "typeerror", "pg_rewind", "raft", "quorum", "traceback", "breakpoint",
     "f10", "f11", "venv", "pip", "gitignore", "requirements", "externally", "managed",
-    "count", "null", "step", "over", "into",
+    "count", "null", "step", "over", "into", "parametrize", "mark", "fixture",
+    "monkeypatch", "contatore", "accumulatore", "dizionario", "dizionari",
 })
+
+_TERMINI_TECNICI_ALTA_PRIORITA = _TERMINI_TECNICI_SPECIFICI
 
 
 def _calcola_pesi_idf_candidati(
@@ -1257,7 +1446,7 @@ def _recupera_da_archivio_ram(
                 "frammenti": [],
             }
 
-    token_estratti = re.findall(r"\d+(?:[.,]\d+)+|\w+", query_bassa)
+    token_estratti = re.findall(r"\d+(?:[.,]\d+)+|[a-zA-Z0-9_]+", query_bassa)
     parole_chiave = list(
         dict.fromkeys(
             token for token in token_estratti

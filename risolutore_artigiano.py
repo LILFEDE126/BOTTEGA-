@@ -1753,7 +1753,7 @@ def risolvi_da_artigiano(
     cercatore_esterno_fn: Optional[Callable[[str], List[Tuple[str, str]]]] = None,
     ipotesi_gia_escluse: Optional[List[str]] = None,
     llm_fn: Callable = chiama_ollama_json,
-    max_caratteri_turno: Optional[int] = None,
+    max_caratteri_turno: int = 1800,
 ) -> dict:
     """Universal closed-loop diagnostic cycle with cross-lingual query translation."""
     if not problema or not problema.strip():
@@ -1987,6 +1987,7 @@ def risolvi_da_artigiano(
     testo_solo_discorsivo = (sol_dict.get("risposta_finale_discorsiva") or "").strip()
     deve_paginare = len(testo_solo_discorsivo) > limite_turno or (
         max_caratteri_turno is not None
+        and max_caratteri_turno < 1800
         and len(risposta_discorsiva_piena) > limite_turno
         and len(testo_solo_discorsivo) > 80
     )

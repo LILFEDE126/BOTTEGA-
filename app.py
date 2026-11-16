@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.14.v24"
+_VERSIONE_MODULI_THE = "2026.11.14.v25"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -95,7 +95,7 @@ def _allinea_moduli_in_memoria() -> None:
 _allinea_moduli_in_memoria()
 
 if "sessione_web_effimera_attiva" not in st.session_state:
-    if getattr(store_pgvector, "_POSTGRES_OFFLINE", True):
+    if not store_pgvector.e_postgres_locale_attivo():
         store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
         risolutore_artigiano.svuota_pagine_continua()
         if hasattr(risolutore_artigiano, "svuota_vault_ram"):
@@ -586,7 +586,7 @@ with st.sidebar:
 
     st.divider()
     st.header("2. Document & PDF Archive")
-    if getattr(store_pgvector, "_POSTGRES_OFFLINE", True):
+    if not store_pgvector.e_postgres_locale_attivo():
         st.info("🔒 Web Ephemeral RAM Mode: Zero data saved on server. Reloading the page wipes all data.")
     else:
         st.success("🗄️ Local Client PostgreSQL Mode: Data stored exclusively in your local database.")
@@ -633,9 +633,12 @@ with st.sidebar:
                 st.rerun()
 
     if files_caricati:
-        nuovi_sb = _elabora_file_caricati(
-            files_caricati, dominio_doc, max_docs, max_mb, max_bytes
-        )
+        with st.spinner(" Analisi e indicizzazione documenti (OCR automatico attivo per PDF scansionati)..."):
+            nuovi_sb = _elabora_file_caricati(
+                files_caricati, dominio_doc, max_docs, max_mb, max_bytes
+            )
+        if nuovi_sb > 0:
+            st.success(f"✅ Saved {nuovi_sb} new fragment(s) into memory.")
         if clic_salva and nuovi_sb == 0 and st.session_state.get("documenti_archivio_sessione"):
             st.toast("All uploaded documents are already indexed and active in the Archive!")
 

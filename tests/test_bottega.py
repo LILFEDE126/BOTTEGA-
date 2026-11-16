@@ -2082,6 +2082,62 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert risolutore_artigiano._e_riga_incompleta_o_troncata("salva e") is True
     assert esito.get("fonte_generazione") in ("LLM_NEURALE", "SINTESI_DETERMINISTICA")
 
+    import inspect
+    sig_art = inspect.signature(risolutore_artigiano.risolvi_da_artigiano)
+    assert sig_art.parameters["max_caratteri_turno"].default == 1800
+
+    class _FakeEmptyPage:
+        def extract_text(self):
+            return ""
+
+    class _FakeScannedPdfReader:
+        def __init__(self, stream):
+            self.pages = [_FakeEmptyPage()]
+
+    orig_reader = store_pgvector.PdfReader
+    orig_ocr_fn = store_pgvector._estrai_testo_ocr_da_pdf_scansionato
+    chiamate_ocr = []
+    try:
+        store_pgvector.PdfReader = _FakeScannedPdfReader
+        store_pgvector._estrai_testo_ocr_da_pdf_scansionato = lambda b: (
+            chiamate_ocr.append(len(b)) or [(1, "Prospetto Vivibanca Finanziamento TAN 5,50% TAEG 6,85% importo 12.000,00 euro.")]
+        )
+        blocchi_ocr = store_pgvector.estrai_blocchi_documento("allegato 9 vivibanca_finanz.pdf", b"%PDF-1.4 scanned")
+        testo_ocr_tot = store_pgvector.estrai_testo_da_pdf(b"%PDF-1.4 scanned")
+        assert len(chiamate_ocr) >= 1
+        assert len(blocchi_ocr) == 1
+        assert "TAN 5,50%" in blocchi_ocr[0][1]
+        assert "TAEG 6,85%" in testo_ocr_tot
+    finally:
+        store_pgvector.PdfReader = orig_reader
+        store_pgvector._estrai_testo_ocr_da_pdf_scansionato = orig_ocr_fn
+
+    store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
+    store_pgvector.incasella_e_salva(
+        "tecnico",
+        "Giorno 02 – Codice pulito.pptx.pdf",
+        [
+            ("Page 10", "Slide generica sul corso Python e funzioni."),
+            (
+                "Page 117",
+                "### [Page 117] STRUMENTO DI PYTEST · PARAMETRIZE\n"
+                "Usare @pytest.mark.parametrize per eseguire lo stesso test con molti casi diversi "
+                "e .get(parola, 0) per inizializzare il contatore nel dizionario.",
+            ),
+        ],
+    )
+    pesi_param = store_pgvector._calcola_pesi_idf_candidati(
+        ["pytest", "mark", "parametrize"], store_pgvector._ARCHIVIO_MEMORIA_RAM
+    )
+    assert pesi_param["parametrize"] >= 6
+    rag_param = store_pgvector.recupera_con_semaforo(
+        "Come si usa @pytest.mark.parametrize e .get(parola, 0) nei dizionari?",
+        dominio="tecnico",
+        top_k=3,
+    )
+    assert rag_param["semaforo"] in ("VERDE", "AMBAR")
+    assert "PARAMETRIZE" in rag_param["frammenti"][0]["testo"]
+
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
 
