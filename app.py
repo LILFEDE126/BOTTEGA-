@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.16.v29"
+_VERSIONE_MODULI_THE = "2026.11.16.v30"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -47,7 +47,9 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(config, "ha_chiave_dedicata_provider")
         or not hasattr(grounding_numerico, "esegui_audit_matematico_tabella_pdf")
         or not hasattr(grounding_numerico, "anonimizza_testo_finanziario")
+        or not hasattr(grounding_numerico, "irr_bisection")
         or not hasattr(store_pgvector, "estrai_pagine_complete_per_audit_tabellare")
+        or not hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
         or not hasattr(cascata_strutturata, "esegui_audit_pdf_scansionato_python_first")
     )
     if necessita_reload:

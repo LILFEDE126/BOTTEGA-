@@ -90,6 +90,7 @@ def e_postgres_locale_attivo() -> bool:
 
 _ARCHIVIO_MEMORIA_RAM: List[Dict[str, Any]] = []
 _CACHE_BLOCCHI_DOCUMENTO: Dict[str, List[Tuple[str, str]]] = {}
+_CACHE_AUDIT_PAGINE_PDF: Dict[str, List[Tuple[int, str]]] = {}
 
 TERMINI_ECONOMICI_AFFINI = frozenset({
     "costi",
@@ -907,11 +908,30 @@ def _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes: bytes) -> List[Tuple[i
     return []
 
 
+def _estrai_numeri_rata_presenti(testo_pagina: str) -> set[int]:
+    if not testo_pagina:
+        return set()
+    trovati: set[int] = set()
+    for m_r in re.findall(
+        r"(?m)^\s*\|?\s*(?:rata\s*n?\.?\s*)?(\d{1,3})\b.*\d+[.,]\d{2}",
+        testo_pagina,
+        flags=re.IGNORECASE,
+    ):
+        val_r = int(m_r)
+        if 1 <= val_r <= 360:
+            trovati.add(val_r)
+    return trovati
+
+
 def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[Tuple[int, str]]:
-    """Estrae tutte le pagine 1..N di un PDF senza alcun filtro slide per l'audit 4C, eseguendo
-    OCR multi-colonna su rendering PNG ad alta risoluzione (sx + dx per tabelle affiancate)."""
+    """Estrae tutte le pagine 1..N di un PDF senza alcun filtro slide per l'audit 4C, con cache deterministica
+    SHA-256 (_CACHE_AUDIT_PAGINE_PDF) ed estrazione mirata in due passaggi (1..60, 61..120) a scale=3.0."""
     if not contenuto_bytes or len(contenuto_bytes) > 20 * 1024 * 1024:
         return []
+
+    sha_audit = hashlib.sha256(contenuto_bytes).hexdigest()
+    if sha_audit in _CACHE_AUDIT_PAGINE_PDF:
+        return list(_CACHE_AUDIT_PAGINE_PDF[sha_audit])
 
     chiave_primaria = risolvi_chiave_api(provider="gemini")
     chiave_fallback = _decodifica_chiave_cloud_default()
@@ -932,6 +952,8 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
         try:
             doc_ocr = pdfium.PdfDocument(contenuto_bytes)
             n_pag = len(doc_ocr)
+            testi_nativi: List[Tuple[int, str]] = []
+            n_rate_atteso_doc = 0
             for idx_zero in range(n_pag):
                 num_p = idx_zero + 1
                 pagina = doc_ocr[idx_zero]
@@ -940,17 +962,25 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
                     testo_nat = normalizza_spazi_testo_pdf(pagina.get_textpage().get_text_bounded() or "").strip()
                 except (RuntimeError, ValueError, TypeError, AttributeError):
                     testo_nat = ""
+                testi_nativi.append((num_p, testo_nat))
+                if n_rate_atteso_doc == 0:
+                    for pat_n in (
+                        r"(?:numero\s+(?:totale\s+)?(?:delle\s+)?rate(?:\s+totale)?|n\.?\s*rate|durata(?:\s+finanziamento)?)\s*[:=]?\s*(\d{1,3})\b",
+                        r"\b(\d{1,3})\s+rate(?:\s+mensili|\s+da|\s+costanti)\b",
+                    ):
+                        m_nr = re.search(pat_n, testo_nat, flags=re.IGNORECASE)
+                        if m_nr and 6 <= int(m_nr.group(1)) <= 360:
+                            n_rate_atteso_doc = int(m_nr.group(1))
+                            break
 
+            for idx_zero, (num_p, testo_nat) in enumerate(testi_nativi):
+                pagina = doc_ocr[idx_zero]
                 t_low = testo_nat.lower()
-                righe_num_rate = [
-                    int(m_r)
-                    for m_r in re.findall(r"(?m)^\s*\|?\s*(?:rata\s*n?\.?\s*)?(\d{1,3})\b.*\d+[.,]\d{2}", testo_nat, flags=re.IGNORECASE)
-                    if 1 <= int(m_r) <= 360
-                ]
-                ha_tabella_incompleta = bool(righe_num_rate and min(righe_num_rate) > 10 and max(righe_num_rate) >= 30)
+                rate_nat = _estrai_numeri_rata_presenti(testo_nat)
+                ha_tabella_incompleta = bool(rate_nat and (min(rate_nat) > 10 or (n_rate_atteso_doc > 0 and len(rate_nat) < n_rate_atteso_doc)))
                 e_pag_costi_o_taeg = any(
                     kw in t_low
-                    for kw in ("taeg", "tan", "teg", "netto ricavo", "erogato", "commissioni", "spese", "riepilogo", "ammortamento", "rata")
+                    for kw in ("taeg", "tan", "teg", "netto ricavo", "importo totale del credito", "erogato", "commissioni", "spese", "riepilogo", "ammortamento", "rata")
                 ) or num_p in (3, 5, 6, 8, 9)
                 necessita_vision = len(re.findall(r"\w", testo_nat)) < 300 or ha_tabella_incompleta or (e_pag_costi_o_taeg and len(re.findall(r"\d", testo_nat)) < 40)
 
@@ -990,7 +1020,64 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
                     except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
                         pass
 
+                    if n_rate_atteso_doc == 0:
+                        for pat_n in (
+                            r"(?:numero\s+(?:totale\s+)?(?:delle\s+)?rate(?:\s+totale)?|n\.?\s*rate|durata(?:\s+finanziamento)?)\s*[:=]?\s*(\d{1,3})\b",
+                            r"\b(\d{1,3})\s+rate(?:\s+mensili|\s+da|\s+costanti)\b",
+                        ):
+                            m_nr_v = re.search(pat_n, testo_finale_p, flags=re.IGNORECASE)
+                            if m_nr_v and 6 <= int(m_nr_v.group(1)) <= 360:
+                                n_rate_atteso_doc = int(m_nr_v.group(1))
+                                break
+
+                    rate_dopo_vis = _estrai_numeri_rata_presenti(testo_finale_p)
+                    target_rate_pag = n_rate_atteso_doc if n_rate_atteso_doc >= 20 else (max(rate_dopo_vis) if len(rate_dopo_vis) >= 30 else 0)
+                    e_pag_piano = ("ammortamento" in testo_finale_p.lower()) or len(rate_dopo_vis) >= 10
+                    if e_pag_piano and target_rate_pag >= 20 and len(rate_dopo_vis) < target_rate_pag:
+                        try:
+                            bmp_hi = pagina.render(scale=3.0)
+                            png_hi_full = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 1.0)
+                            png_hi_sx = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.0, 0.55)
+                            png_hi_dx = _codifica_bitmap_ritaglio_in_png(bmp_hi, 0.45, 1.0)
+                            fasce_rate: List[Tuple[int, int]] = []
+                            inizio_f = 1
+                            while inizio_f <= target_rate_pag:
+                                fine_f = min(inizio_f + 59, target_rate_pag)
+                                mancanti_fascia = [k_f for k_f in range(inizio_f, fine_f + 1) if k_f not in rate_dopo_vis]
+                                if mancanti_fascia:
+                                    fasce_rate.append((inizio_f, fine_f))
+                                inizio_f += 60
+
+                            for f_start, f_end in fasce_rate:
+                                parti_fascia: List[Dict[str, Any]] = []
+                                if png_hi_full:
+                                    parti_fascia.append({"text": f"Pagina {num_p} ad alta risoluzione (focus rate {f_start}..{f_end}):"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_full).decode("ascii")}})
+                                if png_hi_sx and f_start <= 60:
+                                    parti_fascia.append({"text": f"Fascia sinistra/iniziale Pagina {num_p}:"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_sx).decode("ascii")}})
+                                if png_hi_dx and f_end > 60:
+                                    parti_fascia.append({"text": f"Fascia destra/finale Pagina {num_p}:"})
+                                    parti_fascia.append({"inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_hi_dx).decode("ascii")}})
+                                parti_fascia.append({
+                                    "text": (
+                                        f"Trascrivi ESCLUSIVAMENTE le rate dalla {f_start} alla {f_end} visibili in questa pagina "
+                                        f"nel formato tabellare exact-number Markdown: "
+                                        f"'| Rata | Scadenza | Quota Interessi | Quota Capitale | Rata | Capitale Residuo | Debito Residuo |'. "
+                                        f"Riporta OGNI singola rata da {f_start} a {f_end} senza omettere nessuna riga, senza riassumere e senza scrivere '...'."
+                                    )
+                                })
+                                txt_fascia = _invia_parti_multimodali_gemini_ocr(parti_fascia, chiavi_ocr, modelli_ocr)
+                                if txt_fascia:
+                                    txt_fascia_norm = normalizza_spazi_testo_pdf(txt_fascia).strip()
+                                    testo_finale_p = f"{testo_finale_p}\n{txt_fascia_norm}"
+                                    rate_dopo_vis.update(_estrai_numeri_rata_presenti(txt_fascia_norm))
+                        except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
+                            pass
+
                 pagine_risultato.append((num_p, testo_finale_p))
+            if pagine_risultato:
+                _CACHE_AUDIT_PAGINE_PDF[sha_audit] = list(pagine_risultato)
             return pagine_risultato
         except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
             pagine_risultato = []
@@ -1013,7 +1100,10 @@ def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[T
     if not pagine_risultato or tot_w < 100:
         pagine_ocr = _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes)
         if pagine_ocr:
+            _CACHE_AUDIT_PAGINE_PDF[sha_audit] = list(pagine_ocr)
             return pagine_ocr
+    if pagine_risultato:
+        _CACHE_AUDIT_PAGINE_PDF[sha_audit] = list(pagine_risultato)
     return pagine_risultato
 
 

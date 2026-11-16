@@ -2225,6 +2225,72 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert "1..81" in str(esito_4c_test["tabulato_audit_python"])
     assert "1..81" in str(esito_4c_test["valutazione_llm_markdown"])
     assert "IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI" in str(esito_4c_test["valutazione_llm_markdown"])
+    assert audit_res["verdetto_semaforo"] == "ROJO"
+
+    from decimal import ROUND_HALF_UP
+    i_m_v30 = Decimal("0.053") / Decimal("12")
+    d_exact_v30 = Decimal("20736.87")
+    d_prev_v30 = d_exact_v30
+    righe_v30_tutte = []
+    for k_v30 in range(1, 121):
+        d_exact_v30 = d_exact_v30 * (Decimal("1") + i_m_v30) - Decimal("223.00")
+        if k_v30 == 1:
+            d_round_v30 = Decimal("20605.45")
+        elif k_v30 < 120:
+            d_round_v30 = d_exact_v30.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+        else:
+            d_round_v30 = Decimal("0.00")
+        qc_v30 = d_prev_v30 - d_round_v30
+        qi_v30 = Decimal("223.00") - qc_v30
+        deb_v30 = Decimal("26760.00") - (Decimal(k_v30) * Decimal("223.00"))
+        righe_v30_tutte.append(
+            f"| {k_v30} | 31/01/2026 | {qi_v30:.2f} | {qc_v30:.2f} | 223,00 | {d_round_v30:.2f} | {deb_v30:.2f} |"
+        )
+        d_prev_v30 = d_round_v30
+
+    testo_vivi_120_completo = (
+        "### [Page 1]\n"
+        "Contratto SECCI Finanziamento: Numero rate: 120 rate mensili da 223,00 €\n"
+        "Montante lordo complessivo: 26.760,00 € | Totale interessi: 6.023,13 €\n"
+        "Importo totale del credito: 18.113,51 € | TAN 5,30% | TAEG 8,66%\n"
+        "### [Page 3]\n"
+        "| Rata | Scadenza | Colonna A | Colonna B | Rata | Residuo A | Residuo B |\n"
+        + "\n".join(righe_v30_tutte)
+        + "\n### [Page 8]\nCosti TAEG e oneri di istruttoria inclusi.\n### [Page 9]\nProspetto di liquidazione netto al cliente: 18.113,51 €."
+    )
+    audit_v30_verde = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_vivi_120_completo)
+    assert audit_v30_verde["verdetto_semaforo"] == "VERDE"
+    assert audit_v30_verde["certificabile"] is True
+    assert audit_v30_verde["totale_anomalie"] == 0
+    assert audit_v30_verde["strato_l_osservazione"]["capitale_finanziato"] == "20736.87"
+    assert audit_v30_verde["strato_l_osservazione"]["netto_ricavo"] == "18113.51"
+    assert audit_v30_verde["strato_a_quadrature"]["somma_quote_capitale_lette"] == "20736.87"
+    assert audit_v30_verde["strato_a_quadrature"]["somma_quote_interessi_lette"] == "6023.13"
+    assert audit_v30_verde["strato_a_quadrature"]["debito_residuo_finale_zero_ok"] is True
+    assert audit_v30_verde["strato_a_quadrature"]["rata_francese_teorica"] == "223.00"
+    assert audit_v30_verde["strato_d_ricalcolo_taeg_tan"]["tan_ricalcolato_pct"] == "5.30"
+    assert audit_v30_verde["strato_d_ricalcolo_taeg_tan"]["taeg_ricalcolato_pct"] == "8.66"
+    assert audit_v30_verde["righe_tabella_normalizzate"][0]["quota_interessi"] == "91.58"
+    assert audit_v30_verde["righe_tabella_normalizzate"][0]["quota_capitale"] == "131.42"
+    assert audit_v30_verde["righe_tabella_normalizzate"][-1]["capitale_residuo"] == "0.00"
+
+    testo_vivi_100_parziale = (
+        "### [Page 1]\n"
+        "Numero rate: 120 rate mensili da 223,00 € | Montante: 26.760,00 € | Totale interessi: 6.023,13 €\n"
+        "Importo totale del credito: 18.113,51 € | TAN 5,30% | TAEG 8,66%\n"
+        "### [Page 3]\n"
+        + "\n".join(righe_v30_tutte[:100])
+    )
+    audit_v30_rojo = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_vivi_100_parziale)
+    assert audit_v30_rojo["verdetto_semaforo"] == "ROJO"
+    assert audit_v30_rojo["certificabile"] is False
+    assert audit_v30_rojo["strato_l_osservazione"]["rate_mancanti"] == "101..120"
+    assert "0 anomalie" not in str(audit_v30_rojo["tabulato_audit_python"]).lower()
+
+    assert hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
+    assert hasattr(grounding_numerico, "q2")
+    assert hasattr(grounding_numerico, "npv")
+    assert hasattr(grounding_numerico, "irr_bisection")
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 
