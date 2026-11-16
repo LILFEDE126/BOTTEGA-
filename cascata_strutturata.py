@@ -293,10 +293,10 @@ def esegui_audit_pdf_scansionato_python_first(
             "2. DIVIETO ASSOLUTO DI CONTRADDIZIONE: Se un valore nel Tabulato Python appare come 'N/D' o 'NON VERIFICATO', e' TASSATIVAMENTE VIETATO scrivere che e' stato ricalcolato o verificato!\n"
             "3. SEPARAZIONE BASI TAN vs TAEG: Distingui sempre nettamente il Capitale Finanziato del piano C_fin (base del TAN e delle quote capitale, es. 20.736,87 EUR) "
             "dal Netto Erogato / Importo Totale del Credito C_netto (base del TAEG, es. 18.113,51 EUR), evidenziando la riconciliazione dei costi accessori upfront (C_fin - C_netto).\n"
-            "4. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9) distinguendo C_fin da Prospetto vs Verifica Indipendente della tabella 1..N, eventuali riallineamenti OCR (es. Rata 97) e i totali attesi delle eventuali rate mancanti; "
-            "(b) Verifica rata per rata della tabella di ammortamento (Pag. 3), dichiarando con ONESTA' EPISTEMICA ASSOLUTA quante rate su N sono state effettivamente lette da OCR e segnalando l'analisi della Rata Finale (es. Rata 120: 1,71 EUR vs 0,98 EUR teorici); "
+            "4. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9) distinguendo C_fin da Prospetto vs Verifica Indipendente della tabella 1..N, eventuali riallineamenti OCR (es. Rata 97), la riconciliazione esatta subset-sum dei costi accessori upfront (C_fin - C_netto) e i totali attesi delle eventuali rate mancanti; "
+            "(b) Verifica rata per rata della tabella di ammortamento (Pag. 3), dichiarando quante rate su N sono state effettivamente lette da OCR e riportando se l'eventuale scarto sull'ultima rata (es. Rata 120: 1,71 EUR vs 0,98 EUR teorici) e' certificato come CONGUAGLIO_DI_CHIUSURA_FISIOLOGICO (per estinguere esattamente D(n-1) mantenendo D(n)=0,00 EUR e la rata costante); "
             "(c) Ricalcolo degli interessi mensili sul capitale residuo D_precedente(t) e ricalcolo attuariale IRR/NPV separato C_fin (TAN) vs C_netto (TAEG); "
-            "(d) Verdetto finale rigoroso, equilibrato e prudente (ne' allarmistico ne' iper-certificativo: finche' tutte le N rate non sono stabilmente verificate o se resta uno scarto finale sulla Rata 120, non dichiarare assenza vizi al 100%, ma riconcilia chiaramente le quadrature aggregate che risultano esatte).\n"
+            "(d) Verdetto finale coerente con VERDETTO_SEMAFORO: se VERDE (120/120 rate quadrate, 0 anomalie sostanziali), conferma la piena coerenza aritmetica del piano e l'assenza di vizi sostanziali; se ROJO o GREY, vieta qualsiasi attestazione di assenza vizi fino al completamento o alla verifica dell'estrazione.\n"
             "5. Rispondi in italiano chiaro, rigoroso e strutturato.",
             f"DOCUMENTO ANALIZZATO: {nome_documento}\n"
             f"QUESITO SPECIFICO: {quesito_eff}\n"
@@ -354,8 +354,15 @@ def esegui_audit_pdf_scansionato_python_first(
         rate_manc_fb = strato_l.get("rate_mancanti", "Nessuna") if isinstance(strato_l, dict) else "Nessuna"
         completo_fb = bool(strato_l.get("piano_completo_al_100")) if isinstance(strato_l, dict) else False
         stato_taeg_fb = strato_d.get("stato_taeg", "N/D") if isinstance(strato_d, dict) else "N/D"
-        if verdetto_semaforo_py in ("VERDE", "AMBAR"):
-            verdetto_fb = f"Verdetto `{verdetto_semaforo_py}` (`{audit_py.get('stato_certificazione')}`): piano completo al 100% e quadrato."
+        nota_cong_fb = strato_a.get("nota_conguaglio_rata_finale", "") if isinstance(strato_a, dict) else ""
+        if verdetto_semaforo_py == "VERDE":
+            verdetto_fb = (
+                f"🟢 **VERDE — PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI** "
+                f"(`{audit_py.get('stato_certificazione')}` · `0 anomalie sostanziali`)."
+                + (f" {nota_cong_fb}" if nota_cong_fb else "")
+            )
+        elif verdetto_semaforo_py == "AMBAR":
+            verdetto_fb = f"Verdetto `AMBAR` (`{audit_py.get('stato_certificazione')}`): piano completo al 100% con minimi arrotondamenti."
         elif not completo_fb:
             verdetto_fb = f"IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI (`{verdetto_semaforo_py}`): tabella incompleta (rate mancanti nella scansione: `{rate_manc_fb}`)."
         else:

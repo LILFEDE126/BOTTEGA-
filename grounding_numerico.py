@@ -3,6 +3,7 @@
 Write Barrier (EWD496A) on LLM-generated figures. Zero I/O dependencies."""
 
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from itertools import combinations
 import re
 from typing import Dict, List, Optional, Set, Tuple
 
@@ -1056,6 +1057,126 @@ def _estrai_voci_costi_accessori(testo_sorgente: str) -> List[Tuple[str, Decimal
     return trovate
 
 
+def _riconcilia_costi_accessori_subset_sum(
+    testo_sorgente: str,
+    pagine_tutte: List[Tuple[int, str]],
+    pagine_piano: List[Tuple[int, str]],
+    k_target: Decimal,
+    importo_rata: Optional[Decimal] = None,
+) -> Dict[str, object]:
+    """Sezione 2 (v33): Estrae gli importi atomici dalle pagine riepilogo, esclude automaticamente i subtotali
+    (S = a + b) e cerca tramite subset-sum combinatorio (2..6 voci) il sottoinsieme che eguaglia k_target."""
+    voci_etichettate_grezze = _estrai_voci_costi_accessori(testo_sorgente)
+    mappa_etichette: Dict[Decimal, str] = {}
+    for et_v, val_v in voci_etichettate_grezze:
+        if val_v not in mappa_etichette:
+            mappa_etichette[val_v] = et_v
+
+    num_pagine_piano = {np_p for np_p, _ in pagine_piano}
+    blocchi_riepilogo = [
+        corpo_b
+        for num_b, corpo_b in pagine_tutte
+        if num_b not in num_pagine_piano
+    ]
+    testo_riepilogo = "\n".join(blocchi_riepilogo) if blocchi_riepilogo else testo_sorgente
+
+    score_semantico: Dict[Decimal, int] = {}
+    ordine_valori: List[Decimal] = []
+    kw_costo = ("istruttoria", "imposta", "bollo", "commission", "polizza", "assicuraz", "oneri", "spese", "premio", "intermediaz")
+    kw_rumore = ("decumulo", "estinzione", "residua", "esempio", "rata", "montante", "interessi totali")
+
+    for riga_r in testo_riepilogo.splitlines():
+        r_low = riga_r.lower()
+        if re.match(r"^\s*\|?\s*(?:rata\s*n?\.?\s*)?\d{1,3}\b", riga_r, flags=re.IGNORECASE):
+            continue
+        r_senza_date = re.sub(r"\b\d{1,2}[/.\-]\d{1,2}[/.\-]\d{2,4}\b", " ", riga_r)
+        bonus_r = 0
+        if any(kw in r_low for kw in kw_costo):
+            bonus_r += 10
+        if any(kw in r_low for kw in kw_rumore):
+            bonus_r -= 5
+        for tok_imp in re.findall(r"\d+(?:[.,]\d{3})*(?:[.,]\d{2})(?![\d.,])", r_senza_date):
+            val_d = _converti_stringa_in_decimal_audit(tok_imp)
+            if val_d is None:
+                continue
+            v_q = q2(val_d)
+            if v_q < Decimal("1.00") or v_q > k_target:
+                continue
+            if importo_rata is not None and abs(v_q - importo_rata) <= Decimal("0.01"):
+                continue
+            if v_q not in score_semantico:
+                ordine_valori.append(v_q)
+                score_semantico[v_q] = bonus_r
+            else:
+                score_semantico[v_q] = max(score_semantico[v_q], bonus_r)
+
+    for val_et in mappa_etichette:
+        if Decimal("1.00") <= val_et <= k_target and val_et not in score_semantico:
+            ordine_valori.append(val_et)
+            score_semantico[val_et] = 12
+
+    subtotali_rilevati: Set[Decimal] = set()
+    insieme_candidati = set(ordine_valori)
+    for v_s in ordine_valori:
+        trovato_sum = False
+        for v_a in ordine_valori:
+            if v_a >= v_s:
+                continue
+            v_b = q2(v_s - v_a)
+            if v_b != v_a and v_b in insieme_candidati:
+                if not any(
+                    v_x in mappa_etichette and v_s in mappa_etichette
+                    and score_semantico.get(v_s, 0) > score_semantico.get(v_a, 0) + 10
+                    for v_x in (v_a, v_b)
+                ):
+                    trovato_sum = True
+                    break
+        if trovato_sum:
+            subtotali_rilevati.add(v_s)
+
+    atomici = [v for v in ordine_valori if v not in subtotali_rilevati]
+    atomici_ordinati = sorted(atomici, key=lambda x: (-score_semantico.get(x, 0), ordine_valori.index(x)))[:22]
+
+    miglior_comb: Optional[Tuple[Decimal, ...]] = None
+    miglior_chiave_rank: Optional[Tuple[Decimal, int, int]] = None
+
+    for card in range(2, min(7, len(atomici_ordinati) + 1)):
+        for comb in combinations(atomici_ordinati, card):
+            diff_c = abs(sum(comb, Decimal("0.00")) - k_target)
+            if diff_c <= Decimal("0.02"):
+                sc_sem = sum(score_semantico.get(x, 0) for x in comb)
+                chiave_rank = (diff_c, -sc_sem, card)
+                if miglior_chiave_rank is None or chiave_rank < miglior_chiave_rank:
+                    miglior_chiave_rank = chiave_rank
+                    miglior_comb = comb
+        if miglior_comb is not None and miglior_chiave_rank is not None and miglior_chiave_rank[0] == Decimal("0.00") and miglior_chiave_rank[1] < 0:
+            break
+
+    if miglior_comb is not None:
+        voci_riconciliate = sorted(miglior_comb, key=lambda x: ordine_valori.index(x))
+        set_ric = set(voci_riconciliate)
+        scartati = [v for v in ordine_valori if v not in set_ric]
+        etichettate_out = [
+            (mappa_etichette.get(v_r, "Costo accessorio"), v_r)
+            for v_r in voci_riconciliate
+        ]
+        return {
+            "voci_costi_accessori_riconciliate": voci_riconciliate,
+            "voci_etichettate_riconciliate": etichettate_out,
+            "somma_costi_accessori": q2(sum(voci_riconciliate, Decimal("0.00"))),
+            "riconciliazione_costi_ok": True,
+            "subtotali_o_esempi_scartati": scartati,
+        }
+
+    return {
+        "voci_costi_accessori_riconciliate": [v for _, v in voci_etichettate_grezze if v not in subtotali_rilevati],
+        "voci_etichettate_riconciliate": [(et, v) for et, v in voci_etichettate_grezze if v not in subtotali_rilevati],
+        "somma_costi_accessori": q2(sum((v for _, v in voci_etichettate_grezze if v not in subtotali_rilevati), Decimal("0.00"))),
+        "riconciliazione_costi_ok": False,
+        "subtotali_o_esempi_scartati": sorted(subtotali_rilevati),
+    }
+
+
 def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, object]:
     """Pipeline matematica deterministica v31 in 11 Sezioni (Livello 1, Decimal ROUND_HALF_UP):
     estrazione multi-riga TAN/TAEG/C_netto, auto-allineamento Q_int vs Q_cap e Capitale vs Debito Residuo,
@@ -1315,13 +1436,26 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
     costi_accessori_trattenuti: Optional[Decimal] = None
     if c_fin is not None and c_netto is not None and c_fin >= c_netto:
         costi_accessori_trattenuti = q2(c_fin - c_netto)
-    voci_costi_trovate = _estrai_voci_costi_accessori(testo)
-    somma_voci_costi_trovate = q2(sum((v_acc for _, v_acc in voci_costi_trovate), Decimal("0.00")))
-    riconciliazione_costi_ok: Optional[bool] = (
-        abs(somma_voci_costi_trovate - costi_accessori_trattenuti) <= Decimal("1.00")
-        if (costi_accessori_trattenuti is not None and voci_costi_trovate)
-        else None
-    )
+
+    if costi_accessori_trattenuti is not None and costi_accessori_trattenuti > Decimal("0.00"):
+        esito_sub_costi = _riconcilia_costi_accessori_subset_sum(
+            testo, pagine_tutte, pagine_piano, costi_accessori_trattenuti, importo_rata=importo_rata
+        )
+        voci_costi_trovate = list(esito_sub_costi["voci_etichettate_riconciliate"])
+        voci_costi_riconciliate_dec: List[Decimal] = list(esito_sub_costi["voci_costi_accessori_riconciliate"])
+        somma_voci_costi_trovate = Decimal(str(esito_sub_costi["somma_costi_accessori"]))
+        riconciliazione_costi_ok = bool(esito_sub_costi["riconciliazione_costi_ok"])
+        subtotali_o_esempi_scartati: List[Decimal] = list(esito_sub_costi["subtotali_o_esempi_scartati"])
+    else:
+        voci_costi_trovate = _estrai_voci_costi_accessori(testo)
+        voci_costi_riconciliate_dec = [v_acc for _, v_acc in voci_costi_trovate]
+        somma_voci_costi_trovate = q2(sum((v_acc for _, v_acc in voci_costi_trovate), Decimal("0.00")))
+        riconciliazione_costi_ok = (
+            abs(somma_voci_costi_trovate - costi_accessori_trattenuti) <= Decimal("1.00")
+            if (costi_accessori_trattenuti is not None and voci_costi_trovate)
+            else None
+        )
+        subtotali_o_esempi_scartati = []
 
     if totale_interessi_dich is None and m_rif_iniz is not None and c_fin is not None and m_rif_iniz > c_fin:
         totale_interessi_stimato = q2(m_rif_iniz - c_fin)
@@ -1454,16 +1588,33 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
 
         if prev_cap_res is not None and prev_cap_res > Decimal("0.00"):
             d_alt_riga = q2(cap_res + q_cap) if info_k["ha_capitale_residuo"] else None
+            cond1_dn_zero = (not info_k["ha_capitale_residuo"]) or abs(cap_res) <= TOL
+            cond2_estinzione = abs(q_cap - prev_cap_res) <= TOL
+            cond3_quadratura_ultima = diff_somma_rata <= TOL
+            cond4_somma_interessi = (
+                piano_completo_al_100
+                and totale_interessi_stimato is not None
+                and abs(somma_quote_interessi_lette - totale_interessi_stimato) <= Decimal("0.02")
+            )
+            e_conguaglio_chiusura_esatto = bool(
+                k == numero_rate_atteso
+                and numero_rate_atteso > 0
+                and piano_completo_al_100
+                and cond1_dn_zero
+                and cond2_estinzione
+                and cond3_quadratura_ultima
+            )
             if i_m_nominale is not None:
                 int_nom_atteso = q2(prev_cap_res * i_m_nominale)
                 diff_nom = abs(q_int - int_nom_atteso)
-                if diff_nom > TOL:
+                e_conguaglio_nom = e_conguaglio_chiusura_esatto and (cond4_somma_interessi or diff_nom <= Decimal("1.50"))
+                if diff_nom > TOL and not e_conguaglio_nom:
                     msg_nom = f"Rata {k}: Q_int letta {q_int} € vs Q_int_teorico {int_nom_atteso} € (scarto {diff_nom} € su D_prec={prev_cap_res} €)"
                     if d_alt_riga is not None and abs(d_alt_riga - prev_cap_res) > TOL:
                         int_alt_nom = q2(d_alt_riga * i_m_nominale)
                         msg_nom = f"Rata {k}: Q_int letta {q_int} € vs Q_int_teorico {int_nom_atteso} € / {int_alt_nom} € (scarto {diff_nom} € — verificare arrotondamento o OCR residuo)"
                     anomalie_interessi_nominale.append(msg_nom)
-                if convenzione_tan_adottata == "NOMINALE_MENSUALE":
+                if convenzione_tan_adottata == "NOMINALE_MENSUALE" and not e_conguaglio_nom:
                     if diff_nom > scarto_massimo_tabella:
                         scarto_massimo_tabella = diff_nom
                     if diff_nom > TOL:
@@ -1473,10 +1624,11 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
             if i_m_effettiva is not None:
                 int_eff_atteso = q2(prev_cap_res * i_m_effettiva)
                 diff_eff = abs(q_int - int_eff_atteso)
-                if diff_eff > TOL:
+                e_conguaglio_eff = e_conguaglio_chiusura_esatto and (cond4_somma_interessi or diff_eff <= Decimal("1.50"))
+                if diff_eff > TOL and not e_conguaglio_eff:
                     msg_eff = f"Rata {k}: Q_int letta {q_int} € vs effettiva {int_eff_atteso} € (scarto {diff_eff} €)"
                     anomalie_interessi_effettiva.append(msg_eff)
-                if convenzione_tan_adottata == "EFFETTIVA_COMPOSTA":
+                if convenzione_tan_adottata == "EFFETTIVA_COMPOSTA" and not e_conguaglio_eff:
                     if diff_eff > scarto_massimo_tabella:
                         scarto_massimo_tabella = diff_eff
                     if diff_eff > TOL:
@@ -1752,22 +1904,54 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         )
 
     analisi_rata_finale: Optional[Dict[str, str]] = None
+    nota_conguaglio_rata_finale = ""
+    stato_rata_finale = "NON_ESTRATTA"
     if numero_rate_atteso > 0 and numero_rate_atteso in righe_normalizzate and i_m_primario is not None:
         r_fin_obj = righe_normalizzate[numero_rate_atteso]
         d_prec_fin_val, _ = _risolvi_d_precedente(numero_rate_atteso)
         if d_prec_fin_val is not None and d_prec_fin_val > Decimal("0.00"):
             q_cap_fin_val = Decimal(str(r_fin_obj["quota_capitale"]))
             q_int_fin_val = Decimal(str(r_fin_obj["quota_interessi"]))
+            r_fin_val = Decimal(str(r_fin_obj["importo_rata"]))
+            cap_res_fin_val = Decimal(str(r_fin_obj["capitale_residuo"]))
             q_int_teor_fin_val = q2(d_prec_fin_val * i_m_primario)
             delta_fin_val = q2(abs(q_int_fin_val - q_int_teor_fin_val))
+            q_cap_ipotetica = q2(r_fin_val - q_int_teor_fin_val)
+            cond1_ult = (not r_fin_obj["ha_capitale_residuo"]) or abs(cap_res_fin_val) <= TOL
+            cond2_ult = abs(q_cap_fin_val - d_prec_fin_val) <= TOL
+            cond3_ult = abs((q_cap_fin_val + q_int_fin_val) - r_fin_val) <= TOL
+            cond4_ult = (
+                totale_interessi_stimato is not None
+                and abs(somma_quote_interessi_lette - totale_interessi_stimato) <= Decimal("0.02")
+            ) or delta_fin_val <= Decimal("1.50")
+
+            if delta_fin_val > TOL and piano_completo_al_100 and cond1_ult and cond2_ult and cond3_ult and cond4_ult:
+                stato_rata_finale = "CONGUAGLIO_DI_CHIUSURA_FISIOLOGICO"
+                nota_conguaglio_rata_finale = (
+                    f"Rata {numero_rate_atteso} (Conguaglio fisiologico di chiusura certificato): "
+                    f"D({numero_rate_atteso - 1}) = {d_prec_fin_val} €, Rata = {r_fin_val} €, "
+                    f"Q_cap({numero_rate_atteso}) = {q_cap_fin_val} €, "
+                    f"Q_int({numero_rate_atteso}) = {r_fin_val} - {q_cap_fin_val} = {q_int_fin_val} € "
+                    f"(rispetto a {q_int_teor_fin_val} € teorici, scarto +{delta_fin_val} €). "
+                    f"Se si applicasse {q_int_teor_fin_val} €, la quota capitale ({q_cap_ipotetica} €) "
+                    f"supererebbe il debito residuo ({d_prec_fin_val} €). Il valore {q_int_fin_val} € consente "
+                    f"la chiusura esatta D({numero_rate_atteso}) = 0.00 € e la quadratura al centesimo "
+                    f"degli interessi totali ({totale_interessi_stimato or somma_quote_interessi_lette} €)."
+                )
+            elif delta_fin_val <= TOL:
+                stato_rata_finale = "CONFORME_ENTRO_TOLLERANZA"
+            else:
+                stato_rata_finale = "DA_VERIFICARE_PIANO_PARZIALE" if not piano_completo_al_100 else "SCOSTAMENTO_DA_VERIFICARE"
+
             analisi_rata_finale = {
                 "rata": str(numero_rate_atteso),
+                "stato_rata_finale": stato_rata_finale,
                 "d_precedente": str(d_prec_fin_val),
                 "q_cap_letta": str(q_cap_fin_val),
                 "q_int_letta": str(q_int_fin_val),
                 "q_int_teorico": str(q_int_teor_fin_val),
                 "scarto_euro": str(delta_fin_val),
-                "spiegazione": (
+                "spiegazione": nota_conguaglio_rata_finale or (
                     f"Rata {numero_rate_atteso}: Q_int letta {q_int_fin_val} € su D({numero_rate_atteso - 1})={d_prec_fin_val} € "
                     f"contro {q_int_teor_fin_val} € teorici (scarto {delta_fin_val} €). Verificare puntualmente se "
                     f"conguaglio di chiusura della rata costante ({importo_rata} € vs rata teorica non arrotondata) o imprecisione OCR."
@@ -1810,6 +1994,8 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "capitale_finanziato": str(c_fin) if c_fin is not None else None,
         "netto_ricavo": str(c_netto) if c_netto is not None else None,
         "costi_accessori_trattenuti": str(costi_accessori_trattenuti) if costi_accessori_trattenuti is not None else None,
+        "voci_costi_accessori_riconciliate": [str(v_r) for v_r in voci_costi_riconciliate_dec],
+        "subtotali_o_esempi_scartati": [str(v_s) for v_s in subtotali_o_esempi_scartati],
         "voci_costi_accessori_trovate": [{"voce": et_v, "importo": str(val_v)} for et_v, val_v in voci_costi_trovate],
         "somma_voci_costi_trovate": str(somma_voci_costi_trovate) if voci_costi_trovate else None,
         "riconciliazione_costi_ok": riconciliazione_costi_ok,
@@ -1846,6 +2032,8 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "fonte_tan_rata_francese": fonte_tan_controllo,
         "rate_verificate_ok": rate_verificate_ok,
         "rate_riallineate_ocr": rate_riallineate_ocr,
+        "stato_rata_finale": stato_rata_finale,
+        "nota_conguaglio_rata_finale": nota_conguaglio_rata_finale,
         "analisi_rata_finale": analisi_rata_finale,
         "somma_quote_capitale_lette": str(somma_quote_capitale_lette),
         "somma_quote_interessi_lette": str(somma_quote_interessi_lette),
@@ -1908,9 +2096,11 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
 
     blocco_costi_md = ""
     if costi_accessori_trattenuti is not None:
-        voci_str = " + ".join(f"{val_v} € ({et_v})" for et_v, val_v in voci_costi_trovate)
+        voci_str = " + ".join(f"{val_v} €" for _, val_v in voci_costi_trovate)
+        scartati_str = ", ".join(f"{v_s} €" for v_s in subtotali_o_esempi_scartati[:8])
         dettaglio_voci = (
-            f" · Voci estratte: {voci_str} = `{somma_voci_costi_trovate} €` (Riconciliazione: `{riconciliazione_costi_ok}`)"
+            f" · Riconciliazione Subset-Sum: `{voci_str} = {somma_voci_costi_trovate} €` (`OK: {riconciliazione_costi_ok}`)"
+            + (f" · Scartati subtotali/duplicati/esempi OCR: `{scartati_str}`" if scartati_str else "")
             if voci_costi_trovate
             else ""
         )
@@ -1923,7 +2113,9 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         blocco_riallineamento_md = "- **Riallineamenti OCR Riga per Riga:** `" + "` | `".join(rate_riallineate_ocr[:5]) + "`\n"
 
     blocco_rata_finale_md = ""
-    if analisi_rata_finale and Decimal(analisi_rata_finale["scarto_euro"]) > TOL:
+    if nota_conguaglio_rata_finale:
+        blocco_rata_finale_md = f"- **Conguaglio Fisiologico Rata Finale (`{stato_rata_finale}`):** {nota_conguaglio_rata_finale}\n"
+    elif analisi_rata_finale and Decimal(analisi_rata_finale["scarto_euro"]) > TOL:
         blocco_rata_finale_md = f"- **Analisi Specifica Rata Finale ({analisi_rata_finale['rata']}):** {analisi_rata_finale['spiegazione']}\n"
 
     blocco_mancanti_md = ""
@@ -1957,10 +2149,14 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         if debito_residuo_finale_valore is not None
         else "`NON ESTRATTO (ultima rata mancante)`"
     )
-    icona_verdetto = {"VERDE": "🟢", "AMBAR": "🟠", "ROJO": "🔴", "GREY": "⚪"}.get(verdetto_semaforo, "🔴")
+    descrizione_verdetto = (
+        "🟢 VERDE — PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI"
+        if verdetto_semaforo == "VERDE"
+        else f"{ {'AMBAR': '🟠', 'ROJO': '🔴', 'GREY': '⚪'}.get(verdetto_semaforo, '🔴') } `{verdetto_semaforo}`"
+    )
     tabulato_md = (
         "### 🧮 Tabulato Deterministico Python-First (11 Sezioni · `Decimal ROUND_HALF_UP`)\n"
-        f"**Verdetto Semaforo Matematico:** {icona_verdetto} **`{verdetto_semaforo}`** (`{stato_certificazione}`)\n"
+        f"**Verdetto Semaforo Matematico:** **{descrizione_verdetto}** (`{stato_certificazione}`)\n"
         f"{blocco_avviso_md}\n"
         "#### 1. Strato L — Classificazione Pagine, Basi $C_{{fin}}$ vs $C_{{netto}}$ & Completezza\n"
         f"- **Pagine Rilevate:** `{pagine_trovate}` | **Piano Ammortamento:** `{strato_l['pagine_piano_ammortamento']}` | **Costi/TAEG:** `{strato_l['pagine_riepilogo_costi_taeg']}` | **Liquidazione:** `{strato_l['pagine_prospetto_liquidazione']}`\n"
@@ -1977,7 +2173,7 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         f"- **Somma Rate / $Q_{{cap}}$ / $Q_{{int}}$ (su {n_rate_estratte} rate lette):** `{somma_rate_lette} €` | `{somma_quote_capitale_lette} €` (`OK: {quadratura_somma_quote_capitale_ok if piano_completo_al_100 else 'NON VERIFICATO'}`) | `{somma_quote_interessi_lette} €` (`OK: {quadratura_somma_quote_interessi_ok if piano_completo_al_100 else 'NON VERIFICATO'}`)\n"
         f"{blocco_riallineamento_md}"
         f"{blocco_mancanti_md}"
-        f"- **Totale Anomalie Aritmetiche Rilevate (`scarto max {scarto_massimo_tabella} €`):** `{totale_anomalie}` (`Somma rata: {len(righe_quadratura_errata)}`, `Capitale res.: {len(anomalie_capitale_residuo)}`, `Interessi {convenzione_tan_adottata}: {len(anomalie_interessi_primaria)}`, `Aggregate: {len(anomalie_aggregate)}`)\n"
+        f"- **Anomalie Aritmetiche Sostanziali Rilevate (`scarto max {scarto_massimo_tabella} €`):** `{totale_anomalie}` (`Somma rata: {len(righe_quadratura_errata)}`, `Capitale res.: {len(anomalie_capitale_residuo)}`, `Interessi {convenzione_tan_adottata}: {len(anomalie_interessi_primaria)}`, `Aggregate: {len(anomalie_aggregate)}`)\n"
         f"{blocco_rata_finale_md}"
         f"{dettagli_anomalie_md}\n"
         "#### 3. Strato D — Ricalcolo NPV Separato $C_{{fin}}$ (TAN) vs $C_{{netto}}$ (TAEG)\n"
