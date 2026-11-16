@@ -14,6 +14,7 @@ from pydantic import BaseModel, Field
 from logging_bottega import log, log_exception
 from ispezione_moduli import ispezione_completa
 from grounding_numerico import (
+    anonimizza_testo_finanziario,
     arrotonda_esatto_el_x8,
     classifica_nodo_tricolore,
     esegui_audit_matematico_tabella_pdf,
@@ -246,35 +247,36 @@ def esegui_audit_pdf_scansionato_python_first(
 
     if contenuto_bytes:
         try:
-            testo_da_bytes = store_pgvector.estrai_testo_da_pdf(contenuto_bytes)
-            if len(testo_da_bytes) > len(testo_completo):
-                testo_completo = testo_da_bytes
-            audit_prelim = esegui_audit_matematico_tabella_pdf(testo_completo)
-            strato_l_pre = audit_prelim.get("strato_l_osservazione", {})
-            if isinstance(strato_l_pre, dict) and (
-                not strato_l_pre.get("piano_completo_al_100")
-                or not strato_l_pre.get("pagine_riepilogo_taeg_presenti")
-            ):
-                pagine_ocr_extra = store_pgvector._estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes)
-                if pagine_ocr_extra:
-                    testo_ocr_extra = "\n\n".join(
-                        f"### [Page {idx_p}]\n{txt_p}" for idx_p, txt_p in pagine_ocr_extra if txt_p
-                    )
-                    if testo_ocr_extra and testo_ocr_extra not in testo_completo:
-                        testo_completo = f"{testo_completo}\n\n{testo_ocr_extra}".strip()
+            pagine_complete = store_pgvector.estrai_pagine_complete_per_audit_tabellare(contenuto_bytes)
+            if pagine_complete:
+                testo_completo = "\n\n".join(
+                    f"### [Page {idx_p}]\n{txt_p}" for idx_p, txt_p in pagine_complete
+                ).strip()
+            else:
+                testo_da_bytes = store_pgvector.estrai_testo_da_pdf(contenuto_bytes)
+                if len(testo_da_bytes) > len(testo_completo):
+                    testo_completo = testo_da_bytes
         except (RuntimeError, ValueError, OSError, TypeError):
             pass
 
     audit_py = esegui_audit_matematico_tabella_pdf(testo_completo)
+    certificabile_py = bool(audit_py.get("certificabile", False))
     tabulato_py = str(audit_py.get("tabulato_audit_python", ""))
     strato_l = audit_py.get("strato_l_osservazione", {})
     strato_a = audit_py.get("strato_a_quadrature", {})
     strato_d = audit_py.get("strato_d_ricalcolo_taeg_tan", {})
+    righe_norm = audit_py.get("righe_tabella_normalizzate", [])
+
+    testo_anonimizzato = anonimizza_testo_finanziario(testo_completo)
+    anteprima_righe_json = json.dumps(
+        righe_norm[:12] + (righe_norm[-8:] if isinstance(righe_norm, list) and len(righe_norm) > 12 else []),
+        ensure_ascii=False,
+    ) if isinstance(righe_norm, list) and righe_norm else "[]"
 
     quesito_eff = (
         domanda_specifica.strip()
         if domanda_specifica and domanda_specifica.strip()
-        else "Verifica completa del piano di ammortamento rata per rata, quadratura costi (Pag. 1, 5, 6, 8, 9) e ricalcolo TAN/TAEG"
+        else "Audit matematico completo del documento finanziario e verifica di certificabilita'"
     )
 
     valutazione_md = ""
@@ -285,48 +287,70 @@ def esegui_audit_pdf_scansionato_python_first(
             "Sei un revisore matematico-finanziario forense (Architettura Strato L + Strato A + Strato D). "
             "Il motore Python ha gia' eseguito in aritmetica esatta Decimal (ROUND_HALF_UP) tutti i calcoli sul documento. "
             "REGOLE TASSATIVE:\n"
-            "1. Basa il tuo giudizio ESCLUSIVAMENTE sui risultati numerici del TABULATO DETERMINISTICO PYTHON fornito qui sotto.\n"
+            "1. Basa il tuo giudizio ESCLUSIVAMENTE sui risultati numerici del TABULATO DETERMINISTICO PYTHON e sulle righe normalizzate fornite qui sotto.\n"
             "2. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9); (b) Verifica rata per rata della tabella di ammortamento (Pag. 3), "
             "dichiarando con ONESTA' EPISTEMICA ASSOLUTA quante rate su N sono state effettivamente lette e verificate da Python e quali rate mancano nella scansione "
-            "(e' TASSATIVAMENTE VIETATO dichiarare 'privo di vizi l'intero piano' se piano_completo_al_100 e' False o se mancano delle rate!); "
-            "(c) Ricalcolo degli interessi mensili sul debito residuo e ricalcolo attuariale IRR del TAN e del TAEG (Pag. 8 e Pag. 9).\n"
+            "(se certificabile e' False o mancano pagine/rate, e' TASSATIVAMENTE VIETATO usare espressioni come 'i calcoli sono corretti e privi di vizi' o 'privo di vizi' fino al completamento integrale della tabella!); "
+            "(c) Ricalcolo degli interessi mensili sul debito residuo e ricalcolo attuariale IRR/NPV separato C_fin (TAN) vs C_netto (TAEG).\n"
             "3. Rispondi in italiano chiaro, rigoroso e strutturato.",
             f"DOCUMENTO ANALIZZATO: {nome_documento}\n"
-            f"QUESITO SPECIFICO: {quesito_eff}\n\n"
+            f"QUESITO SPECIFICO: {quesito_eff}\n"
+            f"CERTIFICABILE_PY: {certificabile_py} (Stato: {audit_py.get('stato_certificazione')})\n\n"
             f"TABULATO DETERMINISTICO CALCOLATO DA PYTHON (FONTE DI VERITA' MATEMATICA):\n{tabulato_py}\n\n"
-            f"TESTO INTEGRALE PAGINE ESTRATTE:\n{testo_completo[:18000]}",
+            f"CAMPIONE TABELLA NORMALIZZATA PYTHON:\n{anteprima_righe_json}\n\n"
+            f"TESTO INTEGRALE PAGINE ESTRATTE (ANONIMIZZATO):\n{testo_anonimizzato[:18000]}",
             ValutazioneAuditMatematicoPDF,
         )
         fonte_valutazione = "LLM_SU_CALCOLO_PYTHON"
+        verdetto_testo = str(esito_llm.verdetto_finale_onesta_epistemica or "").strip()
         nota_onesta = ""
-        if isinstance(strato_l, dict) and not strato_l.get("piano_completo_al_100"):
-            rate_manc = strato_l.get("rate_mancanti", "N/D")
-            rate_let = strato_l.get("rate_lette_conteggio", 0)
-            n_tot = strato_l.get("numero_rate_totale", 0)
+        if not certificabile_py or (isinstance(strato_l, dict) and not strato_l.get("pagine_riepilogo_taeg_presenti")):
+            rate_manc = strato_l.get("rate_mancanti", "N/D") if isinstance(strato_l, dict) else "N/D"
+            rate_let = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
+            n_tot = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
+            verdetto_basso = verdetto_testo.lower()
+            if any(
+                frase_vietata in verdetto_basso
+                for frase_vietata in ("privo di vizi", "privi di vizi", "corretti e privi", "intero piano corretto", "nessun vizio")
+            ):
+                verdetto_testo = (
+                    f"IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI SULL'INTERO PIANO: sono state estratte {rate_let} rate "
+                    f"su {n_tot} attese (rate mancanti nella scansione: {rate_manc}). Occorre completare l'estrazione "
+                    f"di tutte le {n_tot} rate e delle pagine di riepilogo prima di qualsiasi attestazione di assenza vizi."
+                )
             nota_onesta = (
-                f"\n\n> ⚠️ **Vincolo di Onestà Epistemica (Strato L/D):** Nella scansione sono state lette e certificate "
+                f"\n\n> ⚠️ **Vincolo di Onestà Epistemica (`{audit_py.get('stato_certificazione')}`):** Nella scansione sono state lette e certificate "
                 f"**{rate_let} rate su {n_tot}** (rate mancanti nella scansione: **`{rate_manc}`**). "
-                f"La certificazione matematica copre le sole rate effettivamente visibili; non è lecito attestare le rate non presenti nel testo estratto."
+                f"Impossibile certificare o escludere vizi sull'intero piano fino al completamento integrale della tabella."
             )
         valutazione_md = (
             "### 🧠 Valutazione Tecnica Forense (LLM vincolato al Tabulato Python `Decimal`)\n\n"
             f"#### a) Quadratura Aggregata dei Costi e del Montante (Pag. 1, 5, 6, 9)\n{esito_llm.quadratura_aggregata}\n\n"
             f"#### b) Verifica Analitica Rata per Rata della Tabella di Ammortamento (Pag. 3)\n{esito_llm.verifica_tabella_ammortamento_rata_per_rata}\n\n"
             f"#### c) Ricalcolo Interessi Mensili sul Debito Residuo e Ricalcolo IRR / TAEG (Pag. 8 e Pag. 9)\n{esito_llm.ricalcolo_interessi_e_taeg}\n\n"
-            f"#### d) Verdetto Finale e Onestà Epistemica\n{esito_llm.verdetto_finale_onesta_epistemica}{nota_onesta}"
+            f"#### d) Verdetto Finale e Onestà Epistemica\n{verdetto_testo}{nota_onesta}"
         )
     except (RuntimeError, requests.exceptions.RequestException, ValueError, TypeError) as err_audit:
         log.warning("LLM non disponibile in 4C (%s): restituisco tabulato deterministico Python", err_audit)
         rate_manc_fb = strato_l.get("rate_mancanti", "Nessuna") if isinstance(strato_l, dict) else "Nessuna"
         completo_fb = bool(strato_l.get("piano_completo_al_100")) if isinstance(strato_l, dict) else False
+        stato_taeg_fb = strato_d.get("stato_taeg", "N/D") if isinstance(strato_d, dict) else "N/D"
+        verdetto_fb = (
+            f"Piano completo e certificabile al 100%."
+            if certificabile_py
+            else f"IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI: tabella incompleta (rate mancanti nella scansione: `{rate_manc_fb}`)."
+        )
         valutazione_md = (
             "### ⚙️ Sintesi Tecnica Deterministica sui Risultati di Python (`Zero-LLM Fallback`)\n\n"
             f"- **a) Quadratura Aggregata:** Montante calcolato `{strato_a.get('montante_calcolato') if isinstance(strato_a, dict) else 'N/D'} €` "
-            f"(Quadratura: `{strato_a.get('quadratura_montante_ok') if isinstance(strato_a, dict) else 'N/D'}`).\n"
+            f"(Quadratura: `{strato_a.get('quadratura_montante_ok') if isinstance(strato_a, dict) else 'N/D'}`) | "
+            f"Rata teorica alla francese: `{strato_a.get('rata_francese_teorica') if isinstance(strato_a, dict) else 'N/D'} €`.\n"
             f"- **b) Verifica Rata per Rata (Onestà Epistemica):** Piano completo al 100%: `{completo_fb}` "
             f"(Rate mancanti nella scansione: `{rate_manc_fb}`).\n"
-            f"- **c) Ricalcolo Attuariale IRR / TAEG:** TAN ricalcolato `{strato_d.get('tan_ricalcolato_pct') if isinstance(strato_d, dict) else 'N/D'}%`, "
-            f"TAEG ricalcolato `{strato_d.get('taeg_ricalcolato_pct') if isinstance(strato_d, dict) else 'N/D'}%`."
+            f"- **c) Ricalcolo Attuariale NPV Separato:** `{stato_taeg_fb}` | "
+            f"TAN ricalcolato `{strato_d.get('tan_ricalcolato_pct') if isinstance(strato_d, dict) else 'N/D'}%`, "
+            f"TAEG ricalcolato `{strato_d.get('taeg_ricalcolato_pct') if isinstance(strato_d, dict) else 'N/D'}%`.\n"
+            f"- **d) Verdetto Finale:** {verdetto_fb}"
         )
 
     return {

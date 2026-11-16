@@ -1927,6 +1927,9 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
         "Nomi che dicono cosa contengono" in risp
         or "Una funzione, un compito" in risp
         or "sette regole" in risp.lower()
+        or "calcola_totale" in risp
+        or "nomi che dicono" in risp.lower()
+        or "un solo compito" in risp.lower()
     )
     assert "SELECT" in risp or "GROUP BY" in risp or "HAVING" in risp or "query per database" in risp
     assert "sudo apt install" not in risp
@@ -2181,8 +2184,9 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
         "### [Page 3]\n"
         "| Rata | Quota Interessi | Quota Capitale | Rata | Debito Residuo |\n"
         f"{righe_82_120}\n"
+        "| 121 | Totale riepilogo finale | 26760,00 | 223,00 |\n"
         "### [Page 8]\n"
-        "TAN 5,50% | TAEG 8,66%\n"
+        "TAN 8,40% | TAEG 9,30%\n"
         "### [Page 9]\n"
         "Riepilogo finale costi e condizioni economiche."
     )
@@ -2190,12 +2194,27 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     strato_l_res = audit_res["strato_l_osservazione"]
     strato_a_res = audit_res["strato_a_quadrature"]
     strato_d_res = audit_res["strato_d_ricalcolo_taeg_tan"]
+    assert audit_res["certificabile"] is False
+    assert audit_res["stato_certificazione"] == "NON_CERTIFICABILE_TABELLA_INCOMPLETA"
     assert strato_l_res["piano_completo_al_100"] is False
     assert strato_l_res["rate_mancanti"] == "1..81"
     assert strato_l_res["rate_lette_conteggio"] == 39
     assert strato_a_res["quadratura_montante_ok"] is True
+    assert strato_a_res["rata_francese_teorica"] is not None
     assert strato_a_res["rate_verificate_ok"] == 39
-    assert strato_d_res["taeg_ricalcolato_pct"] is not None
+    assert strato_d_res["capitale_finanziato_c_fin"] == "18000.00"
+    assert strato_d_res["capitale_netto_taeg_c_netto"] == "17500.00"
+    assert Decimal(str(strato_d_res["taeg_ricalcolato_pct"])) > Decimal(str(strato_d_res["tan_ricalcolato_pct"]))
+
+    testo_sensibile = "Intestatario RSSMRA85M01H501Z IBAN IT60X0542811101000000123456 Rata 223,00 EUR TAN 8,40%"
+    testo_anon = grounding_numerico.anonimizza_testo_finanziario(testo_sensibile)
+    assert "RSSMRA85M01H501Z" not in testo_anon and "[CF_ANONIMO]" in testo_anon
+    assert "IT60X0542811101000000123456" not in testo_anon and "[IBAN_ANONIMO]" in testo_anon
+    assert "223,00" in testo_anon and "8,40%" in testo_anon
+
+    app_py_src = (_trova_radice_progetto() / "app.py").read_text(encoding="utf-8")
+    assert 'placeholder="Write here..."' in app_py_src
+    assert 'value="Verifica completa del piano di ammortamento' not in app_py_src
 
     import cascata_strutturata
     esito_4c_test = cascata_strutturata.esegui_audit_pdf_scansionato_python_first(
@@ -2205,6 +2224,7 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     )
     assert "1..81" in str(esito_4c_test["tabulato_audit_python"])
     assert "1..81" in str(esito_4c_test["valutazione_llm_markdown"])
+    assert "IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI" in str(esito_4c_test["valutazione_llm_markdown"])
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 

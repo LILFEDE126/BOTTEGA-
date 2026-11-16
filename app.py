@@ -24,7 +24,7 @@ import seed_bottega
 import cascata_strutturata
 import risolutore_artigiano
 
-_VERSIONE_MODULI_THE = "2026.11.16.v28"
+_VERSIONE_MODULI_THE = "2026.11.16.v29"
 INTERVALLO_STREAMING_UI_SECONDI = 0.01
 ALTEZZA_TEXTAREA_UI = 120
 ALTEZZA_CODICE_UI = 200
@@ -46,6 +46,8 @@ def _allinea_moduli_in_memoria() -> None:
         or not hasattr(risolutore_artigiano, "esegui_ingest_documento_in_wiki")
         or not hasattr(config, "ha_chiave_dedicata_provider")
         or not hasattr(grounding_numerico, "esegui_audit_matematico_tabella_pdf")
+        or not hasattr(grounding_numerico, "anonimizza_testo_finanziario")
+        or not hasattr(store_pgvector, "estrai_pagine_complete_per_audit_tabellare")
         or not hasattr(cascata_strutturata, "esegui_audit_pdf_scansionato_python_first")
     )
     if necessita_reload:
@@ -103,6 +105,7 @@ if "sessione_web_effimera_attiva" not in st.session_state:
         if hasattr(risolutore_artigiano, "svuota_vault_ram"):
             risolutore_artigiano.svuota_vault_ram()
     st.session_state["documenti_archivio_sessione"] = {}
+    st.session_state["bytes_documenti_sessione"] = {}
     st.session_state["llm_wiki_voci"] = []
     st.session_state["parti_discorso_accumulate"] = []
     st.session_state["ultimo_esito_artigiano"] = None
@@ -405,6 +408,7 @@ def _elabora_file_caricati(
                     "n_frammenti": len(blocchi_doc),
                     "n_nuovi": n_ins,
                 }
+                st.session_state.setdefault("bytes_documenti_sessione", {})[singolo_file.name] = raw_bytes
                 nuovi_elaborati_ora += 1
             except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
                 logging_bottega.log_exception(
@@ -506,6 +510,7 @@ def _salva_testo_incollato_in_archivio(
             "n_frammenti": len(blocchi_doc),
             "n_nuovi": n_ins,
         }
+        st.session_state.setdefault("bytes_documenti_sessione", {})[titolo_pulito] = raw_bytes
         st.toast(f"'{titolo_pulito}' successfully saved into memory ({len(blocchi_doc)} fragments)!")
         return True
     except (RuntimeError, ValueError, OSError, psycopg2.Error, KeyError, TypeError) as err:
@@ -666,6 +671,7 @@ with st.sidebar:
                 )
             if st.button("Clear All Uploaded Documents"):
                 st.session_state["documenti_archivio_sessione"] = {}
+                st.session_state["bytes_documenti_sessione"] = {}
                 if hasattr(store_pgvector, "_ARCHIVIO_MEMORIA_RAM"):
                     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
                 st.rerun()
@@ -1144,7 +1150,8 @@ with tab_codice:
     )
     quesito_audit_4c = st.text_input(
         "Specific Audit Question (optional):",
-        value="Verifica completa del piano di ammortamento rata per rata, quadratura costi (Pag. 1, 5, 6, 8, 9) e ricalcolo TAN/TAEG",
+        value="",
+        placeholder="Write here...",
         key="q_audit_4c",
     )
     if st.button("🧮 Run Python-First Math Audit (Python Decimal -> LLM Evaluation)", type="primary", key="btn_run_4c"):
@@ -1157,6 +1164,7 @@ with tab_codice:
         elif doc_scelto_audit in archivio_per_audit:
             nome_doc_4c = doc_scelto_audit
             meta_4c = archivio_per_audit[doc_scelto_audit]
+            bytes_doc_4c = st.session_state.get("bytes_documenti_sessione", {}).get(doc_scelto_audit, b"")
             blocchi_4c = meta_4c.get("blocchi") or []
             testo_doc_4c = "\n\n".join(
                 f"### [{sez_b}]\n{txt_b}" for sez_b, txt_b in blocchi_4c if txt_b

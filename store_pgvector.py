@@ -702,12 +702,20 @@ def _elabora_pagine_pdf(pagine_estratte: List[Tuple[int, str]]) -> List[Tuple[st
     return blocchi_slide
 
 
-def _codifica_bitmap_pdfium_in_png(bmp: Any) -> bytes:
-    """Codifica un bitmap pypdfium2 in bytes PNG standard usando solo struct e zlib (zero dipendenze esterne)."""
+def _codifica_bitmap_ritaglio_in_png(
+    bmp: Any, x_inizio_ratio: float = 0.0, x_fine_ratio: float = 1.0
+) -> bytes:
+    """Codifica un'immagine o un suo ritaglio orizzontale (sx/dx) in bytes PNG usando solo struct e zlib."""
     try:
         if hasattr(bmp, "to_pil"):
+            img_pil = bmp.to_pil()
+            w_p, h_p = img_pil.size
+            x0 = max(0, int(w_p * x_inizio_ratio))
+            x1 = min(w_p, int(w_p * x_fine_ratio))
+            if x_inizio_ratio > 0.0 or x_fine_ratio < 1.0:
+                img_pil = img_pil.crop((x0, 0, x1, h_p))
             buf_pil = io.BytesIO()
-            bmp.to_pil().save(buf_pil, format="PNG")
+            img_pil.save(buf_pil, format="PNG")
             return buf_pil.getvalue()
     except (ImportError, OSError, RuntimeError, AttributeError, ValueError):
         pass
@@ -718,11 +726,14 @@ def _codifica_bitmap_pdfium_in_png(bmp: Any) -> bytes:
     buffer_raw = bytes(getattr(bmp, "buffer", b""))
     if larghezza <= 0 or altezza <= 0 or not buffer_raw:
         return b""
+    x_start = max(0, int(larghezza * x_inizio_ratio))
+    x_end = min(larghezza, int(larghezza * x_fine_ratio))
+    w_crop = max(1, x_end - x_start)
     righe_rgb = bytearray()
     for y in range(altezza):
         righe_rgb.append(0)
         offset_y = y * stride
-        for x in range(larghezza):
+        for x in range(x_start, x_end):
             idx_px = offset_y + x * canali
             if idx_px + 2 < len(buffer_raw):
                 b_val = buffer_raw[idx_px]
@@ -736,7 +747,7 @@ def _codifica_bitmap_pdfium_in_png(bmp: Any) -> bytes:
         crc = zlib.crc32(tag_b + dati_b) & 0xFFFFFFFF
         return struct.pack("!I", len(dati_b)) + tag_b + dati_b + struct.pack("!I", crc)
 
-    ihdr = struct.pack("!IIBBBBB", larghezza, altezza, 8, 2, 0, 0, 0)
+    ihdr = struct.pack("!IIBBBBB", w_crop, altezza, 8, 2, 0, 0, 0)
     idat = zlib.compress(bytes(righe_rgb), 6)
     return (
         b"\x89PNG\r\n\x1a\n"
@@ -744,6 +755,11 @@ def _codifica_bitmap_pdfium_in_png(bmp: Any) -> bytes:
         + _blocco_png(b"IDAT", idat)
         + _blocco_png(b"IEND", b"")
     )
+
+
+def _codifica_bitmap_pdfium_in_png(bmp: Any) -> bytes:
+    """Codifica un bitmap pypdfium2 in bytes PNG standard usando solo struct e zlib (zero dipendenze esterne)."""
+    return _codifica_bitmap_ritaglio_in_png(bmp, 0.0, 1.0)
 
 
 def _parse_testo_ocr_in_pagine(testo_trascritto: str) -> List[Tuple[int, str]]:
@@ -889,6 +905,116 @@ def _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes: bytes) -> List[Tuple[i
     if mappa_pagine_ocr:
         return sorted(mappa_pagine_ocr.items(), key=lambda x: x[0])
     return []
+
+
+def estrai_pagine_complete_per_audit_tabellare(contenuto_bytes: bytes) -> List[Tuple[int, str]]:
+    """Estrae tutte le pagine 1..N di un PDF senza alcun filtro slide per l'audit 4C, eseguendo
+    OCR multi-colonna su rendering PNG ad alta risoluzione (sx + dx per tabelle affiancate)."""
+    if not contenuto_bytes or len(contenuto_bytes) > 20 * 1024 * 1024:
+        return []
+
+    chiave_primaria = risolvi_chiave_api(provider="gemini")
+    chiave_fallback = _decodifica_chiave_cloud_default()
+    chiavi_ocr = list(dict.fromkeys(k for k in (chiave_primaria, chiave_fallback) if k and k.strip()))
+    modelli_ocr = list(
+        dict.fromkeys(list(MODELLI_NATIVI_GEMINI_LIVE) + ["gemini-2.5-flash", "gemini-2.0-flash"])
+    )
+    prompt_tabellare = (
+        "Trascrivi in una tabella Markdown normalizzata TUTTE le righe e TUTTE le colonne presenti "
+        "in questa pagina (leggendo prima per intero la colonna/tabella di sinistra dalla rata 1 in poi, "
+        "poi la colonna centrale e infine la colonna di destra fino all'ultima rata, oltre a tutte le "
+        "tabelle di costo, TAEG e liquidazione). Non omettere alcuna rata e non riassumere."
+    )
+
+    pagine_risultato: List[Tuple[int, str]] = []
+    if PDFIUM_DISPONIBILE and pdfium is not None:
+        doc_ocr = None
+        try:
+            doc_ocr = pdfium.PdfDocument(contenuto_bytes)
+            n_pag = len(doc_ocr)
+            for idx_zero in range(n_pag):
+                num_p = idx_zero + 1
+                pagina = doc_ocr[idx_zero]
+                testo_nat = ""
+                try:
+                    testo_nat = normalizza_spazi_testo_pdf(pagina.get_textpage().get_text_bounded() or "").strip()
+                except (RuntimeError, ValueError, TypeError, AttributeError):
+                    testo_nat = ""
+
+                t_low = testo_nat.lower()
+                righe_num_rate = [
+                    int(m_r)
+                    for m_r in re.findall(r"(?m)^\s*\|?\s*(?:rata\s*n?\.?\s*)?(\d{1,3})\b.*\d+[.,]\d{2}", testo_nat, flags=re.IGNORECASE)
+                    if 1 <= int(m_r) <= 360
+                ]
+                ha_tabella_incompleta = bool(righe_num_rate and min(righe_num_rate) > 10 and max(righe_num_rate) >= 30)
+                e_pag_costi_o_taeg = any(
+                    kw in t_low
+                    for kw in ("taeg", "tan", "teg", "netto ricavo", "erogato", "commissioni", "spese", "riepilogo", "ammortamento", "rata")
+                ) or num_p in (3, 5, 6, 8, 9)
+                necessita_vision = len(re.findall(r"\w", testo_nat)) < 300 or ha_tabella_incompleta or (e_pag_costi_o_taeg and len(re.findall(r"\d", testo_nat)) < 40)
+
+                testo_finale_p = testo_nat
+                if necessita_vision and chiavi_ocr:
+                    try:
+                        bmp = pagina.render(scale=2.6)
+                        png_intera = _codifica_bitmap_ritaglio_in_png(bmp, 0.0, 1.0)
+                        parti_vis: List[Dict[str, Any]] = []
+                        if png_intera:
+                            parti_vis.append({"text": f"Pagina {num_p} intera:"})
+                            parti_vis.append({
+                                "inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_intera).decode("ascii")}
+                            })
+                        if ha_tabella_incompleta or "ammortamento" in t_low or num_p == 3:
+                            png_sx = _codifica_bitmap_ritaglio_in_png(bmp, 0.0, 0.55)
+                            png_dx = _codifica_bitmap_ritaglio_in_png(bmp, 0.45, 1.0)
+                            if png_sx:
+                                parti_vis.append({"text": f"Dettaglio colonna sinistra Pagina {num_p}:"})
+                                parti_vis.append({
+                                    "inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_sx).decode("ascii")}
+                                })
+                            if png_dx:
+                                parti_vis.append({"text": f"Dettaglio colonna destra Pagina {num_p}:"})
+                                parti_vis.append({
+                                    "inlineData": {"mimeType": "image/png", "data": base64.b64encode(png_dx).decode("ascii")}
+                                })
+                        if parti_vis:
+                            parti_vis.append({"text": prompt_tabellare})
+                            testo_vis = _invia_parti_multimodali_gemini_ocr(parti_vis, chiavi_ocr, modelli_ocr)
+                            if testo_vis:
+                                testo_vis_norm = normalizza_spazi_testo_pdf(testo_vis).strip()
+                                if testo_nat and testo_nat[:50].lower() not in testo_vis_norm.lower():
+                                    testo_finale_p = f"{testo_nat}\n{testo_vis_norm}"
+                                elif len(testo_vis_norm) >= len(testo_nat):
+                                    testo_finale_p = testo_vis_norm
+                    except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
+                        pass
+
+                pagine_risultato.append((num_p, testo_finale_p))
+            return pagine_risultato
+        except (RuntimeError, ValueError, OSError, TypeError, AttributeError):
+            pagine_risultato = []
+        finally:
+            if doc_ocr is not None and hasattr(doc_ocr, "close"):
+                doc_ocr.close()
+
+    try:
+        lettore = PdfReader(io.BytesIO(contenuto_bytes))
+        for idx_p, pag_r in enumerate(lettore.pages, start=1):
+            try:
+                t_p = normalizza_spazi_testo_pdf(pag_r.extract_text() or "").strip()
+            except (PyPdfError, ValueError, KeyError, TypeError):
+                t_p = ""
+            pagine_risultato.append((idx_p, t_p))
+    except (PyPdfError, RuntimeError, ValueError, OSError):
+        pass
+
+    tot_w = sum(len(re.findall(r"\w", t)) for _, t in pagine_risultato)
+    if not pagine_risultato or tot_w < 100:
+        pagine_ocr = _estrai_testo_ocr_da_pdf_scansionato(contenuto_bytes)
+        if pagine_ocr:
+            return pagine_ocr
+    return pagine_risultato
 
 
 def estrai_testo_da_pdf(contenuto_bytes: bytes) -> str:
