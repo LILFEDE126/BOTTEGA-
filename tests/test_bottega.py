@@ -2286,7 +2286,7 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert audit_v30_ambar["certificabile"] is False
     assert audit_v30_ambar["totale_anomalie"] == 0
     assert audit_v30_ambar["strato_l_osservazione"]["rate_mancanti"] == "101..120"
-    assert audit_v30_ambar["strato_l_osservazione"]["stato_certificazione"] == "PIANO_COERENTE_OCR_PARZIALE_DA_COMPLETARE"
+    assert audit_v30_ambar["strato_l_osservazione"]["stato_certificazione"] == "GIALLO_NESSUN_VIZIO_ARITMETICO_LIMITE_VERIFICA_OCR"
 
     assert hasattr(store_pgvector, "_CACHE_AUDIT_PAGINE_PDF")
     assert hasattr(store_pgvector, "_raggruppa_intervalli_mancanti")
@@ -2420,6 +2420,37 @@ def test_v20_ram_effimera_web_filtro_ahaslides_e_query_composta_python_postgresq
     assert audit_v34["strato_l_osservazione"]["rate_mancanti"] == "1..81"
     assert audit_v34["strato_a_quadrature"]["verifica_teorica_continuita"]["eseguita"] is True
     assert audit_v34["strato_a_quadrature"]["verifica_teorica_continuita"]["continuita_ok"] is True
+
+    testo_v34_120_ocr_crop_sovrapposti = (
+        testo_v32_scambio97
+        + "\n"
+        + "\n".join(righe_v32_rata97_inv[40:85])
+    )
+    audit_v34_120_verde = grounding_numerico.esegui_audit_matematico_tabella_pdf(testo_v34_120_ocr_crop_sovrapposti)
+    assert audit_v34_120_verde["totale_anomalie"] == 0
+    assert audit_v34_120_verde["strato_l_osservazione"]["n_rate_estratte"] == 120
+    assert audit_v34_120_verde["verdetto_semaforo"] == "VERDE"
+    assert audit_v34_120_verde["certificabile"] is True
+    assert audit_v34_120_verde["stato_certificazione"] == "CERTIFICATO_VERDE_NESSUN_VIZIO_ARITMETICO"
+    assert "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE" not in str(audit_v34_120_verde["tabulato_audit_python"])
+
+    def _llm_finto_contraddittorio_4c(_sys, _usr, schema):
+        return schema(
+            quadratura_aggregata="C_fin 20.736,87 EUR + Interessi 6.023,13 EUR = Montante 26.760,00 EUR.",
+            verifica_tabella_ammortamento_rata_per_rata="120 rate su 120 verificate con 0 anomalie.",
+            ricalcolo_interessi_e_taeg="TAN 5,30%, TAEG 8,66%.",
+            verdetto_finale_onesta_epistemica="ROJO NON_CERTIFICABILE_ANOMALIE_ARITMETICHE test",
+        )
+
+    esito_4c_verde_v34 = cascata_strutturata.esegui_audit_pdf_scansionato_python_first(
+        testo_v34_120_ocr_crop_sovrapposti,
+        "allegato_9_vivibanca_finanz.pdf",
+        llm_fn=_llm_finto_contraddittorio_4c,
+    )
+    assert esito_4c_verde_v34["audit_python"]["verdetto_semaforo"] == "VERDE"
+    assert esito_4c_verde_v34["audit_python"]["certificabile"] is True
+    assert "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE" not in str(esito_4c_verde_v34["referto_completo_markdown"])
+    assert "Certificazione Matematica Completata" in str(esito_4c_verde_v34["valutazione_llm_markdown"])
 
     store_pgvector._ARCHIVIO_MEMORIA_RAM.clear()
 

@@ -761,7 +761,23 @@ def _estrai_righe_grezze_ammortamento(
                 continue
 
             if idx_r in righe_grezze:
-                rate_duplicate.append(idx_r)
+                esistente = righe_grezze[idx_r]
+                old_rata = Decimal(str(esistente["importo_rata"]))
+                old_a = Decimal(str(esistente["add_a"]))
+                old_b = Decimal(str(esistente["add_b"]))
+                nuova_rata = q2(rata_v)
+                nuovo_a = q2(add_a)
+                nuovo_b = q2(add_b)
+                stessi_addendi = (
+                    abs(old_a - nuovo_a) <= Decimal("0.05") and abs(old_b - nuovo_b) <= Decimal("0.05")
+                ) or (
+                    abs(old_a - nuovo_b) <= Decimal("0.05") and abs(old_b - nuovo_a) <= Decimal("0.05")
+                )
+                if abs(old_rata - nuova_rata) <= Decimal("0.05") and stessi_addendi:
+                    if len(residui_grezzi) > len(esistente["residui"]):
+                        esistente["residui"] = [q2(r_res) for r_res in residui_grezzi[:2]]
+                elif abs(old_rata - nuova_rata) > Decimal("0.50"):
+                    rate_duplicate.append(idx_r)
             else:
                 righe_grezze[idx_r] = {
                     "rata": idx_r,
@@ -2045,10 +2061,10 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         + len(anomalie_quote_negative)
         + len(anomalie_aggregate)
     )
+    totale_anomalie_sostanziali = int(totale_anomalie)
 
     ha_violazioni_sostanziali = bool(
-        rate_duplicate
-        or righe_residuo_non_decrescente
+        righe_residuo_non_decrescente
         or anomalie_quote_negative
         or righe_rata_anomala
         or righe_quadratura_errata
@@ -2117,55 +2133,6 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
                     "rate_mancanti": elenco_mancanti_str,
                 }
 
-    if ha_violazioni_sostanziali or totale_anomalie > 0:
-        verdetto_semaforo = "ROJO"
-        certificabile = False
-        stato_certificazione = (
-            "NON_CERTIFICABILE_TABELLA_INCOMPLETA"
-            if not piano_completo_al_100
-            else "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
-        )
-    elif numero_rate_atteso > 0 and n_rate_estratte == numero_rate_atteso and len(rate_mancanti_lista) == 0:
-        verdetto_semaforo = "VERDE"
-        certificabile = True
-        stato_certificazione = "CERTIFICATO_VERDE_NESSUN_VIZIO_SOSTANZIALE"
-    elif not piano_completo_al_100:
-        verdetto_semaforo = "AMBAR"
-        certificabile = False
-        stato_certificazione = "PIANO_COERENTE_OCR_PARZIALE_DA_COMPLETARE"
-    elif not dati_tassi_completi or tan_dichiarato is None or taeg_dichiarato is None:
-        verdetto_semaforo = "GREY"
-        certificabile = False
-        stato_certificazione = "NON_CERTIFICABILE_DATI_MANCANTI"
-    elif scarto_massimo_tabella <= TOLLERANZA_AMBAR:
-        verdetto_semaforo = "AMBAR"
-        certificabile = True
-        stato_certificazione = "CERTIFICABILE_AMBAR_ARROTONDAMENTI_MINIMI"
-    else:
-        verdetto_semaforo = "ROJO"
-        certificabile = False
-        stato_certificazione = "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
-
-    messaggio_blocco_certificazione = ""
-    if verdetto_semaforo == "ROJO":
-        messaggio_blocco_certificazione = (
-            f"⛔ ANOMALIE SOSTANZIALI RILEVATE (`ROJO`): Rilevate {totale_anomalie} anomalie aritmetiche "
-            f"(scarto massimo `{scarto_massimo_tabella} €`; rate lette `{n_rate_estratte}/{numero_rate_atteso}`): "
-            f"{', '.join(anomalie_aggregate[:3] or anomalie_interessi_dettaglio[:2]) or 'vedi dettagli rata per rata'}."
-        )
-    elif verdetto_semaforo == "AMBAR" and not piano_completo_al_100:
-        messaggio_blocco_certificazione = (
-            f"🟡 **AMBAR — PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; "
-            f"DA COMPLETARE ESTRAZIONE OCR RATE `[{elenco_mancanti_str}]`**: "
-            f"Lette da OCR `{n_rate_estratte}/{numero_rate_atteso}` rate (visibili `[{_compatta_intervalli_rate(rate_lette_lista)}]`); "
-            f"`0` anomalie aritmetiche rilevate sulle rate visibili."
-        )
-    elif verdetto_semaforo == "GREY":
-        messaggio_blocco_certificazione = (
-            f"⚪ DATI CONTRATTUALI INCOMPLETI (`GREY`): Tabella `{n_rate_estratte}/{numero_rate_atteso}` letta, "
-            f"ma mancano elementi essenziali per chiudere il ricalcolo TAN/TAEG (`{', '.join(voci_mancanti_cashflow) or 'TAN/TAEG dichiarati'}`)."
-        )
-
     analisi_rata_finale: Optional[Dict[str, str]] = None
     nota_conguaglio_rata_finale = ""
     stato_rata_finale = "NON_ESTRATTA"
@@ -2220,6 +2187,67 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
                     f"conguaglio di chiusura della rata costante ({importo_rata} € vs rata teorica non arrotondata) o imprecisione OCR."
                 ),
             }
+
+    if totale_anomalie_sostanziali > 0 or ha_violazioni_sostanziali:
+        verdetto_semaforo = "ROJO"
+        certificabile = False
+        stato_certificazione = (
+            "NON_CERTIFICABILE_TABELLA_INCOMPLETA"
+            if not piano_completo_al_100
+            else "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
+        )
+    elif numero_rate_atteso > 0 and n_rate_estratte == numero_rate_atteso and len(rate_mancanti_lista) == 0:
+        verdetto_semaforo = "VERDE"
+        certificabile = True
+        stato_certificazione = "CERTIFICATO_VERDE_NESSUN_VIZIO_ARITMETICO"
+    elif not piano_completo_al_100:
+        verdetto_semaforo = "AMBAR"
+        certificabile = False
+        stato_certificazione = "GIALLO_NESSUN_VIZIO_ARITMETICO_LIMITE_VERIFICA_OCR"
+    elif not dati_tassi_completi or tan_dichiarato is None or taeg_dichiarato is None:
+        verdetto_semaforo = "GREY"
+        certificabile = False
+        stato_certificazione = "NON_CERTIFICABILE_DATI_MANCANTI"
+    elif scarto_massimo_tabella <= TOLLERANZA_AMBAR:
+        verdetto_semaforo = "AMBAR"
+        certificabile = True
+        stato_certificazione = "CERTIFICABILE_AMBAR_ARROTONDAMENTI_MINIMI"
+    else:
+        verdetto_semaforo = "ROJO"
+        certificabile = False
+        stato_certificazione = "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
+
+    d_finale_str = str(debito_residuo_finale_valore) if debito_residuo_finale_valore is not None else "0.00"
+    messaggio_blocco_certificazione = ""
+    if verdetto_semaforo == "VERDE":
+        messaggio_blocco_certificazione = (
+            f"✅ **PIANO ARITMETICAMENTE COERENTE E CERTIFICATO (`VERDE`)**: Rilevate `0` anomalie aritmetiche sostanziali "
+            f"su `{n_rate_estratte}/{numero_rate_atteso}` rate (scarto massimo `{scarto_massimo_tabella} €`). "
+            f"Tutte le quadrature (`C_fin = {c_fin or 'N/D'} €`, `Interessi = {totale_interessi_stimato or 'N/D'} €`, "
+            f"`Montante = {m_rif_iniz or 'N/D'} €`, `Costi accessori = {costi_accessori_trattenuti or 'N/D'} €`, "
+            f"`Netto erogato = {c_netto or 'N/D'} €`, `TAN = {tan_ricalcolato or tan_dichiarato or 'N/D'}%`, "
+            f"`TAEG = {taeg_ricalcolato or taeg_dichiarato or 'N/D'}%`, `D({numero_rate_atteso}) = {d_finale_str} €`) "
+            f"risultano verificate."
+        )
+    elif verdetto_semaforo == "ROJO":
+        messaggio_blocco_certificazione = (
+            f"⛔ ANOMALIE SOSTANZIALI RILEVATE (`ROJO`): Rilevate {totale_anomalie_sostanziali} anomalie aritmetiche "
+            f"(scarto massimo `{scarto_massimo_tabella} €`; rate lette `{n_rate_estratte}/{numero_rate_atteso}`): "
+            f"{', '.join(anomalie_aggregate[:3] or anomalie_interessi_dettaglio[:2]) or 'vedi dettagli rata per rata'}."
+        )
+    elif verdetto_semaforo == "AMBAR" and not piano_completo_al_100:
+        messaggio_blocco_certificazione = (
+            f"🟡 **NESSUN VIZIO ARITMETICO RILEVATO SUI DATI ESTRATTI (`0` anomalie aritmetiche)**: "
+            f"tutte le quadrature dei totali, dei costi accessori (`{costi_accessori_trattenuti or 'N/D'} €`), "
+            f"del TAN (`{tan_ricalcolato or tan_dichiarato or 'N/D'}%`), del TAEG (`{taeg_ricalcolato or taeg_dichiarato or 'N/D'}%`) "
+            f"e delle `{n_rate_estratte}/{numero_rate_atteso}` rate lette sono coerenti. "
+            f"Da completare solo la verifica visiva/OCR delle rate non estratte (`[{elenco_mancanti_str}]`)."
+        )
+    elif verdetto_semaforo == "GREY":
+        messaggio_blocco_certificazione = (
+            f"⚪ DATI CONTRATTUALI INCOMPLETI (`GREY`): Tabella `{n_rate_estratte}/{numero_rate_atteso}` letta, "
+            f"ma mancano elementi essenziali per chiudere il ricalcolo TAN/TAEG (`{', '.join(voci_mancanti_cashflow) or 'TAN/TAEG dichiarati'}`)."
+        )
 
     righe_tabella_serializzate = [
         {
@@ -2430,7 +2458,7 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "🟢 VERDE — PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI"
         if verdetto_semaforo == "VERDE"
         else (
-            f"🟡 AMBAR — PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; DA COMPLETARE ESTRAZIONE OCR ({elenco_mancanti_str})"
+            "🟡 GIALLO / DA VERIFICARE OCR"
             if verdetto_semaforo == "AMBAR" and not piano_completo_al_100
             else f"{ {'AMBAR': '🟠', 'ROJO': '🔴', 'GREY': '⚪'}.get(verdetto_semaforo, '🔴') } `{verdetto_semaforo}`"
         )

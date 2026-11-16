@@ -296,7 +296,7 @@ def esegui_audit_pdf_scansionato_python_first(
             "4. Esponi in modo distinto: (a) Quadratura aggregata (Pag. 1, 5, 6, 9) distinguendo C_fin da Prospetto vs Verifica Indipendente della tabella 1..N, eventuali riallineamenti OCR (es. Rata 97), la riconciliazione esatta subset-sum dei costi accessori upfront (C_fin - C_netto) e i totali attesi delle eventuali rate mancanti; "
             "(b) Verifica rata per rata della tabella di ammortamento (Pag. 3), dichiarando quante rate su N sono state effettivamente lette da OCR e riportando se l'eventuale scarto sull'ultima rata (es. Rata 120: 1,71 EUR vs 0,98 EUR teorici) e' certificato come CONGUAGLIO_DI_CHIUSURA_FISIOLOGICO (per estinguere esattamente D(n-1) mantenendo D(n)=0,00 EUR e la rata costante); "
             "(c) Ricalcolo degli interessi mensili sul capitale residuo D_precedente(t) e ricalcolo attuariale IRR/NPV separato C_fin (TAN) vs C_netto (TAEG); "
-            "(d) Verdetto finale coerente con VERDETTO_SEMAFORO: se VERDE (120/120 rate quadrate, 0 anomalie sostanziali), conferma la piena coerenza aritmetica del piano e l'assenza di vizi sostanziali; se ROJO o GREY, vieta qualsiasi attestazione di assenza vizi fino al completamento o alla verifica dell'estrazione.\n"
+            "(d) Verdetto finale coerente con VERDETTO_SEMAFORO: se VERDE (120/120 rate quadrate, 0 anomalie sostanziali), riporta obbligatoriamente '🟢 VERDE (PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI)' e VIETA qualsiasi riferimento contraddittorio a ROJO o NON_CERTIFICABILE; se AMBAR (0 anomalie ma OCR parziale), riporta '🟡 GIALLO / DA VERIFICARE OCR' vietando qualsiasi riferimento a ROJO; se ROJO (anomalie sostanziali > 0), vieta qualsiasi attestazione di assenza vizi.\n"
             "5. Rispondi in italiano chiaro, rigoroso e strutturato.",
             f"DOCUMENTO ANALIZZATO: {nome_documento}\n"
             f"QUESITO SPECIFICO: {quesito_eff}\n"
@@ -323,7 +323,35 @@ def esegui_audit_pdf_scansionato_python_first(
                 f"(`stato_taeg={strato_d.get('stato_taeg')}`) e non va considerato ricalcolato fino al reperimento di `C_netto`."
             )
         nota_onesta = ""
-        if verdetto_semaforo_py in ("ROJO", "GREY"):
+        if verdetto_semaforo_py == "VERDE" and totale_anomalie_py == 0:
+            n_tot_v = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
+            rate_let_v = strato_l.get("rate_lette_conteggio", n_tot_v) if isinstance(strato_l, dict) else n_tot_v
+            costi_v = strato_l.get("costi_accessori_trattenuti", "N/D") if isinstance(strato_l, dict) else "N/D"
+            tan_v = (
+                (strato_d.get("tan_ricalcolato_pct") if isinstance(strato_d, dict) else None)
+                or (strato_l.get("tan_dichiarato") if isinstance(strato_l, dict) else None)
+                or "N/D"
+            )
+            taeg_v = (
+                (strato_d.get("taeg_ricalcolato_pct") if isinstance(strato_d, dict) else None)
+                or (strato_l.get("taeg_dichiarato") if isinstance(strato_l, dict) else None)
+                or "N/D"
+            )
+            if any(
+                err_parola in verdetto_testo.upper()
+                for err_parola in ("ROJO", "NON_CERTIFICABILE", "IMPOSSIBILE CERTIFICARE")
+            ):
+                verdetto_testo = (
+                    f"🟢 VERDE (PIANO ARITMETICAMENTE COERENTE E PRIVO DI VIZI SOSTANZIALI): "
+                    f"{rate_let_v}/{n_tot_v} rate verificate, 0 anomalie aritmetiche sostanziali."
+                )
+            nota_onesta = (
+                f"\n\n> ✅ **Certificazione Matematica Completata (`🟢 VERDE` · `{audit_py.get('stato_certificazione')}`):** "
+                f"`{rate_let_v}/{n_tot_v}` rate verificate, `0` anomalie aritmetiche sostanziali. "
+                f"Il piano di ammortamento, i costi accessori (`{costi_v} €`), il TAN (`{tan_v}%`) e il TAEG (`{taeg_v}%`) "
+                f"risultano aritmeticamente coerenti e privi di vizi."
+            )
+        elif verdetto_semaforo_py in ("ROJO", "GREY"):
             rate_manc = strato_l.get("rate_mancanti", "N/D") if isinstance(strato_l, dict) else "N/D"
             rate_let = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
             n_tot = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
@@ -347,17 +375,17 @@ def esegui_audit_pdf_scansionato_python_first(
             rate_let = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
             n_tot = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
             if any(
-                frase_vietata in verdetto_testo.lower()
-                for frase_vietata in ("intero piano corretto", "privo di vizi sull'intero")
+                frase_vietata in verdetto_testo.upper()
+                for frase_vietata in ("ROJO", "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE", "INTERO PIANO CORRETTO")
             ):
                 verdetto_testo = (
-                    f"🟡 AMBAR (PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; "
-                    f"DA COMPLETARE ESTRAZIONE OCR RATE {rate_manc}): lette da OCR {rate_let} rate su {n_tot}, `0` anomalie."
+                    f"🟡 GIALLO / DA VERIFICARE OCR (`0` anomalie aritmetiche sui dati estratti): "
+                    f"lette da OCR {rate_let} rate su {n_tot}; da completare solo la verifica visiva/OCR delle rate `{rate_manc}`."
                 )
             nota_onesta = (
-                f"\n\n> 🟡 **Onestà Epistemica (`AMBAR` · `{audit_py.get('stato_certificazione')}`):** "
-                f"Lette da OCR **{rate_let} rate su {n_tot}** (`0` anomalie rilevate sulle rate visibili; "
-                f"da completare estrazione OCR per le rate `{rate_manc}`)."
+                f"\n\n> 🟡 **GIALLO / DA VERIFICARE OCR (`{audit_py.get('stato_certificazione')}`):** "
+                f"Nessun vizio aritmetico sui dati estratti (`{rate_let}/{n_tot}` rate, `0` anomalie); "
+                f"da completare la verifica visiva/OCR delle rate `{rate_manc}`."
             )
         valutazione_md = (
             "### 🧠 Valutazione Tecnica Forense (LLM vincolato al Tabulato Python `Decimal`)\n\n"
@@ -385,9 +413,9 @@ def esegui_audit_pdf_scansionato_python_first(
                 rate_let_fb = strato_l.get("rate_lette_conteggio", 0) if isinstance(strato_l, dict) else 0
                 n_tot_fb = strato_l.get("numero_rate_totale", 0) if isinstance(strato_l, dict) else 0
                 verdetto_fb = (
-                    f"🟡 **AMBAR — PIANO ARITMETICAMENTE COERENTE SUI DATI VISIBILI E SUI TOTALI DICHIARATI — ZERO VIZI RILEVATI; "
-                    f"DA COMPLETARE ESTRAZIONE OCR RATE `[{rate_manc_fb}]`** "
-                    f"(`{audit_py.get('stato_certificazione')}` · Lette da OCR `{rate_let_fb}/{n_tot_fb}` · `0` anomalie)."
+                    f"🟡 **GIALLO / DA VERIFICARE OCR** (`{audit_py.get('stato_certificazione')}` · "
+                    f"Lette da OCR `{rate_let_fb}/{n_tot_fb}` · `0` anomalie aritmetiche; "
+                    f"da completare verifica visiva/OCR delle rate `[{rate_manc_fb}]`)."
                 )
         elif not completo_fb:
             verdetto_fb = f"IMPOSSIBILE CERTIFICARE O ESCLUDERE VIZI (`{verdetto_semaforo_py}`): tabella incompleta (rate mancanti nella scansione: `{rate_manc_fb}`)."
