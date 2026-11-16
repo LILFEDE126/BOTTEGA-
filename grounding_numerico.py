@@ -1861,27 +1861,29 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         and (taeg_verificato_ok is not False)
     )
 
-    if not piano_completo_al_100 or ha_violazioni_sostanziali:
+    if numero_rate_atteso > 0 and n_rate_estratte == numero_rate_atteso and len(rate_mancanti_lista) == 0 and totale_anomalie == 0:
+        verdetto_semaforo = "VERDE"
+        certificabile = True
+        stato_certificazione = "CERTIFICATO_VERDE_NESSUN_VIZIO_SOSTANZIALE"
+    elif not piano_completo_al_100 or ha_violazioni_sostanziali:
         verdetto_semaforo = "ROJO"
+        certificabile = False
+        stato_certificazione = (
+            "NON_CERTIFICABILE_TABELLA_INCOMPLETA"
+            if not piano_completo_al_100
+            else "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
+        )
     elif not dati_tassi_completi or tan_dichiarato is None or taeg_dichiarato is None:
         verdetto_semaforo = "GREY"
-    elif totale_anomalie == 0 and scarto_massimo_tabella <= TOL:
-        verdetto_semaforo = "VERDE"
+        certificabile = False
+        stato_certificazione = "NON_CERTIFICABILE_DATI_MANCANTI"
     elif scarto_massimo_tabella <= TOLLERANZA_AMBAR:
         verdetto_semaforo = "AMBAR"
+        certificabile = True
+        stato_certificazione = "CERTIFICABILE_AMBAR_ARROTONDAMENTI_MINIMI"
     else:
         verdetto_semaforo = "ROJO"
-
-    certificabile = verdetto_semaforo in ("VERDE", "AMBAR")
-    if verdetto_semaforo == "VERDE":
-        stato_certificazione = "CERTIFICABILE_VERDE_PIANO_COMPLETO"
-    elif verdetto_semaforo == "AMBAR":
-        stato_certificazione = "CERTIFICABILE_AMBAR_ARROTONDAMENTI_MINIMI"
-    elif verdetto_semaforo == "GREY":
-        stato_certificazione = "NON_CERTIFICABILE_DATI_MANCANTI"
-    elif not piano_completo_al_100:
-        stato_certificazione = "NON_CERTIFICABILE_TABELLA_INCOMPLETA"
-    else:
+        certificabile = False
         stato_certificazione = "NON_CERTIFICABILE_ANOMALIE_ARITMETICHE"
 
     messaggio_blocco_certificazione = ""
@@ -2105,7 +2107,7 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
             else ""
         )
         blocco_costi_md = (
-            f"- **Riconciliazione Costi Accessori Upfront ($C_{{fin}} - C_{{netto}}$):** `{costi_accessori_trattenuti} €`{dettaglio_voci}\n"
+            f"- **Riconciliazione Costi Accessori Upfront (C_fin - C_netto):** `{costi_accessori_trattenuti} €`{dettaglio_voci}\n"
         )
 
     blocco_riallineamento_md = ""
@@ -2121,22 +2123,22 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
     blocco_mancanti_md = ""
     if n_rate_mancanti > 0:
         righe_salti = "; ".join(
-            f"buco `{s['buco']}` ($D({s['rata_prima']}) - D({s['rata_dopo']}^-) = {s['salto_capitale_residuo']} €`)"
+            f"buco `{s['buco']}` (D({s['rata_prima']}) - D({s['rata_dopo']}^-) = {s['salto_capitale_residuo']} €)"
             for s in salti_buco_residuo
         )
         blocco_mancanti_md = (
             f"- **Verifica Indipendente Somma Quote Tabella (1..{numero_rate_atteso}):** `{verifica_indipendente_tabella_stato}`\n"
             f"- **Controllo Obbligatorio Rate Mancanti (`{n_rate_mancanti}` rate · `{elenco_mancanti_str}`):** "
             f"Somma rate attesa `{somma_rate_mancanti_attesa or 'N/D'} €` | "
-            f"$Q_{{cap}}$ mancanti attesa `{somma_q_cap_mancanti_attesa or 'N/D'} €` | "
-            f"$Q_{{int}}$ mancanti attesa `{somma_q_int_mancanti_attesa or 'N/D'} €` "
+            f"`Q_cap` mancanti attesa `{somma_q_cap_mancanti_attesa or 'N/D'} €` | "
+            f"`Q_int` mancanti attesa `{somma_q_int_mancanti_attesa or 'N/D'} €` "
             f"(Quadratura blocco mancante: `{quadratura_blocco_mancante_ok}`"
             f"{f' · Salto residuo buco: {righe_salti}, OK={verifica_salto_buco_ok}' if righe_salti else ''})\n"
         )
     else:
         blocco_mancanti_md = (
             f"- **Verifica Indipendente Somma Quote Tabella (1..{numero_rate_atteso}):** "
-            f"`VERIFICATA_INTEGRALE` ($\\sum Q_{{cap}} = {somma_quote_capitale_lette} €$, $\\sum Q_{{int}} = {somma_quote_interessi_lette} €$)\n"
+            f"`VERIFICATA_INTEGRALE` (Somma Q_cap = `{somma_quote_capitale_lette} €`, Somma Q_int = `{somma_quote_interessi_lette} €`)\n"
         )
 
     dettagli_anomalie_md = ""
@@ -2158,28 +2160,28 @@ def esegui_audit_matematico_tabella_pdf(testo_documento: str) -> Dict[str, objec
         "### 🧮 Tabulato Deterministico Python-First (11 Sezioni · `Decimal ROUND_HALF_UP`)\n"
         f"**Verdetto Semaforo Matematico:** **{descrizione_verdetto}** (`{stato_certificazione}`)\n"
         f"{blocco_avviso_md}\n"
-        "#### 1. Strato L — Classificazione Pagine, Basi $C_{{fin}}$ vs $C_{{netto}}$ & Completezza\n"
+        "#### 1. Strato L — Classificazione Pagine, Basi C_fin vs C_netto & Completezza\n"
         f"- **Pagine Rilevate:** `{pagine_trovate}` | **Piano Ammortamento:** `{strato_l['pagine_piano_ammortamento']}` | **Costi/TAEG:** `{strato_l['pagine_riepilogo_costi_taeg']}` | **Liquidazione:** `{strato_l['pagine_prospetto_liquidazione']}`\n"
         f"- **Allineamento Colonne (`Q_int`/`Q_cap`) & Convenzione TAN:** `{criterio_allineamento_colonne}` · `{convenzione_tan_adottata}` (`{fonte_tan_controllo}`)\n"
         f"- **Numero Rate Atteso:** `{numero_rate_atteso}` | **Importo Rata Contrattuale:** `{strato_l['importo_rata'] or 'N/D'} €` | **Rate Lette da OCR:** `{n_rate_estratte}/{numero_rate_atteso}`\n"
-        f"- **Montante Lordo ($M$):** `{strato_l['montante_dichiarato'] or str(m_rif_iniz) or 'N/D'} €` | **Capitale Finanziato Piano ($C_{{fin}}$ base TAN):** `{strato_l['capitale_finanziato'] or 'N/D'} €` | **Interessi Contrattuali:** `{strato_l['interessi_totali_contrattuali'] or 'N/D'} €` | **Netto Erogato ($C_{{netto}}$ base TAEG):** `{strato_l['netto_ricavo'] or 'N/D'} €`\n"
+        f"- **Montante Lordo (M):** `{strato_l['montante_dichiarato'] or str(m_rif_iniz) or 'N/D'} €` | **Capitale Finanziato Piano (`C_fin` base TAN):** `{strato_l['capitale_finanziato'] or 'N/D'} €` | **Interessi Contrattuali:** `{strato_l['interessi_totali_contrattuali'] or 'N/D'} €` | **Netto Erogato (`C_netto` base TAEG):** `{strato_l['netto_ricavo'] or 'N/D'} €`\n"
         f"{blocco_costi_md}"
         f"- **TAN Dichiarato:** `{strato_l['tan_dichiarato'] or 'N/D'}%` | **TAEG Dichiarato:** `{strato_l['taeg_dichiarato'] or 'N/D'}%`\n"
         f"- **Stato Completezza (`{stato_certificazione}`):** **{stato_completezza}**\n\n"
         "#### 2. Strato A — Quadrature Rata per Rata, Riallineamenti OCR & Formula Alla Francese\n"
-        f"- **Verifica Montante ($n \\times R$):** `{montante_calcolato or 'N/D'} €` (Quadratura OK: `{quadratura_montante_ok}`)\n"
+        f"- **Verifica Montante (n x R):** `{montante_calcolato or 'N/D'} €` (Quadratura OK: `{quadratura_montante_ok}`)\n"
         f"- **Rata Teorica Alla Francese ({fonte_tan_controllo}):** `{rata_francese_teorica or 'N/D'} €` (vs Contrattuale `{strato_l['importo_rata'] or 'N/D'} €` · Delta: `{delta_rata_francese if delta_rata_francese is not None else 'N/D'} €` · `|Delta| <= 0.01`: `{quadratura_rata_francese_ok}`)\n"
-        f"- **Rate Verificate ($Q_{{cap}} + Q_{{int}} = \\text{{Rata}}$):** `{rate_verificate_ok} / {n_rate_estratte}` | **$D(n) = 0$ ({numero_rate_atteso}):** {stato_dn_str}\n"
-        f"- **Somma Rate / $Q_{{cap}}$ / $Q_{{int}}$ (su {n_rate_estratte} rate lette):** `{somma_rate_lette} €` | `{somma_quote_capitale_lette} €` (`OK: {quadratura_somma_quote_capitale_ok if piano_completo_al_100 else 'NON VERIFICATO'}`) | `{somma_quote_interessi_lette} €` (`OK: {quadratura_somma_quote_interessi_ok if piano_completo_al_100 else 'NON VERIFICATO'}`)\n"
+        f"- **Rate Verificate (`Q_cap + Q_int = Rata`):** `{rate_verificate_ok} / {n_rate_estratte}` | **`D(n) = 0` ({numero_rate_atteso}):** {stato_dn_str}\n"
+        f"- **Somma Rate / `Q_cap` / `Q_int` (su {n_rate_estratte} rate lette):** `{somma_rate_lette} €` | `{somma_quote_capitale_lette} €` (`OK: {quadratura_somma_quote_capitale_ok if piano_completo_al_100 else 'NON VERIFICATO'}`) | `{somma_quote_interessi_lette} €` (`OK: {quadratura_somma_quote_interessi_ok if piano_completo_al_100 else 'NON VERIFICATO'}`)\n"
         f"{blocco_riallineamento_md}"
         f"{blocco_mancanti_md}"
         f"- **Anomalie Aritmetiche Sostanziali Rilevate (`scarto max {scarto_massimo_tabella} €`):** `{totale_anomalie}` (`Somma rata: {len(righe_quadratura_errata)}`, `Capitale res.: {len(anomalie_capitale_residuo)}`, `Interessi {convenzione_tan_adottata}: {len(anomalie_interessi_primaria)}`, `Aggregate: {len(anomalie_aggregate)}`)\n"
         f"{blocco_rata_finale_md}"
         f"{dettagli_anomalie_md}\n"
-        "#### 3. Strato D — Ricalcolo NPV Separato $C_{{fin}}$ (TAN) vs $C_{{netto}}$ (TAEG)\n"
+        "#### 3. Strato D — Ricalcolo NPV Separato C_fin (TAN) vs C_netto (TAEG)\n"
         f"{avviso_cashflow}"
-        f"- **TAN Ricalcolato da $C_{{fin}}$ (`{strato_d['capitale_finanziato_c_fin'] or 'N/D'} €`):** `{strato_d['tan_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['tan_dichiarato'] or 'N/D'}%` · OK: `{tan_verificato_ok}`)\n"
-        f"- **TAEG Ricalcolato da $C_{{netto}}$ (`{strato_d['capitale_netto_taeg_c_netto'] or 'N/D'} €`):** `{strato_d['taeg_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['taeg_dichiarato'] or 'N/D'}%` · OK: `{taeg_verificato_ok}`)\n"
+        f"- **TAN Ricalcolato da `C_fin` (`{strato_d['capitale_finanziato_c_fin'] or 'N/D'} €`):** `{strato_d['tan_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['tan_dichiarato'] or 'N/D'}%` · OK: `{tan_verificato_ok}`)\n"
+        f"- **TAEG Ricalcolato da `C_netto` (`{strato_d['capitale_netto_taeg_c_netto'] or 'N/D'} €`):** `{strato_d['taeg_ricalcolato_pct'] or 'N/D'}%` (Dichiarato: `{strato_l['taeg_dichiarato'] or 'N/D'}%` · OK: `{taeg_verificato_ok}`)\n"
     )
 
     return {
